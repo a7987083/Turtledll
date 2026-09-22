@@ -37,7 +37,16 @@
       "los_counter_update_sites": "confirmed",
       "runtime_verified": false
     },
-    "Cooldown_CD1R2": "reconstructed",
+    "Cooldown_CD1R2": {
+      "status": "dispatcher-engine-query-clear-reset-disassembly-confirmed",
+      "status_handler": "0x10042F0A",
+      "get_handler": "0x10043C4E",
+      "list_handler": "0x100442E1",
+      "engine_query": "0x006E2EA0",
+      "clear_cooldown_reset": "confirmed",
+      "cooldown_cheat_reset": "in-progress",
+      "runtime_verified": false
+    },
     "UnitState_US1R2": "reconstructed",
     "Spatial_S5R1F1": "reconstructed"
   }
