@@ -20,7 +20,12 @@
     "runtime_verified": false
   },
   "modules": {
-    "Foundation_F1": "reconstructed",
+    "Foundation_F1": {
+      "status": "contract-disassembly-confirmed",
+      "dispatcher_compare": "0x10003EC7",
+      "status_handler": "0x1000584B",
+      "live_counter_update_sites": "in-progress"
+    },
     "Cooldown_CD1R2": "reconstructed",
     "UnitState_US1R2": "reconstructed",
     "Spatial_S5R1F1": "reconstructed"
