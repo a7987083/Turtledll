@@ -1,0 +1,28 @@
+{
+  "project": "TaiYangShenDian API37 recovery",
+  "date": "2026-09-22",
+  "repository": "a7987083/Turtledll",
+  "baseline": {
+    "api": 33,
+    "name": "ARX1_DW1_LOS1",
+    "source_authentic": true
+  },
+  "target": {
+    "api": 37,
+    "name": "S5_R1F1",
+    "sha256": "1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae"
+  },
+  "recovery_build": {
+    "build_succeeded": true,
+    "sha256": "d0ac0158fba9d7aade4ee30afb86f14090e282556e7d86e99759ed107a7cbfff",
+    "api_string_set_missing": 0,
+    "api_string_set_extra": 0,
+    "runtime_verified": false
+  },
+  "modules": {
+    "Foundation_F1": "reconstructed",
+    "Cooldown_CD1R2": "reconstructed",
+    "UnitState_US1R2": "reconstructed",
+    "Spatial_S5R1F1": "reconstructed"
+  }
+}
