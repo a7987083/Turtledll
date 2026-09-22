@@ -1,0 +1,2 @@
+Clean-build verification trigger for API37 S5-R1F1 recovery.
+Baseline reproduction verified locally on 2026-09-22.
