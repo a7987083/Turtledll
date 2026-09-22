@@ -11,14 +11,16 @@
   "target": {
     "api": 37,
     "name": "S5_R1F1",
-    "sha256": "1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae"
+    "sha256": "1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae",
+    "size_bytes": 380928
   },
   "recovery_build": {
     "build_succeeded": true,
     "previous_full_recovery_sha256": "d0ac0158fba9d7aade4ee30afb86f14090e282556e7d86e99759ed107a7cbfff",
     "api_string_set_missing": 0,
     "api_string_set_extra": 0,
-    "runtime_verified": false
+    "runtime_verified": false,
+    "note": "Previous build predates the 2026-09-22 historical-source recovery edits below; current source edits are not yet rebuilt because CI source archive reconstruction remains blocked."
   },
   "stage_builds": {
     "API34_Foundation_F1_previous": {
@@ -34,21 +36,24 @@
       "build_succeeded": true,
       "sha256": "ec23f57be99909be37d393778354fdc9f1eb5f7940108293aa634dab592393ae",
       "commands_present": ["Cooldown.Status", "Cooldown.Get", "Cooldown.List"],
-      "runtime_equivalent": false
+      "runtime_equivalent": false,
+      "superseded_by_source_edits": true
     },
     "API36_UnitState_US1R2_scaffold": {
       "build_succeeded": true,
       "sha256": "850645e671cdbd18bcb31c460b7a8d816f037d6f47ccd2176e911a43f213ff50",
       "commands_present": ["UnitState.Status", "UnitState.Get", "UnitState.Track", "UnitState.Untrack", "UnitState.List", "UnitState.Clear"],
-      "descriptor_reconcile": "pending-disassembly",
-      "runtime_equivalent": false
+      "descriptor_reconcile": "historical-read-path-partially-recovered",
+      "runtime_equivalent": false,
+      "superseded_by_source_edits": true
     },
     "API37_Spatial_S5R1F1_scaffold": {
       "build_succeeded": true,
       "sha256": "f165b2206598633fe66d3eb80685345f09bf1288229b4316788809555ea99282",
       "commands_present": ["Spatial.Status", "Spatial.Get", "Unit.Distance", "Unit.Behind"],
-      "geometry_return_semantics": "pending-disassembly",
-      "runtime_equivalent": false
+      "geometry_return_semantics": "historical-range-and-facing-core-recovered",
+      "runtime_equivalent": false,
+      "superseded_by_source_edits": true
     }
   },
   "ci": {
@@ -70,26 +75,56 @@
       "runtime_verified": false
     },
     "Cooldown_CD1R2": {
-      "status": "dispatcher-engine-query-clear-reset-disassembly-confirmed",
+      "status": "engine-query-abi-and-wrap-safe-deadline-recovered",
       "status_handler": "0x10042F0A",
       "get_handler": "0x10043C4E",
       "list_handler": "0x100442E1",
       "engine_query": "0x006E2EA0",
-      "clear_cooldown_reset": "confirmed",
-      "cooldown_cheat_reset": "in-progress",
+      "engine_query_abi": "uint32 duration,start,enable; duration output precedes start output",
+      "clock_semantics": "uint32-wrap-safe-ms",
+      "deadline_polling": "replaced-50ms-engine-poll-with-deadline-requery",
+      "clear_cooldown_reset": "binary-confirmed-but-exact-multi-record-reconcile-not-yet-reimplemented",
+      "cooldown_cheat_reset": "pending-disassembly",
       "runtime_verified": false
     },
     "UnitState_US1R2": {
-      "status": "compile-scaffold-pass",
+      "status": "historical-fast-guid-and-descriptor-read-path-recovered",
       "dirty_gate": "UPDATE_OBJECT/COMPRESSED_UPDATE_OBJECT",
-      "descriptor_reconcile": "pending-disassembly",
+      "fast_guid_lookup": "0x00464870",
+      "descriptor_layout_recovered": {
+        "unit_fields_ptr": "object+0x110",
+        "health": "+0x40",
+        "maxHealth": "+0x58",
+        "combatFlags": "+0xA0 bit 0x00080000"
+      },
+      "descriptor_empty_policy": "preserve-cache",
+      "power_descriptor_offsets": "pending",
+      "custom_event_dispatch": "pending",
+      "exact_post_handler_callsite": "pending",
       "runtime_verified": false
     },
     "Spatial_S5R1F1": {
-      "status": "compile-scaffold-pass",
+      "status": "historical-range-core-and-s5r1f1-rear-axis-implemented",
       "command_surface": "confirmed",
-      "geometry_and_return_layout": "pending-disassembly",
+      "range_semantics": {
+        "rangedEdgeGap": "max(0,distance3d-actorCombatReach-targetCombatReach)",
+        "chainsEdgeGap": "max(0,distance3d-actorBoundingRadius-targetBoundingRadius)",
+        "meleeZEligible": "abs(zDelta)<6.0",
+        "meleeBaseReach": "max(5.0,max(1.5,actorReach)+max(1.5,targetReach)+1.333333373069763)",
+        "meleeBaseGap2d": "max(0,distance2d-meleeBaseReach)"
+      },
+      "descriptor_offsets": {
+        "boundingRadius": "unitFields+0x1EC",
+        "combatReach": "unitFields+0x1F0"
+      },
+      "facing_semantics": "rearDot=-forwardDot; rearDot>0 behind; rearDot<0 front",
+      "server_backstab_truth": "not-claimed-by-Spatial",
       "runtime_verified": false
     }
+  },
+  "source_edits_20260922": {
+    "spatial_core_commit": "29ec33ebf6d0a9b90cc906ff20837f7f1804fbd8",
+    "cooldown_core_commit": "80fa7d4006da87f4808ea9196fd80d0831dd9079",
+    "unit_state_core_commit": "0c2ecc7e3244e93b337d6af77d1b3ffa54e6634c"
   }
 }
