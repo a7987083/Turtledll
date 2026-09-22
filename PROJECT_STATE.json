@@ -19,12 +19,23 @@
     "api_string_set_extra": 0,
     "runtime_verified": false
   },
+  "stage_builds": {
+    "API34_Foundation_F1": {
+      "build_succeeded": true,
+      "sha256": "3430a066a332852011a516c89f102449fb768b17f6efd49fde3a1ff533f49b98",
+      "api_increment_from_api33": 1,
+      "foundation_status_present": true
+    }
+  },
   "modules": {
     "Foundation_F1": {
-      "status": "contract-disassembly-confirmed",
+      "status": "counter-semantics-disassembly-confirmed",
       "dispatcher_compare": "0x10003EC7",
       "status_handler": "0x1000584B",
-      "live_counter_update_sites": "in-progress"
+      "fast_guid_address": "0x00464870",
+      "guid_counter_update_sites": "confirmed",
+      "los_counter_update_sites": "confirmed",
+      "runtime_verified": false
     },
     "Cooldown_CD1R2": "reconstructed",
     "UnitState_US1R2": "reconstructed",
