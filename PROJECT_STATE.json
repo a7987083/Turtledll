@@ -5,7 +5,8 @@
   "baseline": {
     "api": 33,
     "name": "ARX1_DW1_LOS1",
-    "source_authentic": true
+    "source_authentic": true,
+    "exact_rebuild_sha256": "aa598a044ee3236c31a87d25d1646cf35a3cf9c3e85a120eea542645af96ba3e"
   },
   "target": {
     "api": 37,
@@ -14,18 +15,49 @@
   },
   "recovery_build": {
     "build_succeeded": true,
-    "sha256": "d0ac0158fba9d7aade4ee30afb86f14090e282556e7d86e99759ed107a7cbfff",
+    "previous_full_recovery_sha256": "d0ac0158fba9d7aade4ee30afb86f14090e282556e7d86e99759ed107a7cbfff",
     "api_string_set_missing": 0,
     "api_string_set_extra": 0,
     "runtime_verified": false
   },
   "stage_builds": {
-    "API34_Foundation_F1": {
+    "API34_Foundation_F1_previous": {
       "build_succeeded": true,
-      "sha256": "3430a066a332852011a516c89f102449fb768b17f6efd49fde3a1ff533f49b98",
-      "api_increment_from_api33": 1,
-      "foundation_status_present": true
+      "sha256": "3430a066a332852011a516c89f102449fb768b17f6efd49fde3a1ff533f49b98"
+    },
+    "API34_Foundation_F1_current_scaffold": {
+      "build_succeeded": true,
+      "sha256": "ed376804f577d7eba4cc445116da0880fa5d03944563cf5cc9286f86fe532571",
+      "runtime_equivalent": false
+    },
+    "API35_Cooldown_CD1R2_scaffold": {
+      "build_succeeded": true,
+      "sha256": "ec23f57be99909be37d393778354fdc9f1eb5f7940108293aa634dab592393ae",
+      "commands_present": ["Cooldown.Status", "Cooldown.Get", "Cooldown.List"],
+      "runtime_equivalent": false
+    },
+    "API36_UnitState_US1R2_scaffold": {
+      "build_succeeded": true,
+      "sha256": "850645e671cdbd18bcb31c460b7a8d816f037d6f47ccd2176e911a43f213ff50",
+      "commands_present": ["UnitState.Status", "UnitState.Get", "UnitState.Track", "UnitState.Untrack", "UnitState.List", "UnitState.Clear"],
+      "descriptor_reconcile": "pending-disassembly",
+      "runtime_equivalent": false
+    },
+    "API37_Spatial_S5R1F1_scaffold": {
+      "build_succeeded": true,
+      "sha256": "f165b2206598633fe66d3eb80685345f09bf1288229b4316788809555ea99282",
+      "commands_present": ["Spatial.Status", "Spatial.Get", "Unit.Distance", "Unit.Behind"],
+      "geometry_return_semantics": "pending-disassembly",
+      "runtime_equivalent": false
     }
+  },
+  "ci": {
+    "workflow": "Recovery Build",
+    "latest_attempt": 3,
+    "latest_run_id": 35699905017,
+    "llvm_setup": "fixed",
+    "current_blocker": "recovery/archive.parts contains only three truncated XZ/base64 parts; xz reports Unexpected end of input",
+    "source_compile_reached": false
   },
   "modules": {
     "Foundation_F1": {
@@ -47,7 +79,17 @@
       "cooldown_cheat_reset": "in-progress",
       "runtime_verified": false
     },
-    "UnitState_US1R2": "reconstructed",
-    "Spatial_S5R1F1": "reconstructed"
+    "UnitState_US1R2": {
+      "status": "compile-scaffold-pass",
+      "dirty_gate": "UPDATE_OBJECT/COMPRESSED_UPDATE_OBJECT",
+      "descriptor_reconcile": "pending-disassembly",
+      "runtime_verified": false
+    },
+    "Spatial_S5R1F1": {
+      "status": "compile-scaffold-pass",
+      "command_surface": "confirmed",
+      "geometry_and_return_layout": "pending-disassembly",
+      "runtime_verified": false
+    }
   }
 }
