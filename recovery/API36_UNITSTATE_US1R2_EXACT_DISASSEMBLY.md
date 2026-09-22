@@ -44,22 +44,32 @@ The descriptor range is validated once from `descriptor+0x58` through `descripto
 Confirmed absolute descriptor offsets used by the target DLL:
 
 ```text
-+0x58  health
-+0x5C  power1
++0x58  health                     (UNIT_FIELD_HEALTH)
++0x5C  power1                     (UNIT_FIELD_POWER1)
 +0x60  power2
 +0x64  power3
 +0x68  power4
 +0x6C  power5
-+0x70  maxHealth
-+0x74  maxPower1
++0x70  maxHealth                  (UNIT_FIELD_MAXHEALTH)
++0x74  maxPower1                  (UNIT_FIELD_MAXPOWER1)
 +0x78  maxPower2
 +0x7C  maxPower3
 +0x80  maxPower4
 +0x84  maxPower5
 +0x90  packed power type byte in bits 24..31
-+0xB8  unit flags; combat = bit 19 / mask 0x00080000
-+0x23C additional unit state field used by the frozen dead/state policy
++0xB8  UNIT_FIELD_FLAGS; combat = bit 19 / mask 0x00080000
++0x23C UNIT_DYNAMIC_FLAGS
 ```
+
+Turtle/Tortoise 1.18.1 `UpdateFields.h` independently names update-field index 143 as `UNIT_DYNAMIC_FLAGS`; `143 * 4 = 0x23C`. Its `SharedDefines.h` defines `UNIT_DYNFLAG_DEAD = 0x0020`, exactly matching the target DLL's extraction of bit 5 from descriptor `+0x23C`.
+
+Therefore the target's derived `dead` state is:
+
+```text
+health == 0  OR  (UNIT_DYNAMIC_FLAGS & 0x20) != 0
+```
+
+This closes the previously unnamed `+0x23C` field.
 
 Active power is selected only from the current power type (0..4), matching `ACTIVE_POWER_ONLY_TYPE_VALUE_MAX`.
 
@@ -77,9 +87,9 @@ For an existing cached record the DLL compares old vs new snapshot and independe
 
 ### Health event
 
-Health-change is true when any of the frozen health contract members changes (current health, max health, or the derived dead state). The event is emitted through `SignalEventParam(0x00703F50)` using the registered `TYS_UNIT_HEALTH_CHANGED` slot.
+Health-change is true when any of current health, max health, or the derived dead state changes. The event is emitted through `SignalEventParam(0x00703F50)` using the registered `TYS_UNIT_HEALTH_CHANGED` slot.
 
-Payload order is behaviorally confirmed as:
+Payload order:
 
 ```text
 guid, oldHealth, newHealth, maxHealth, dead
@@ -117,9 +127,9 @@ The three event counters are incremented only after their corresponding `SignalE
 
 Global world-generation counter is at `0x100595F4`.
 
-Reset routine `0x100459BE` clears per-record live/dirty state and increments `worldGeneration` with wrap-safe nonzero progression.
+Reset routine `0x100459BE` clears per-record live/dirty state and increments `worldGeneration` with nonzero progression.
 
-The only write to `0x100595F4` in the target DLL is this reset routine. It is called from the central event path for `PLAYER_LEAVING_WORLD`; the adjacent path handles `PLAYER_ENTERING_WORLD` separately. Therefore the target uses `worldGeneration` to invalidate/unbind cached unit snapshots across world-leave transitions rather than incrementing on every ordinary UPDATE_OBJECT packet.
+The only write to `0x100595F4` in the target DLL is this reset routine. It is called from the central event path for `PLAYER_LEAVING_WORLD`; the adjacent path handles `PLAYER_ENTERING_WORLD` separately. Therefore the target uses `worldGeneration` to invalidate/unbind cached unit snapshots across world-leave transitions rather than incrementing on ordinary UPDATE_OBJECT packets.
 
 ## Important correction to the earlier recovery scaffold
 
@@ -128,8 +138,8 @@ Earlier recovered code used the historical UnitXP-style `object+0x110 -> UnitFie
 ## Confidence
 
 - descriptor pointer and offsets: **binary-confirmed**
+- `+0x23C = UNIT_DYNAMIC_FLAGS`, dead bit `0x20`: **binary + Turtle 1.18.1 source confirmed**
 - UPDATE_OBJECT/COMPRESSED_UPDATE_OBJECT dirty gate: **binary-confirmed**
 - post-stock-handler world-tick reconcile: **binary-confirmed architecture/call order**
 - health/power/combat event separation and payload contracts: **binary + diagnostic-plugin confirmed**
 - `worldGeneration` write site and PLAYER_LEAVING_WORLD linkage: **binary-confirmed**
-- semantic meaning of descriptor `+0x23C` beyond its participation in dead/state derivation: **not yet named with source-level certainty**
