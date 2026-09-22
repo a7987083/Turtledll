@@ -15,6 +15,17 @@ constexpr std::uint32_t OBJECT_TYPE_UNIT=3u;
 constexpr std::uint32_t OBJECT_TYPE_PLAYER=4u;
 constexpr std::uint32_t UNIT_FLAG_IN_COMBAT=0x00080000u;
 
+// WoW 1.12.1 UnitFields layout, independently present in the historical
+// UnitXP_SP3 / ClassicAPI lineage and verified against vanilla script handlers.
+constexpr std::uint32_t OFF_OBJECT_FIELDS=0x110u;
+constexpr std::uint32_t OFF_HEALTH=0x40u;
+constexpr std::uint32_t OFF_POWER1=0x44u;
+constexpr std::uint32_t OFF_MAXHEALTH=0x58u;
+constexpr std::uint32_t OFF_MAXPOWER1=0x5Cu;
+constexpr std::uint32_t OFF_POWER_TYPE_BYTE=0x7Bu;
+constexpr std::uint32_t OFF_UNIT_FLAGS=0xA0u;
+constexpr std::uint32_t MAX_POWER_TYPE=4u;
+
 struct Entry {
     unsigned long long guid;
     unsigned long health;
@@ -35,12 +46,13 @@ static volatile LONG g_init=0,g_inSub=0,g_tickSub=0;
 static volatile LONG g_updatePackets=0,g_compressedUpdatePackets=0,g_dirtySignals=0,g_coalescedSignals=0;
 static volatile LONG g_snapshotCalls=0,g_untrackCalls=0,g_descriptorReconciles=0,g_descriptorFailures=0,g_descriptorClears=0,g_descriptorEmptyPreserves=0,g_descriptorUnbinds=0;
 static volatile LONG g_healthEvents=0,g_powerEvents=0,g_combatEvents=0,g_objectUnavailable=0,g_recordsChecked=0,g_reconcilePasses=0;
+static unsigned long long g_lastChangedGuid=0;
+static unsigned long g_lastChangedMask=0;
 static char g_status[96]="NOT_INITIALIZED";
 
 static void setStr(Lua50::State L,const char*k,const char*v){Lua50::PushString(L,k);Lua50::PushString(L,v);Lua50::SetTable(L,-3);}
 static void setNum(Lua50::State L,const char*k,double v){Lua50::PushString(L,k);Lua50::PushNumber(L,v);Lua50::SetTable(L,-3);}
 static void setBool(Lua50::State L,const char*k,bool v){Lua50::PushString(L,k);Lua50::PushBool(L,v);Lua50::SetTable(L,-3);}
-static void setNil(Lua50::State L,const char*k){Lua50::PushString(L,k);Lua50::PushNil(L);Lua50::SetTable(L,-3);}
 
 static bool readableProtection(DWORD protection){
     const DWORD p=protection&0xffu;
@@ -58,8 +70,6 @@ static bool canRead(std::uintptr_t address,std::size_t bytes){
     return address>=begin&&address<=end&&bytes<=end-address;
 }
 
-template<class T> static bool safeRead(std::uintptr_t a,T*out){if(!out||!canRead(a,sizeof(T)))return false;*out=*(const T*)a;return true;}
-
 static bool executable(std::uintptr_t a){
     MEMORY_BASIC_INFORMATION m={};
     if(!a||VirtualQuery((const void*)a,&m,sizeof(m))!=sizeof(m)||m.State!=MEM_COMMIT||(m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;
@@ -70,28 +80,19 @@ static bool executable(std::uintptr_t a){
 static bool hexNibble(char c,unsigned*o){if(c>='0'&&c<='9'){*o=(unsigned)(c-'0');return true;}if(c>='a'&&c<='f'){*o=(unsigned)(c-'a'+10);return true;}if(c>='A'&&c<='F'){*o=(unsigned)(c-'A'+10);return true;}return false;}
 
 static bool parseGuidText(const char*s,unsigned long long*out){
-    if(!s||!out)return false;
-    *out=0;
+    if(!s||!out)return false;*out=0;
     while(*s==' '||*s=='\t'||*s=='\r'||*s=='\n')++s;
     if(s[0]=='0'&&(s[1]=='x'||s[1]=='X'))s+=2;
     unsigned long long v=0;unsigned digits=0;
     for(;*s&&digits<16;++s,++digits){unsigned n=0;if(!hexNibble(*s,&n))return false;v=(v<<4)|n;}
-    if(*s||digits==0||v==0)return false;
-    *out=v;return true;
+    if(*s||digits==0||v==0)return false;*out=v;return true;
 }
 
 static bool resolveGuid(Lua50::State L,int idx,unsigned long long*out){
-    if(!out)return false;
-    *out=0;
-    if(Lua50::IsNumber(L,idx)){
-        const double n=Lua50::ToNumber(L,idx);
-        if(n<=0)return false;
-        *out=(unsigned long long)n;
-        return *out!=0;
-    }
+    if(!out)return false;*out=0;
+    if(Lua50::IsNumber(L,idx)){const double n=Lua50::ToNumber(L,idx);if(n<=0)return false;*out=(unsigned long long)n;return *out!=0;}
     if(!Lua50::IsString(L,idx))return false;
-    const char*s=Lua50::ToString(L,idx);
-    if(!s||!*s)return false;
+    const char*s=Lua50::ToString(L,idx);if(!s||!*s)return false;
     if(executable(UNIT_GUID_FN)){
         using UnitGuidFn=unsigned long long(__fastcall*)(const char*);
         const unsigned long long g=((UnitGuidFn)UNIT_GUID_FN)(s);
@@ -100,35 +101,26 @@ static bool resolveGuid(Lua50::State L,int idx,unsigned long long*out){
     return parseGuidText(s,out);
 }
 
-static void pushGuid(Lua50::State L,const char*k,unsigned long long guid){
-    char b[24]={};
+static void formatGuid(char*b,std::size_t n,unsigned long long guid){
+    if(!b||n<2)return;
 #if defined(_MSC_VER)
     std::sprintf(b,"0x%016I64X",guid);
 #else
     std::sprintf(b,"0x%016llX",guid);
 #endif
-    setStr(L,k,b);
 }
+static void pushGuid(Lua50::State L,const char*k,unsigned long long guid){char b[24]={};formatGuid(b,sizeof(b),guid);setStr(L,k,b);}
 
 static Entry* find(unsigned long long guid){for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&g_entries[i].guid==guid)return &g_entries[i];return 0;}
-
 static Entry* track(unsigned long long guid,bool*isNew){
-    if(isNew)*isNew=false;
-    Entry*e=find(guid);if(e)return e;
-    for(unsigned i=0;i<MAX_TRACKED;++i)if(!g_entries[i].used){
-        g_entries[i]=Entry{};g_entries[i].used=true;g_entries[i].dirty=true;g_entries[i].guid=guid;
-        if(isNew)*isNew=true;return &g_entries[i];
-    }
+    if(isNew)*isNew=false;Entry*e=find(guid);if(e)return e;
+    for(unsigned i=0;i<MAX_TRACKED;++i)if(!g_entries[i].used){g_entries[i]=Entry{};g_entries[i].used=true;g_entries[i].dirty=true;g_entries[i].guid=guid;if(isNew)*isNew=true;return &g_entries[i];}
     return 0;
 }
 
 static void markDirtyAll(){
-    for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used){
-        if(g_entries[i].dirty)++g_coalescedSignals;
-        else {g_entries[i].dirty=true;++g_dirtySignals;}
-    }
+    for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used){if(g_entries[i].dirty)++g_coalescedSignals;else{g_entries[i].dirty=true;++g_dirtySignals;}}
 }
-
 static void onIncoming(unsigned long op,TysNativeBus::CDataStoreView*){
     if(op==WoW112::SMSG_UPDATE_OBJECT_OPCODE){++g_updatePackets;markDirtyAll();}
     else if(op==WoW112::SMSG_COMPRESSED_UPDATE_OBJECT_OPCODE){++g_compressedUpdatePackets;markDirtyAll();}
@@ -138,215 +130,115 @@ static bool resolveObject(unsigned long long guid,std::uint32_t*out){
     if(!guid||!out||!executable(FAST_GUID_LOOKUP))return false;
     using GetObjectFn=std::uint32_t(__fastcall*)(unsigned long long);
     const std::uint32_t object=((GetObjectFn)FAST_GUID_LOOKUP)(guid);
-    if(!object||(object&1u)||!canRead(object,0x11cu))return false;
-    std::uint32_t type=0;
-    if(!safeRead((std::uintptr_t)object+0x14u,&type)||(type!=OBJECT_TYPE_UNIT&&type!=OBJECT_TYPE_PLAYER))return false;
-    unsigned long long liveGuid=0;
-    if(!safeRead((std::uintptr_t)object+0x30u,&liveGuid)||liveGuid!=guid)return false;
+    // One object-range validation per snapshot. All object reads below are then
+    // inside this already-validated range, matching the US1-R2 contract.
+    if(!object||(object&1u)||!canRead(object,OFF_OBJECT_FIELDS+sizeof(std::uint32_t)))return false;
+    const std::uint32_t type=*(const std::uint32_t*)((std::uintptr_t)object+0x14u);
+    if(type!=OBJECT_TYPE_UNIT&&type!=OBJECT_TYPE_PLAYER)return false;
+    const unsigned long long liveGuid=*(const unsigned long long*)((std::uintptr_t)object+0x30u);
+    if(liveGuid!=guid)return false;
     *out=object;return true;
 }
 
-// Recovered historical UnitXP descriptor layout:
-// object + 0x110 -> UnitFields base
-// health +0x40, maxHealth +0x58, UNIT_FIELD_FLAGS-like combat word +0xA0.
-// Active-power offsets are deliberately left unrecovered here; we preserve the
-// previous cached power values rather than inventing descriptor indices.
 static bool reconcileEntry(Entry&e){
     ++g_recordsChecked;
     std::uint32_t object=0;
     if(!resolveObject(e.guid,&object)){
         ++g_objectUnavailable;
-        e.valid=false;
-        e.dirty=false;
+        if(e.valid)++g_descriptorUnbinds;
+        e.valid=false;e.powerValid=false;e.dirty=false;
         return false;
     }
 
-    std::uint32_t attr=0;
-    if(!safeRead((std::uintptr_t)object+0x110u,&attr)){
-        ++g_descriptorFailures;e.dirty=false;return false;
-    }
+    const std::uint32_t attr=*(const std::uint32_t*)((std::uintptr_t)object+OFF_OBJECT_FIELDS);
     if(!attr){
-        // US1-R2 contract: empty descriptor preserves the previous cache.
+        // Explicit US1-R2 rule: a transient empty UnitFields pointer is not
+        // authoritative enough to erase the previous snapshot.
         ++g_descriptorEmptyPreserves;e.dirty=false;return true;
     }
-    if((attr&3u)!=0u||!canRead(attr,0xA4u)){
-        ++g_descriptorFailures;e.dirty=false;return false;
-    }
+    // One descriptor-range validation per snapshot, then direct reads inside it.
+    if((attr&3u)!=0u||!canRead(attr,OFF_UNIT_FLAGS+sizeof(std::uint32_t))){++g_descriptorFailures;e.dirty=false;return false;}
 
-    std::uint32_t health=0,maxHealth=0,flags=0;
-    if(!safeRead((std::uintptr_t)attr+0x40u,&health)||
-       !safeRead((std::uintptr_t)attr+0x58u,&maxHealth)||
-       !safeRead((std::uintptr_t)attr+0xA0u,&flags)){
-        ++g_descriptorFailures;e.dirty=false;return false;
-    }
+    const std::uint32_t health=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_HEALTH);
+    const std::uint32_t maxHealth=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_MAXHEALTH);
+    const std::uint32_t flags=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_UNIT_FLAGS);
+    const std::uint8_t powerType=*(const std::uint8_t*)((std::uintptr_t)attr+OFF_POWER_TYPE_BYTE);
+    if(powerType>MAX_POWER_TYPE){++g_descriptorFailures;e.dirty=false;return false;}
+    const std::uint32_t power=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_POWER1+(std::uint32_t)powerType*4u);
+    const std::uint32_t maxPower=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_MAXPOWER1+(std::uint32_t)powerType*4u);
 
     const bool had=e.valid;
-    const unsigned long oldHealth=e.health;
-    const unsigned long oldMax=e.maxHealth;
-    const unsigned long oldCombat=e.combatFlag;
+    const bool hadPower=e.powerValid;
+    const unsigned long oldHealth=e.health,oldMaxHealth=e.maxHealth,oldCombat=e.combatFlag;
+    const unsigned long oldPowerType=e.powerType,oldPower=e.power,oldMaxPower=e.maxPower;
 
-    e.health=health;
-    e.maxHealth=maxHealth;
-    e.combatFlag=(flags&UNIT_FLAG_IN_COMBAT)?1u:0u;
-    e.capturedAtMs=GetTickCount();
-    e.valid=true;
-    e.dirty=false;
-    ++g_descriptorReconciles;
+    e.health=health;e.maxHealth=maxHealth;e.combatFlag=(flags&UNIT_FLAG_IN_COMBAT)?1u:0u;
+    e.powerType=powerType;e.power=power;e.maxPower=maxPower;e.powerValid=true;
+    e.capturedAtMs=GetTickCount();e.valid=true;e.dirty=false;++g_descriptorReconciles;
 
-    // Counters are recovered now; actual custom-event dispatch remains pending
-    // until the historical event bridge/post-handler call site is recovered.
-    if(had&&(oldHealth!=e.health||oldMax!=e.maxHealth))++g_healthEvents;
-    if(had&&oldCombat!=e.combatFlag)++g_combatEvents;
+    unsigned long changedMask=0;
+    if(had&&(oldHealth!=e.health||oldMaxHealth!=e.maxHealth)){++g_healthEvents;changedMask|=0x08u;}
+    if(had&&oldCombat!=e.combatFlag){++g_combatEvents;changedMask|=0x10u;}
+    if(had&&hadPower){
+        unsigned long powerMask=0;
+        if(oldPowerType!=e.powerType)powerMask|=0x01u;
+        if(oldPower!=e.power)powerMask|=0x02u;
+        if(oldMaxPower!=e.maxPower)powerMask|=0x04u;
+        if(powerMask){++g_powerEvents;changedMask|=powerMask;}
+    }
+    if(changedMask){g_lastChangedGuid=e.guid;g_lastChangedMask=changedMask;}
     return true;
 }
 
 static void onTick(){
-    bool any=false;
-    for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&g_entries[i].dirty){any=true;break;}
-    if(!any)return;
-    ++g_reconcilePasses;
+    bool any=false;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&g_entries[i].dirty){any=true;break;}
+    if(!any)return;++g_reconcilePasses;
     for(unsigned i=0;i<MAX_TRACKED;++i){Entry&e=g_entries[i];if(e.used&&e.dirty)reconcileEntry(e);}
 }
 
 static int pushEntry(Lua50::State L,const Entry&e){
-    Lua50::NewTable(L);
-    pushGuid(L,"guid",e.guid);
-    setNum(L,"guidLow",(unsigned long)e.guid);
-    setNum(L,"guidHigh",(unsigned long)(e.guid>>32));
-    setBool(L,"tracked",e.used);
-    setBool(L,"visible",e.valid);
-    setBool(L,"valid",e.valid);
-    setBool(L,"dirty",e.dirty);
-    setNum(L,"health",e.health);
-    setNum(L,"maxHealth",e.maxHealth);
-    setBool(L,"dead",e.valid&&e.health==0);
-    setBool(L,"combat",e.combatFlag!=0);
-    setNum(L,"combatFlag",e.combatFlag);
+    Lua50::NewTable(L);pushGuid(L,"guid",e.guid);setNum(L,"guidLow",(unsigned long)e.guid);setNum(L,"guidHigh",(unsigned long)(e.guid>>32));
+    setBool(L,"tracked",e.used);setBool(L,"visible",e.valid);setBool(L,"valid",e.valid);setBool(L,"dirty",e.dirty);
+    setNum(L,"health",e.health);setNum(L,"maxHealth",e.maxHealth);setBool(L,"dead",e.valid&&e.health==0);setBool(L,"combat",e.combatFlag!=0);setNum(L,"combatFlag",e.combatFlag);
     if(e.powerValid){setNum(L,"powerType",e.powerType);setNum(L,"power",e.power);setNum(L,"maxPower",e.maxPower);}
-    else {setNil(L,"powerType");setNil(L,"power");setNil(L,"maxPower");}
-    setNum(L,"capturedAtMs",e.capturedAtMs);
-    return 1;
+    else{Lua50::PushString(L,"powerType");Lua50::PushNil(L);Lua50::SetTable(L,-3);Lua50::PushString(L,"power");Lua50::PushNil(L);Lua50::SetTable(L,-3);Lua50::PushString(L,"maxPower");Lua50::PushNil(L);Lua50::SetTable(L,-3);}
+    setNum(L,"capturedAtMs",e.capturedAtMs);return 1;
 }
 
 } // namespace
 
 bool initialize(){
     if(InterlockedCompareExchange(&g_init,1,0)!=0)return true;
-    bool a=TysNativeBus::subscribeIncoming(&onIncoming);
-    bool b=TysNativeBus::subscribeWorldTick(&onTick);
-    InterlockedExchange(&g_inSub,a?1:0);
-    InterlockedExchange(&g_tickSub,b?1:0);
-    const char*s=(a&&b)?"READY_TRACKED_UPDATEOBJECT_GATE_DESCRIPTOR_READ_PARTIAL":"PARTIAL_TRACKED_UPDATEOBJECT_GATE";
-    unsigned i=0;for(;s[i]&&i+1<sizeof(g_status);++i)g_status[i]=s[i];g_status[i]=0;
-    return a&&b;
+    bool a=TysNativeBus::subscribeIncoming(&onIncoming);bool b=TysNativeBus::subscribeWorldTick(&onTick);
+    InterlockedExchange(&g_inSub,a?1:0);InterlockedExchange(&g_tickSub,b?1:0);
+    const char*s=(a&&b)?"READY_TRACKED_UPDATEOBJECT_GATE_DESCRIPTOR_POWER_READ":"PARTIAL_TRACKED_UPDATEOBJECT_GATE";
+    unsigned i=0;for(;s[i]&&i+1<sizeof(g_status);++i)g_status[i]=s[i];g_status[i]=0;return a&&b;
 }
-
 const char* status(){return g_status;}
 
 int dispatchStatus(Lua50::State L){
-    initialize();
-    Lua50::NewTable(L);
-    setStr(L,"stage","US1-R2");
-    setStr(L,"status",g_status);
-    setBool(L,"incomingSubscribed",g_inSub!=0);
-    setBool(L,"worldTickSubscribed",g_tickSub!=0);
-    setBool(L,"customEventsReady",false);
-    setNum(L,"capacity",MAX_TRACKED);
-    unsigned tracked=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used)++tracked;
-    setNum(L,"tracked",tracked);
-    setNum(L,"fastGuidLookupAddress",FAST_GUID_LOOKUP);
-    setNum(L,"updatePackets",g_updatePackets);
-    setNum(L,"compressedUpdatePackets",g_compressedUpdatePackets);
-    setNum(L,"dirtySignals",g_dirtySignals);
-    setNum(L,"coalescedSignals",g_coalescedSignals);
-    setNum(L,"reconcilePasses",g_reconcilePasses);
-    setNum(L,"recordsChecked",g_recordsChecked);
-    setNum(L,"objectUnavailable",g_objectUnavailable);
-    setNum(L,"snapshotCalls",g_snapshotCalls);
-    setNum(L,"untrackCalls",g_untrackCalls);
-    setNum(L,"descriptorReconciles",g_descriptorReconciles);
-    setNum(L,"descriptorFailures",g_descriptorFailures);
-    setNum(L,"descriptorClears",g_descriptorClears);
-    setNum(L,"descriptorEmptyPreserves",g_descriptorEmptyPreserves);
-    setNum(L,"descriptorUnbinds",g_descriptorUnbinds);
-    setNum(L,"healthEvents",g_healthEvents);
-    setNum(L,"powerEvents",g_powerEvents);
-    setNum(L,"combatEvents",g_combatEvents);
-    setStr(L,"powerSemantics","ACTIVE_POWER_ONLY_TYPE_VALUE_MAX_PENDING_DESCRIPTOR_OFFSETS");
-    setStr(L,"powerMaskSemantics","BIT0_TYPE_BIT1_VALUE_BIT2_MAX");
-    setStr(L,"descriptorReadPolicy","ONE_OBJECT_RANGE_PLUS_ONE_DESCRIPTOR_RANGE_PER_SNAPSHOT");
-    setStr(L,"descriptorPolicy","UNITFIELDS_PRESENCE_AUTHORITY; EMPTY_DESCRIPTOR_PRESERVES_CACHE");
-    setBool(L,"packetBodyParsing",false);
-    setBool(L,"zlibDecompression",false);
-    setBool(L,"compressedDecompression",false);
-    setBool(L,"objectManagerPolling",false);
-    setBool(L,"directHook",false);
-    setBool(L,"timer",false);
-    setBool(L,"backgroundThread",false);
-    setBool(L,"idleTickPath",true);
-    return 1;
+    initialize();Lua50::NewTable(L);setStr(L,"stage","US1-R2");setStr(L,"status",g_status);setBool(L,"incomingSubscribed",g_inSub!=0);setBool(L,"worldTickSubscribed",g_tickSub!=0);setBool(L,"customEventsReady",false);setNum(L,"capacity",MAX_TRACKED);
+    unsigned tracked=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used)++tracked;setNum(L,"tracked",tracked);
+    setNum(L,"fastGuidLookupAddress",FAST_GUID_LOOKUP);setNum(L,"updatePackets",g_updatePackets);setNum(L,"compressedUpdatePackets",g_compressedUpdatePackets);setNum(L,"dirtySignals",g_dirtySignals);setNum(L,"coalescedSignals",g_coalescedSignals);setNum(L,"reconcilePasses",g_reconcilePasses);setNum(L,"recordsChecked",g_recordsChecked);setNum(L,"objectUnavailable",g_objectUnavailable);setNum(L,"snapshotCalls",g_snapshotCalls);setNum(L,"untrackCalls",g_untrackCalls);setNum(L,"descriptorReconciles",g_descriptorReconciles);setNum(L,"descriptorFailures",g_descriptorFailures);setNum(L,"descriptorClears",g_descriptorClears);setNum(L,"descriptorEmptyPreserves",g_descriptorEmptyPreserves);setNum(L,"descriptorUnbinds",g_descriptorUnbinds);setNum(L,"healthEvents",g_healthEvents);setNum(L,"powerEvents",g_powerEvents);setNum(L,"combatEvents",g_combatEvents);
+    if(g_lastChangedGuid)pushGuid(L,"lastChangedGuid",g_lastChangedGuid);else{Lua50::PushString(L,"lastChangedGuid");Lua50::PushNil(L);Lua50::SetTable(L,-3);}setNum(L,"lastChangedMask",g_lastChangedMask);
+    setStr(L,"powerSemantics","ACTIVE_POWER_ONLY_TYPE_VALUE_MAX");setStr(L,"powerMaskSemantics","BIT0_TYPE_BIT1_VALUE_BIT2_MAX");setStr(L,"descriptorReadPolicy","ONE_OBJECT_RANGE_PLUS_ONE_DESCRIPTOR_RANGE_PER_SNAPSHOT");setStr(L,"descriptorPolicy","UNITFIELDS_PRESENCE_AUTHORITY; EMPTY_DESCRIPTOR_PRESERVES_CACHE");
+    setBool(L,"packetBodyParsing",false);setBool(L,"zlibDecompression",false);setBool(L,"compressedDecompression",false);setBool(L,"objectManagerPolling",false);setBool(L,"directHook",false);setBool(L,"timer",false);setBool(L,"backgroundThread",false);setBool(L,"idleTickPath",true);return 1;
 }
 
 int dispatchTrack(Lua50::State L){
-    initialize();
-    unsigned long long g=0;
-    if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g)){Lua50::PushNil(L);Lua50::PushString(L,"BAD_ARGUMENT");return 2;}
-    bool n=false;Entry*e=track(g,&n);
-    if(!e){Lua50::PushNil(L);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}
-    // Initial snapshot is demand-driven and uses the same reconcile path.
-    reconcileEntry(*e);
-    Lua50::PushBool(L,true);
-    Lua50::PushString(L,n?"TRACKED_NEW":"TRACKED_EXISTING");
-    char b[24]={};
-#if defined(_MSC_VER)
-    std::sprintf(b,"0x%016I64X",g);
-#else
-    std::sprintf(b,"0x%016llX",g);
-#endif
-    Lua50::PushString(L,b);
-    return 3;
+    initialize();unsigned long long g=0;if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g)){Lua50::PushNil(L);Lua50::PushString(L,"BAD_ARGUMENT");return 2;}
+    bool n=false;Entry*e=track(g,&n);if(!e){Lua50::PushNil(L);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}reconcileEntry(*e);
+    Lua50::PushBool(L,true);Lua50::PushString(L,n?"TRACKED_NEW":"TRACKED_EXISTING");char b[24]={};formatGuid(b,sizeof(b),g);Lua50::PushString(L,b);return 3;
 }
-
 int dispatchUntrack(Lua50::State L){
-    initialize();
-    unsigned long long g=0;
-    if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g)){Lua50::PushBool(L,false);Lua50::PushString(L,"BAD_ARGUMENT");return 2;}
-    ++g_untrackCalls;Entry*e=find(g);
-    if(!e){Lua50::PushBool(L,false);Lua50::PushString(L,"NOT_TRACKED");return 2;}
-    *e=Entry{};
-    Lua50::PushBool(L,true);Lua50::PushString(L,"UNTRACKED");
-    char b[24]={};
-#if defined(_MSC_VER)
-    std::sprintf(b,"0x%016I64X",g);
-#else
-    std::sprintf(b,"0x%016llX",g);
-#endif
-    Lua50::PushString(L,b);
-    return 3;
+    initialize();unsigned long long g=0;if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g)){Lua50::PushBool(L,false);Lua50::PushString(L,"BAD_ARGUMENT");return 2;}
+    ++g_untrackCalls;Entry*e=find(g);if(!e){Lua50::PushBool(L,false);Lua50::PushString(L,"NOT_TRACKED");return 2;}*e=Entry{};Lua50::PushBool(L,true);Lua50::PushString(L,"UNTRACKED");char b[24]={};formatGuid(b,sizeof(b),g);Lua50::PushString(L,b);return 3;
 }
-
 int dispatchGet(Lua50::State L){
-    initialize();
-    unsigned long long g=0;
-    if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g)){Lua50::PushNil(L);Lua50::PushString(L,"BAD_ARGUMENT");return 2;}
-    ++g_snapshotCalls;
-    Entry*e=find(g);
-    if(!e){Lua50::PushNil(L);Lua50::PushString(L,"NOT_TRACKED");return 2;}
-    if(e->dirty)reconcileEntry(*e);
-    return pushEntry(L,*e);
+    initialize();unsigned long long g=0;if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g)){Lua50::PushNil(L);Lua50::PushString(L,"BAD_ARGUMENT");return 2;}++g_snapshotCalls;
+    Entry*e=find(g);if(!e){Lua50::PushNil(L);Lua50::PushString(L,"NOT_TRACKED");return 2;}if(e->dirty)reconcileEntry(*e);return pushEntry(L,*e);
 }
-
-int dispatchList(Lua50::State L){
-    initialize();
-    Lua50::NewTable(L);int idx=1;
-    for(unsigned i=0;i<MAX_TRACKED;++i){if(!g_entries[i].used)continue;Lua50::PushNumber(L,idx++);pushEntry(L,g_entries[i]);Lua50::SetTable(L,-3);}
-    return 1;
-}
-
-int dispatchClear(Lua50::State L){
-    initialize();
-    unsigned n=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used){g_entries[i]=Entry{};++n;}
-    Lua50::PushNumber(L,n);return 1;
-}
+int dispatchList(Lua50::State L){initialize();Lua50::NewTable(L);int idx=1;for(unsigned i=0;i<MAX_TRACKED;++i){if(!g_entries[i].used)continue;Lua50::PushNumber(L,idx++);pushEntry(L,g_entries[i]);Lua50::SetTable(L,-3);}return 1;}
+int dispatchClear(Lua50::State L){initialize();unsigned n=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used){g_entries[i]=Entry{};++n;}Lua50::PushNumber(L,n);return 1;}
 
 } // namespace TysUnitStateCore
