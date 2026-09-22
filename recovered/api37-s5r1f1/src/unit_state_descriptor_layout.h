@@ -17,13 +17,14 @@ constexpr std::uint32_t DESC_MAX_HEALTH        = 0x70u;
 constexpr std::uint32_t DESC_MAX_POWER1        = 0x74u;
 constexpr std::uint32_t DESC_POWER_TYPE_PACKED = 0x90u;
 constexpr std::uint32_t DESC_UNIT_FLAGS        = 0xB8u;
-constexpr std::uint32_t DESC_STATE_23C         = 0x23Cu;
+constexpr std::uint32_t DESC_DYNAMIC_FLAGS     = 0x23Cu;
 
 constexpr std::uint32_t DESC_RANGE_START       = 0x58u;
 constexpr std::uint32_t DESC_RANGE_BYTES       = 0x1E8u;
 
 constexpr std::uint32_t POWER_LANES            = 5u;
 constexpr std::uint32_t UNIT_FLAG_IN_COMBAT    = 0x00080000u;
+constexpr std::uint32_t UNIT_DYNFLAG_DEAD      = 0x00000020u;
 
 inline std::uint32_t powerOffset(std::uint32_t powerType) {
     return DESC_POWER1 + powerType * 4u;
@@ -39,6 +40,10 @@ inline std::uint32_t powerTypeFromPacked(std::uint32_t packed) {
 
 inline bool inCombat(std::uint32_t flags) {
     return (flags & UNIT_FLAG_IN_COMBAT) != 0;
+}
+
+inline bool dead(std::uint32_t health, std::uint32_t dynamicFlags) {
+    return health == 0u || (dynamicFlags & UNIT_DYNFLAG_DEAD) != 0u;
 }
 
 // Public power-change contract frozen in US1-R2.
