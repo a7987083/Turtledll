@@ -20,7 +20,7 @@
     "api_string_set_missing": 0,
     "api_string_set_extra": 0,
     "runtime_verified": false,
-    "note": "Previous build predates the 2026-09-22 historical-source recovery edits below; current source edits are not yet rebuilt because CI source archive reconstruction remains blocked."
+    "note": "Previous build predates the 2026-09-22 historical-source recovery edits; current source edits are not yet rebuilt because CI source archive reconstruction remains blocked."
   },
   "stage_builds": {
     "API34_Foundation_F1_previous": {
@@ -43,7 +43,7 @@
       "build_succeeded": true,
       "sha256": "850645e671cdbd18bcb31c460b7a8d816f037d6f47ccd2176e911a43f213ff50",
       "commands_present": ["UnitState.Status", "UnitState.Get", "UnitState.Track", "UnitState.Untrack", "UnitState.List", "UnitState.Clear"],
-      "descriptor_reconcile": "historical-read-path-partially-recovered",
+      "descriptor_reconcile": "descriptor-and-active-power-read-path-recovered; post-handler scheduling architecture recovered",
       "runtime_equivalent": false,
       "superseded_by_source_edits": true
     },
@@ -75,32 +75,46 @@
       "runtime_verified": false
     },
     "Cooldown_CD1R2": {
-      "status": "engine-query-abi-and-wrap-safe-deadline-recovered",
+      "status": "engine-query-clock-reset-packet-and-shared-event-bridge-recovered",
       "status_handler": "0x10042F0A",
       "get_handler": "0x10043C4E",
       "list_handler": "0x100442E1",
       "engine_query": "0x006E2EA0",
       "engine_query_abi": "uint32 duration,start,enable; duration output precedes start output",
       "clock_semantics": "uint32-wrap-safe-ms",
-      "deadline_polling": "replaced-50ms-engine-poll-with-deadline-requery",
-      "clear_cooldown_reset": "binary-confirmed-but-exact-multi-record-reconcile-not-yet-reimplemented",
-      "cooldown_cheat_reset": "pending-disassembly",
+      "deadline_semantics": "active deadline revalidation; no 50ms engine polling",
+      "clear_packet_layout": "uint32 spellId + uint64 targetGuid",
+      "cooldown_cheat_packet_layout": "uint64 targetGuid; resets all cooldowns for target",
+      "reset_reconcile_architecture": "NativeBus incoming marks dirty before stock dispatch; shared worldTick callback runs after original world tick and re-queries engine state",
+      "custom_event_transport": "API33 dynamic FrameScript slot claim + SignalEventParam recovered",
+      "custom_event_transition_call_sites": "pending-wiring",
+      "kind_gcd_classification": "pending-final-binary-calibration",
       "runtime_verified": false
     },
     "UnitState_US1R2": {
-      "status": "historical-fast-guid-and-descriptor-read-path-recovered",
+      "status": "descriptor-active-power-and-post-handler-architecture-recovered",
       "dirty_gate": "UPDATE_OBJECT/COMPRESSED_UPDATE_OBJECT",
       "fast_guid_lookup": "0x00464870",
       "descriptor_layout_recovered": {
         "unit_fields_ptr": "object+0x110",
         "health": "+0x40",
+        "power1": "+0x44 + powerType*4",
         "maxHealth": "+0x58",
+        "maxPower1": "+0x5C + powerType*4",
+        "powerType": "+0x7B",
         "combatFlags": "+0xA0 bit 0x00080000"
       },
       "descriptor_empty_policy": "preserve-cache",
-      "power_descriptor_offsets": "pending",
-      "custom_event_dispatch": "pending",
-      "exact_post_handler_callsite": "pending",
+      "power_semantics": "ACTIVE_POWER_ONLY_TYPE_VALUE_MAX",
+      "power_mask_semantics": "BIT0_TYPE_BIT1_VALUE_BIT2_MAX",
+      "post_handler_architecture": "API33 NativeBus incoming subscriber marks dirty before original packet dispatch; NativeBus worldTick hook calls original world tick first, then UnitState subscriber reconciles descriptors. This places descriptor reads after stock packet processing without a new per-opcode hook.",
+      "custom_event_transport": "API33 dynamic FrameScript slot claim + SignalEventParam recovered",
+      "custom_event_payloads": {
+        "TYS_UNIT_HEALTH_CHANGED": "guid,oldHealth,newHealth,maxHealth,dead",
+        "TYS_UNIT_POWER_CHANGED": "guid,powerType,oldPower,newPower,maxPower,mask",
+        "TYS_UNIT_COMBAT_CHANGED": "guid,oldCombat,newCombat"
+      },
+      "custom_event_transition_call_sites": "pending-wiring",
       "runtime_verified": false
     },
     "Spatial_S5R1F1": {
@@ -122,9 +136,24 @@
       "runtime_verified": false
     }
   },
+  "authentic_api33_shared_infrastructure": {
+    "native_bus_incoming": "0x00537AA0",
+    "native_bus_outgoing": "0x005379A0",
+    "native_bus_world_tick": "0x0066FD50",
+    "framescript_create_events": "0x00703D90",
+    "framescript_set_event_count": "0x007053B0",
+    "framescript_event_object_data": "0x00CEEF68",
+    "signal_event_param": "0x00703F50",
+    "sstr_dup_a": "0x0064A620",
+    "expanded_event_count": 700,
+    "dynamic_event_policy": "find existing same-name slot else claim first NULL slot from low end; never overwrite occupied names"
+  },
   "source_edits_20260922": {
     "spatial_core_commit": "29ec33ebf6d0a9b90cc906ff20837f7f1804fbd8",
-    "cooldown_core_commit": "80fa7d4006da87f4808ea9196fd80d0831dd9079",
-    "unit_state_core_commit": "0c2ecc7e3244e93b337d6af77d1b3ffa54e6634c"
+    "cooldown_core_commit": "087373b86dd0ca95738052d32551c361fd208f15",
+    "unit_state_core_commit": "9e3959df36b01499b2c8858a29da0f5413360a75",
+    "custom_event_bridge_header_commit": "94f5398abc0fe59ba965badf4c3567d338b6cf0c",
+    "custom_event_bridge_cpp_commit": "92d4c6f3a2c7b788f79a571038bbb69f316ca6cd",
+    "custom_event_evidence_commit": "fe4a14714bae8dd231511520a444ea0703c9a9c1"
   }
 }
