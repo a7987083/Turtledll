@@ -26,6 +26,14 @@ A query path around `0x10044191` checks the address and then calls `0x006E2EA0` 
 
 Observed query call shape is consistent with the recovered CD1-R2 model: local-player spell id query, engine-derived start/duration-like values, then active-deadline reconciliation.
 
+## Confirmed reset reconciliation path
+
+The `SMSG_CLEAR_COOLDOWN` literal is referenced by code around `0x10047A49`.
+
+The routine calls a reset helper on two cooldown state blocks, clears an associated NativeBus/reset flag, and records the reset-reason string as `SMSG_CLEAR_COOLDOWN`. This confirms that clear-cooldown handling is state reconciliation rather than a new polling path.
+
+`SMSG_COOLDOWN_CHEAT` is present in the final binary and is part of the same documented reset contract. Its exact code-reference/handler target is still being resolved.
+
 ## Confirmed public event/string contract
 
 The final binary contains and references:
@@ -44,7 +52,7 @@ The API catalog states: NativeBus dirty SpellIDs + engine query `0x006E2EA0` + a
 - `Cooldown.Get` dispatch: **disassembly-confirmed**
 - `Cooldown.List` dispatch: **disassembly-confirmed**
 - Engine query address `0x006E2EA0`: **disassembly-confirmed**
+- `SMSG_CLEAR_COOLDOWN` reset path: **disassembly-confirmed**
 - Exact query output structure/field semantics: **in progress**
-- `SMSG_CLEAR_COOLDOWN` reset handler path: **in progress**
 - `SMSG_COOLDOWN_CHEAT` reset handler path: **in progress**
 - Event emission ordering/timing: **pending runtime validation**
