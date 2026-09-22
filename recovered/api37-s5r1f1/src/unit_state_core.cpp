@@ -4,6 +4,8 @@
 #include "unit_state_core.h"
 #include "native_bus.h"
 #include "wow112_offsets.h"
+#include "custom_event_bridge.h"
+#include "unit_state_descriptor_layout.h"
 
 namespace TysUnitStateCore {
 namespace {
@@ -13,17 +15,6 @@ constexpr std::uintptr_t FAST_GUID_LOOKUP=0x00464870u;
 constexpr std::uintptr_t UNIT_GUID_FN=0x00515970u;
 constexpr std::uint32_t OBJECT_TYPE_UNIT=3u;
 constexpr std::uint32_t OBJECT_TYPE_PLAYER=4u;
-constexpr std::uint32_t UNIT_FLAG_IN_COMBAT=0x00080000u;
-
-// WoW 1.12.1 UnitFields layout, independently present in the historical
-// UnitXP_SP3 / ClassicAPI lineage and verified against vanilla script handlers.
-constexpr std::uint32_t OFF_OBJECT_FIELDS=0x110u;
-constexpr std::uint32_t OFF_HEALTH=0x40u;
-constexpr std::uint32_t OFF_POWER1=0x44u;
-constexpr std::uint32_t OFF_MAXHEALTH=0x58u;
-constexpr std::uint32_t OFF_MAXPOWER1=0x5Cu;
-constexpr std::uint32_t OFF_POWER_TYPE_BYTE=0x7Bu;
-constexpr std::uint32_t OFF_UNIT_FLAGS=0xA0u;
 constexpr std::uint32_t MAX_POWER_TYPE=4u;
 
 struct Entry {
@@ -35,6 +26,7 @@ struct Entry {
     unsigned long powerType;
     unsigned long combatFlag;
     unsigned long capturedAtMs;
+    bool dead;
     bool used;
     bool valid;
     bool dirty;
@@ -130,12 +122,10 @@ static bool resolveObject(unsigned long long guid,std::uint32_t*out){
     if(!guid||!out||!executable(FAST_GUID_LOOKUP))return false;
     using GetObjectFn=std::uint32_t(__fastcall*)(unsigned long long);
     const std::uint32_t object=((GetObjectFn)FAST_GUID_LOOKUP)(guid);
-    // One object-range validation per snapshot. All object reads below are then
-    // inside this already-validated range, matching the US1-R2 contract.
-    if(!object||(object&1u)||!canRead(object,OFF_OBJECT_FIELDS+sizeof(std::uint32_t)))return false;
-    const std::uint32_t type=*(const std::uint32_t*)((std::uintptr_t)object+0x14u);
+    if(!object||(object&1u)||!canRead(object,TysUnitStateLayout::OBJECT_VALIDATE_BYTES))return false;
+    const std::uint32_t type=*(const std::uint32_t*)((std::uintptr_t)object+TysUnitStateLayout::OBJECT_TYPE);
     if(type!=OBJECT_TYPE_UNIT&&type!=OBJECT_TYPE_PLAYER)return false;
-    const unsigned long long liveGuid=*(const unsigned long long*)((std::uintptr_t)object+0x30u);
+    const unsigned long long liveGuid=*(const unsigned long long*)((std::uintptr_t)object+TysUnitStateLayout::OBJECT_GUID_LOW);
     if(liveGuid!=guid)return false;
     *out=object;return true;
 }
@@ -150,41 +140,56 @@ static bool reconcileEntry(Entry&e){
         return false;
     }
 
-    const std::uint32_t attr=*(const std::uint32_t*)((std::uintptr_t)object+OFF_OBJECT_FIELDS);
-    if(!attr){
-        // Explicit US1-R2 rule: a transient empty UnitFields pointer is not
-        // authoritative enough to erase the previous snapshot.
-        ++g_descriptorEmptyPreserves;e.dirty=false;return true;
+    const std::uint32_t descriptor=*(const std::uint32_t*)((std::uintptr_t)object+TysUnitStateLayout::OBJECT_DESCRIPTOR_PTR);
+    if(!descriptor){
+        ++g_descriptorEmptyPreserves;
+        e.dirty=false;
+        return e.valid;
     }
-    // One descriptor-range validation per snapshot, then direct reads inside it.
-    if((attr&3u)!=0u||!canRead(attr,OFF_UNIT_FLAGS+sizeof(std::uint32_t))){++g_descriptorFailures;e.dirty=false;return false;}
+    if((descriptor&3u)!=0u||!canRead((std::uintptr_t)descriptor+TysUnitStateLayout::DESC_RANGE_START,TysUnitStateLayout::DESC_RANGE_BYTES)){
+        ++g_descriptorFailures;e.dirty=false;return false;
+    }
 
-    const std::uint32_t health=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_HEALTH);
-    const std::uint32_t maxHealth=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_MAXHEALTH);
-    const std::uint32_t flags=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_UNIT_FLAGS);
-    const std::uint8_t powerType=*(const std::uint8_t*)((std::uintptr_t)attr+OFF_POWER_TYPE_BYTE);
+    const std::uint32_t health=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::DESC_HEALTH);
+    const std::uint32_t maxHealth=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::DESC_MAX_HEALTH);
+    const std::uint32_t flags=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::DESC_UNIT_FLAGS);
+    const std::uint32_t dynamicFlags=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::DESC_DYNAMIC_FLAGS);
+    const std::uint32_t packedPowerType=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::DESC_POWER_TYPE_PACKED);
+    const std::uint32_t powerType=TysUnitStateLayout::powerTypeFromPacked(packedPowerType);
     if(powerType>MAX_POWER_TYPE){++g_descriptorFailures;e.dirty=false;return false;}
-    const std::uint32_t power=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_POWER1+(std::uint32_t)powerType*4u);
-    const std::uint32_t maxPower=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_MAXPOWER1+(std::uint32_t)powerType*4u);
+    const std::uint32_t power=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::powerOffset(powerType));
+    const std::uint32_t maxPower=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::maxPowerOffset(powerType));
+    const bool combat=TysUnitStateLayout::inCombat(flags);
+    const bool dead=TysUnitStateLayout::dead(health,dynamicFlags);
 
     const bool had=e.valid;
     const bool hadPower=e.powerValid;
     const unsigned long oldHealth=e.health,oldMaxHealth=e.maxHealth,oldCombat=e.combatFlag;
     const unsigned long oldPowerType=e.powerType,oldPower=e.power,oldMaxPower=e.maxPower;
+    const bool oldDead=e.dead;
 
-    e.health=health;e.maxHealth=maxHealth;e.combatFlag=(flags&UNIT_FLAG_IN_COMBAT)?1u:0u;
+    e.health=health;e.maxHealth=maxHealth;e.dead=dead;e.combatFlag=combat?1u:0u;
     e.powerType=powerType;e.power=power;e.maxPower=maxPower;e.powerValid=true;
     e.capturedAtMs=GetTickCount();e.valid=true;e.dirty=false;++g_descriptorReconciles;
 
     unsigned long changedMask=0;
-    if(had&&(oldHealth!=e.health||oldMaxHealth!=e.maxHealth)){++g_healthEvents;changedMask|=0x08u;}
-    if(had&&oldCombat!=e.combatFlag){++g_combatEvents;changedMask|=0x10u;}
+    if(had&&(oldHealth!=e.health||oldMaxHealth!=e.maxHealth||oldDead!=e.dead)){
+        if(TysCustomEvents::emitUnitHealth(e.guid,oldHealth,e.health,e.maxHealth,e.dead))++g_healthEvents;
+        changedMask|=0x08u;
+    }
+    if(had&&oldCombat!=e.combatFlag){
+        if(TysCustomEvents::emitUnitCombat(e.guid,oldCombat!=0,e.combatFlag!=0))++g_combatEvents;
+        changedMask|=0x10u;
+    }
     if(had&&hadPower){
         unsigned long powerMask=0;
-        if(oldPowerType!=e.powerType)powerMask|=0x01u;
-        if(oldPower!=e.power)powerMask|=0x02u;
-        if(oldMaxPower!=e.maxPower)powerMask|=0x04u;
-        if(powerMask){++g_powerEvents;changedMask|=powerMask;}
+        if(oldPowerType!=e.powerType)powerMask|=TysUnitStateLayout::POWER_TYPE_CHANGED;
+        if(oldPower!=e.power)powerMask|=TysUnitStateLayout::POWER_VALUE_CHANGED;
+        if(oldMaxPower!=e.maxPower)powerMask|=TysUnitStateLayout::POWER_MAX_CHANGED;
+        if(powerMask){
+            if(TysCustomEvents::emitUnitPower(e.guid,e.powerType,oldPower,e.power,e.maxPower,powerMask))++g_powerEvents;
+            changedMask|=powerMask;
+        }
     }
     if(changedMask){g_lastChangedGuid=e.guid;g_lastChangedMask=changedMask;}
     return true;
@@ -199,7 +204,7 @@ static void onTick(){
 static int pushEntry(Lua50::State L,const Entry&e){
     Lua50::NewTable(L);pushGuid(L,"guid",e.guid);setNum(L,"guidLow",(unsigned long)e.guid);setNum(L,"guidHigh",(unsigned long)(e.guid>>32));
     setBool(L,"tracked",e.used);setBool(L,"visible",e.valid);setBool(L,"valid",e.valid);setBool(L,"dirty",e.dirty);
-    setNum(L,"health",e.health);setNum(L,"maxHealth",e.maxHealth);setBool(L,"dead",e.valid&&e.health==0);setBool(L,"combat",e.combatFlag!=0);setNum(L,"combatFlag",e.combatFlag);
+    setNum(L,"health",e.health);setNum(L,"maxHealth",e.maxHealth);setBool(L,"dead",e.valid&&e.dead);setBool(L,"combat",e.combatFlag!=0);setNum(L,"combatFlag",e.combatFlag);
     if(e.powerValid){setNum(L,"powerType",e.powerType);setNum(L,"power",e.power);setNum(L,"maxPower",e.maxPower);}
     else{Lua50::PushString(L,"powerType");Lua50::PushNil(L);Lua50::SetTable(L,-3);Lua50::PushString(L,"power");Lua50::PushNil(L);Lua50::SetTable(L,-3);Lua50::PushString(L,"maxPower");Lua50::PushNil(L);Lua50::SetTable(L,-3);}
     setNum(L,"capturedAtMs",e.capturedAtMs);return 1;
@@ -209,15 +214,15 @@ static int pushEntry(Lua50::State L,const Entry&e){
 
 bool initialize(){
     if(InterlockedCompareExchange(&g_init,1,0)!=0)return true;
-    bool a=TysNativeBus::subscribeIncoming(&onIncoming);bool b=TysNativeBus::subscribeWorldTick(&onTick);
+    bool a=TysNativeBus::subscribeIncoming(&onIncoming);bool b=TysNativeBus::subscribeWorldTick(&onTick);bool c=TysCustomEvents::ensureUnitStateEvents();
     InterlockedExchange(&g_inSub,a?1:0);InterlockedExchange(&g_tickSub,b?1:0);
-    const char*s=(a&&b)?"READY_TRACKED_UPDATEOBJECT_GATE_DESCRIPTOR_POWER_READ":"PARTIAL_TRACKED_UPDATEOBJECT_GATE";
+    const char*s=(a&&b&&c)?"READY_TRACKED_UPDATEOBJECT_GATE_DESCRIPTOR_RECONCILE":"PARTIAL_TRACKED_UPDATEOBJECT_GATE";
     unsigned i=0;for(;s[i]&&i+1<sizeof(g_status);++i)g_status[i]=s[i];g_status[i]=0;return a&&b;
 }
 const char* status(){return g_status;}
 
 int dispatchStatus(Lua50::State L){
-    initialize();Lua50::NewTable(L);setStr(L,"stage","US1-R2");setStr(L,"status",g_status);setBool(L,"incomingSubscribed",g_inSub!=0);setBool(L,"worldTickSubscribed",g_tickSub!=0);setBool(L,"customEventsReady",false);setNum(L,"capacity",MAX_TRACKED);
+    initialize();Lua50::NewTable(L);setStr(L,"stage","US1-R2");setStr(L,"status",g_status);setBool(L,"incomingSubscribed",g_inSub!=0);setBool(L,"worldTickSubscribed",g_tickSub!=0);setBool(L,"customEventsReady",TysCustomEvents::ensureUnitStateEvents());setNum(L,"capacity",MAX_TRACKED);
     unsigned tracked=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used)++tracked;setNum(L,"tracked",tracked);
     setNum(L,"fastGuidLookupAddress",FAST_GUID_LOOKUP);setNum(L,"updatePackets",g_updatePackets);setNum(L,"compressedUpdatePackets",g_compressedUpdatePackets);setNum(L,"dirtySignals",g_dirtySignals);setNum(L,"coalescedSignals",g_coalescedSignals);setNum(L,"reconcilePasses",g_reconcilePasses);setNum(L,"recordsChecked",g_recordsChecked);setNum(L,"objectUnavailable",g_objectUnavailable);setNum(L,"snapshotCalls",g_snapshotCalls);setNum(L,"untrackCalls",g_untrackCalls);setNum(L,"descriptorReconciles",g_descriptorReconciles);setNum(L,"descriptorFailures",g_descriptorFailures);setNum(L,"descriptorClears",g_descriptorClears);setNum(L,"descriptorEmptyPreserves",g_descriptorEmptyPreserves);setNum(L,"descriptorUnbinds",g_descriptorUnbinds);setNum(L,"healthEvents",g_healthEvents);setNum(L,"powerEvents",g_powerEvents);setNum(L,"combatEvents",g_combatEvents);
     if(g_lastChangedGuid)pushGuid(L,"lastChangedGuid",g_lastChangedGuid);else{Lua50::PushString(L,"lastChangedGuid");Lua50::PushNil(L);Lua50::SetTable(L,-3);}setNum(L,"lastChangedMask",g_lastChangedMask);
