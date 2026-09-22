@@ -1,0 +1,75 @@
+name: Recovery Build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'recovered/**'
+      - 'recovery/archive.parts/**'
+      - '.github/workflows/recovery-build.yml'
+
+jobs:
+  build-api37:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install LLVM tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld xz-utils
+          command -v clang-cl
+          command -v lld-link
+
+      - name: Reconstruct recovery source archive
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat recovery/archive.parts/api37-source.part*.b64 | tr -d '\r\n' | base64 -d > /tmp/api37-source.xz
+          file /tmp/api37-source.xz
+          mkdir -p /tmp/api37-source
+          xz -dc /tmp/api37-source.xz > /tmp/api37-source.payload
+          file /tmp/api37-source.payload
+          if tar -tf /tmp/api37-source.payload >/dev/null 2>&1; then
+            tar -xf /tmp/api37-source.payload -C /tmp/api37-source
+          else
+            echo 'Decoded payload is not a tar archive'
+            exit 1
+          fi
+          find /tmp/api37-source -maxdepth 3 -type f | sort | head -200
+
+      - name: Build recovered DLL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BUILD_SH="$(find /tmp/api37-source -type f -path '*/build/build.sh' | head -n1)"
+          test -n "$BUILD_SH"
+          chmod +x "$BUILD_SH"
+          bash "$BUILD_SH"
+          ROOT="$(cd "$(dirname "$BUILD_SH")/.." && pwd)"
+          test -f "$ROOT/taiyangshendian.dll"
+          file "$ROOT/taiyangshendian.dll"
+          sha256sum "$ROOT/taiyangshendian.dll" | tee /tmp/SHA256.txt
+          cp "$ROOT/taiyangshendian.dll" /tmp/taiyangshendian-api37-recovered.dll
+
+      - name: Verify API contract strings
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DLL=/tmp/taiyangshendian-api37-recovered.dll
+          for s in \
+            'Foundation.Status' \
+            'Cooldown.Status' 'Cooldown.Get' 'Cooldown.List' \
+            'UnitState.Status' 'UnitState.Get' 'UnitState.Track' 'UnitState.Untrack' 'UnitState.List' 'UnitState.Clear' \
+            'Spatial.Status' 'Spatial.Get' 'Unit.Distance' 'Unit.Behind'; do
+            strings "$DLL" | grep -Fx "$s"
+          done
+
+      - name: Upload recovered DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: taiyangshendian-api37-recovered
+          path: |
+            /tmp/taiyangshendian-api37-recovered.dll
+            /tmp/SHA256.txt
