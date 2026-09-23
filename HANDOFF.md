@@ -4,7 +4,7 @@
 
 `recovery/unitstate-us1r2-exact`
 
-This branch is the current work area for exact API36 UnitState recovery. Do not merge to main until source integration/build verification is complete.
+This branch is the current work area for API34-37 behavior-equivalent recovery. Do not merge to main until the full latest UnitState + Cooldown + Spatial source is compiled together and regression-checked.
 
 ## Baseline
 
@@ -27,17 +27,24 @@ The last source-authentic handoff is `TaiYangShenDian_ARX1_API33_DW1_LOS1_HANDOF
 
 ### Cooldown CD1-R2
 
-Recovered/confirmed:
+Recovered/confirmed and now integrated into `cooldown_core.cpp`:
 
 - engine query `0x006E2EA0`
-- uint32 wrap-safe clock/deadline behavior
+- unsigned 32-bit wrap-safe clock/deadline behavior
 - CLEAR single-spell reset and CHEAT all-cooldown reset semantics
 - kind mapping: NONE/GCD/SPELL/UNKNOWN
 - source mapping 1..7
 - STARTED/CHANGED/READY transition state machine
-- API33-derived dynamic custom event bridge
+- packet-source-preserving dirty reconciliation
+- SpellRec recovery fields at `+0x4C`, `+0x50`, `+0x274`, `+0x278`
+- API33-derived dynamic custom event bridge for `TYS_COOLDOWN_*`
+- CLEAR/CHEAT ready and SPELL->GCD diagnostic counters
 
-Runtime verification is still pending.
+Compile-test status: no-STL/no-default-lib build succeeded on the recovered source base. SHA256 `828e7c683ad6c623c37f1b38a95fc5dd74e0242bc7946af13254dad863fa3907`.
+
+This is a Cooldown integration compile test, not yet the final all-latest API37 build. Runtime verification is still pending.
+
+Turtle/Tortoise 1.18.1 source is used only to cross-check server/protocol semantics where useful. It confirms separate `RemoveSpellCooldown` and `RemoveAllSpellCooldown` server paths; final DLL disassembly remains authoritative for client behavior.
 
 ### UnitState US1-R2
 
@@ -63,27 +70,36 @@ Confirmed public event payloads:
 
 `lastChangedMask` is category-level: bit0 HEALTH, bit1 POWER, bit2 COMBAT.
 
-`worldGeneration` lives at `0x100595F4` and advances on `PLAYER_LEAVING_WORLD` reset, not per UPDATE_OBJECT.
+`worldGeneration` lives at `0x100595F4` and advances on the existing `PLAYER_LEAVING_WORLD` lifecycle funnel, not per UPDATE_OBJECT. The recovered source now calls `TysUnitStateCore::onWorldLeaving()` from that existing funnel; no new hook was added.
 
 Important correction: final `UnitState.Status` does **not** expose `descriptorClears`, `descriptorEmptyPreserves`, `descriptorReconciles`, or `descriptorUnbinds`. See `recovery/API36_UNITSTATE_STATUS_EXACT.md`.
 
 ### Spatial S5-R1F1
 
-Range core and rear-axis client geometry have been reconstructed from historical source + final DLL/plugin evidence. Do not encode the experimental ~105° Backstab observation as a global threshold; that test was incomplete and special-target-specific.
+Range core and rear-axis client geometry have been reconstructed from historical source + final DLL/plugin evidence. The next code task is to move the latest Spatial implementation into the same compile-verified no-STL overlay and compile it with latest UnitState + Cooldown.
+
+Do not encode the experimental ~105° Backstab observation as a global threshold; that test was incomplete and special-target-specific.
 
 ## Build/CI
 
-The previous recovered DLL build predates the latest exact-source edits. Current source is not yet rebuilt because the repository CI reconstruction archive remains incomplete/truncated. Do not represent the old recovery DLL as containing the latest UnitState/Cooldown changes.
+Known stage builds:
+
+- exact UnitState overlay interim build SHA256: `d44302b3227c5a13ae9132db4d1b080512dede81820f32a60aeb0782f4c92099`
+- exact Cooldown integration compile-test SHA256: `828e7c683ad6c623c37f1b38a95fc5dd74e0242bc7946af13254dad863fa3907`
+
+Neither is the final all-latest API37 build. A combined build with latest UnitState + Cooldown + Spatial is still required.
+
+GitHub CI remains blocked by the incomplete/truncated `recovery/archive.parts` reconstruction input. Local compile tests are currently the reliable build-validation path.
 
 ## Evidence priority
 
 1. final target DLL disassembly
-2. user's historical GitHub/source handoffs
+2. user's historical GitHub/source handoffs and branches
 3. Aug 25-31 diagnostic plugins
 4. Turtle/Tortoise 1.18.1 server source for protocol/server semantics
 5. ClassicAPI/SuperWoW/Nampower for 1.12 client internals
 
-External reference code must not override behavior that is directly confirmed by the final DLL.
+External reference code must not override behavior directly confirmed by the final DLL.
 
 ## Project maintenance rule
 
