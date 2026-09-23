@@ -2,42 +2,41 @@
 
 ## Active blockers
 
-### 1. Exact UnitState selector helper is not fully reproduced
+### 1. `UNIT_RESOLVER_UNAVAILABLE` ownership remains unresolved
 
-Final DLL evidence points to a selector helper around client resolver `0x00515940`, with explicit handling for `player`, `target`, `mouseover`, `pet`, `partyN`, `raidN` and distinct error paths such as `RESOLVE_UNIT_UNAVAILABLE`, `UNIT_NOT_FOUND`, `GUID_INVALID`, and `BAD_SELECTOR`.
+The target contains this string, but a raw image scan found no direct absolute address xref to the string start or to any suffix position. Its owning handler is therefore still unproven. Do not add it speculatively.
 
-Current recovery still uses the older/simpler token resolver path. This is the main known public-behavior gap after the UnitState.Get/Track/Untrack/Clear surface alignment.
-
-### 2. `UNIT_RESOLVER_UNAVAILABLE` ownership remains unresolved
-
-The target contains this string, but its owning handler/xref has not yet been proven. Do not add it speculatively merely to close a string difference.
-
-### 3. Remaining binary-size delta
+### 2. Remaining binary-size/code delta
 
 - target: `380928` bytes
-- current exact-surface candidate: `373760` bytes
-- delta: `7168` bytes
+- current candidate: `374272` bytes
+- delta: `6656` bytes
+- target `.text`: `0x489c0`
+- recovery `.text`: `0x47148`
+- target `.rdata`: `0xa4fb`
+- recovery `.rdata`: `0xa4ef`
 
-The strict callable API set already matches `118/118` and the broad dotted-string set matches `129/129`; the remaining size difference must be investigated as possible implementation/detail differences, not padded.
+The strict callable API set matches `118/118` and broad dotted strings match `129/129`. Exact build id is now restored. Remaining work is implementation/code fidelity, not API discovery or string padding.
 
-### 4. GitHub Actions source reconstruction remains broken
+API36→API37 stage comparison shows target Spatial introduction increases `.text` by approximately the same magnitude as the remaining recovery `.text` gap. Continue disassembling/recovering real Spatial/wrapper behavior; never pad.
 
-`recovery/archive.parts` is incomplete/truncated, so the current workflow cannot reproduce the local source base. Local clang-cl/lld-link builds are the authoritative compile validation for now.
+### 3. GitHub Actions source reconstruction remains broken
 
-### 5. Runtime verification remains pending
+`recovery/archive.parts` is incomplete/truncated, so the current workflow cannot reproduce the local source base. Local clang-cl/lld-link builds are authoritative for compile validation.
 
-The exact-surface candidate has not yet been tested in a live WoW/Turtle client. Cooldown event ordering/coalescing, UnitState selector/lifecycle/event timing and Spatial wrapper return behavior still require real-client regression.
+### 4. Runtime verification remains pending
+
+The current candidate has not yet been tested in a live WoW/Turtle client. Cooldown event ordering/coalescing, UnitState selector/lifecycle/event timing and Spatial wrapper return behavior still require real-client regression.
 
 ## Resolved / reduced issues
 
+- Exact UnitState selector helper is integrated and locally compile-verified.
 - Latest Cooldown + UnitState + Spatial compile simultaneously.
 - Strict callable API regression: target `118`, recovery `118`, missing `0`, extra `0`.
 - Broad dotted strings: target `129`, recovery `129`, missing `0`, extra `0`.
-- UnitState.Get no longer incorrectly requires Track and now exposes the final public table shape.
-- UnitState.Untrack/Clear return semantics aligned to final DLL.
-- Cooldown success status and UnitState success status aligned to final DLL.
-- Cooldown and UnitState both use the existing PLAYER_LEAVING_WORLD lifecycle funnel.
-- Current candidate SHA256 `6bd0239cd15e66486c47267f70ef9dc6f31cc70b6878e12f08ffa49cfaabb393`.
+- Exact final API37 build id restored through the overlay.
+- Meaningful `.rdata` delta reduced from `0x50` to `0x0c`.
+- Current candidate SHA256 `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`.
 
 ## Non-blocking cautions
 
