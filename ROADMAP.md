@@ -3,30 +3,29 @@
 ## Current recovery baseline
 
 - [x] API33 source-authentic baseline recovered and exact rebuild proven.
-- [x] API34 Foundation F1 public contract/counters substantially disassembly-confirmed.
-- [x] API35 Cooldown CD1-R2 classifier/source/STARTED-CHANGED-READY logic integrated and compile-tested.
-- [x] API36 UnitState US1-R2 descriptor/status/lifecycle/event behavior integrated and compile-tested.
-- [x] API37 Spatial S5-R1F1 range/reach/rear-axis behavior converted to the no-STL/no-default-lib toolchain and compile-tested.
-- [x] Latest UnitState + Cooldown + Spatial build together successfully.
-- [x] Strict callable API regression matches the final target: `118` vs `118`, missing `0`, extra `0`.
-- [x] Broad dotted-string regression matches the final target: `129` vs `129`, missing `0`, extra `0`.
-- [x] UnitState.Get public table aligned to final DLL (`visible/fieldsValid/tracked/initialized`, flags, active power, power1..5/maxPower1..5, code).
-- [x] UnitState.Untrack idempotent `NOT_TRACKED` and UnitState.Clear `true,"CLEARED"` returns aligned.
-- [x] Cooldown success status aligned to `READY_NATIVEBUS_ENGINE_QUERY`; UnitState success status aligned to `READY_TRACKED_UPDATEOBJECT_GATE`.
-- [x] Cooldown and UnitState now both reset through the existing `PLAYER_LEAVING_WORLD` lifecycle funnel.
-- [x] Current exact-surface local candidate: SHA256 `6bd0239cd15e66486c47267f70ef9dc6f31cc70b6878e12f08ffa49cfaabb393`, size `373760` bytes.
+- [x] API34 Foundation F1 substantially disassembly-confirmed.
+- [x] API35 Cooldown CD1-R2 exact surface integrated and compile-tested.
+- [x] API36 UnitState US1-R2 descriptor/status/events/lifecycle integrated and compile-tested.
+- [x] API37 Spatial S5-R1F1 range/reach/rear-axis behavior integrated and compile-tested.
+- [x] Latest UnitState + Cooldown + Spatial compile together successfully.
+- [x] Strict callable API regression: target `118`, recovery `118`, missing `0`, extra `0`.
+- [x] Broad dotted-string regression: target `129`, recovery `129`, missing `0`, extra `0`.
+- [x] UnitState.Get/Untrack/Clear public surfaces aligned to final DLL.
+- [x] Cooldown and UnitState success statuses and world-leave lifecycle aligned.
+- [x] UnitState selector helper recovered from final DLL: case-insensitive player/target/mouseover/pet, party1..4, raid1..40 via client resolver `0x00515940`; GUID text has separate 64-bit hex path and exact resolver/not-found/invalid error branches.
+- [x] Current local candidate SHA256 `c97218fcf4c375d385cf088f6883c03c23fe974ae0fe7c302614b7f6609ddb05`, size `374272` bytes.
 
 ## Immediate next work
 
-- [ ] Recover the remaining exact unit-selector helper semantics around client resolver `0x00515940` (player/target/mouseover/pet/partyN/raidN and exact error codes).
-- [ ] Identify the owner/xref of remaining target string `UNIT_RESOLVER_UNAVAILABLE`; do not invent behavior.
-- [ ] Inspect the remaining target/recovery size delta (`380928` vs `373760`, delta `7168`) for real behavior; never pad.
-- [ ] Repair/replace truncated `recovery/archive.parts` so GitHub Actions reproduces the current local build.
+- [ ] Identify the owner/xref of target string `UNIT_RESOLVER_UNAVAILABLE`; do not add it speculatively.
+- [ ] Inspect remaining PE delta: target `380928` vs recovery `374272` = `6656` bytes. Current section deltas are primarily `.text` (`0x489c0` vs `0x47148`), then `.reloc`; `.rdata` is already within `0x50` bytes.
+- [ ] Continue recovering actual implementation differences rather than padding.
+- [ ] Repair truncated `recovery/archive.parts` so GitHub Actions reproduces the local build.
 
 ## Runtime validation
 
-- [ ] Real-machine Foundation.Status comparison.
-- [ ] Real-machine Cooldown STARTED/CHANGED/READY, CLEAR/CHEAT, deadline and world-leave regression.
-- [ ] Real-machine UnitState Get/Track/Untrack/Clear/events/world-leave/re-enter regression.
-- [ ] Real-machine Spatial.Get / Unit.Distance / Unit.Behind return-shape regression.
-- [ ] Keep S5-R2 ~105° only as unfinished experimental observation; it is not a confirmed threshold and must not enter Spatial core.
+- [ ] Foundation.Status comparison.
+- [ ] Cooldown events/reset/deadline/world-leave regression.
+- [ ] UnitState selector/Get/Track/Untrack/Clear/events/world-leave regression.
+- [ ] Spatial.Get / Unit.Distance / Unit.Behind regression.
+- [ ] S5-R2 ~105° remains unfinished experimental observation only; never encode it as a threshold.
