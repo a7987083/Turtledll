@@ -28,13 +28,24 @@ def main() -> None:
     if not target_src.is_dir() or not build.is_file() or not dllmain.is_file():
         die(f"invalid recovery source root: {root}")
 
+    # Only copy modules that have been compiled against the no-CRT/no-MSVC-STL
+    # recovery toolchain. Cooldown/Spatial are added to this list after their
+    # newer reconstructed implementations pass the same compile gate.
+    names = [
+        "custom_event_bridge.h",
+        "custom_event_bridge.cpp",
+        "unit_state_descriptor_layout.h",
+        "unit_state_lifecycle.h",
+        "unit_state_core.h",
+        "unit_state_core.cpp",
+    ]
     copied = []
-    for src in sorted(source_overlay.iterdir()):
+    for name in names:
+        src = source_overlay / name
         if not src.is_file():
-            continue
-        dst = target_src / src.name
-        shutil.copy2(src, dst)
-        copied.append(src.name)
+            die(f"overlay source missing: {src}")
+        shutil.copy2(src, target_src / name)
+        copied.append(name)
 
     b = build.read_text()
     b = replace_once(
