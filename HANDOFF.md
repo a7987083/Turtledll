@@ -13,11 +13,12 @@ API33 is the last source-authentic baseline. API34-37 is behavior-equivalent rec
 
 ## Current local candidate
 
-- SHA256 `c97218fcf4c375d385cf088f6883c03c23fe974ae0fe7c302614b7f6609ddb05`
+- SHA256 `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`
 - size `374272`
 - remaining file-size delta `6656`
 - callable APIs `118/118`, missing `0`, extra `0`
 - broad dotted strings `129/129`, missing `0`, extra `0`
+- exact final build id restored
 - runtime verified: no
 
 ## Current module state
@@ -30,16 +31,9 @@ Engine query `0x006E2EA0`, uint32 timing, kind/source, STARTED/CHANGED/READY, re
 
 Descriptor/status/events/lifecycle and public Get/Track/Untrack/Clear surfaces are integrated. Successful init status is `READY_TRACKED_UPDATEOBJECT_GATE`.
 
-Final selector helper has now been recovered from `0x100466AF`:
+Final selector helper recovered from `0x100466AF`: case-insensitive `player`, `target`, `mouseover`, `pet`, `party1..4`, `raid1..40`; recognized tokens use client resolver `0x00515940`; non-token input follows optional-`0x`, max-16-hex-digit GUID parsing.
 
-- case-insensitive `player`, `target`, `mouseover`, `pet`
-- `party1..4`
-- `raid1..40`
-- recognized tokens call client resolver `0x00515940` and read GUID from object `+0x30/+0x34`
-- errors: `RESOLVE_UNIT_UNAVAILABLE`, `UNIT_NOT_FOUND`
-- non-token input follows optional-`0x`, max-16-hex-digit GUID parsing; invalid input -> `GUID_INVALID`
-
-This selector behavior is compile-verified locally. `UNIT_RESOLVER_UNAVAILABLE` is still present in the target but its owning API/handler has not been proven; do not invent an association.
+`UNIT_RESOLVER_UNAVAILABLE` remains unowned. A raw image scan found no direct absolute address reference to the string or to any suffix position. Do not assign it to an API unless a different reference form is proven.
 
 ### Spatial S5-R1F1
 
@@ -47,14 +41,12 @@ Historical range/reach formulas and final rear-axis dot behavior are integrated.
 
 ## Remaining binary delta
 
-Target vs recovery sections now show the remaining difference is mainly code:
-
 - target `.text` `0x489c0`; recovery `.text` `0x47148`
-- target `.rdata` `0xa4fb`; recovery `.rdata` `0xa4ab`
+- target `.rdata` `0xa4fb`; recovery `.rdata` `0xa4ef`
 - target `.data` `0x4c00`; recovery `.data` `0x4c00`
 - target `.reloc` `0x4fb0`; recovery `.reloc` `0x4df0`
 
-Continue looking for real implementation differences; never pad.
+The remaining gap is overwhelmingly code. API36→API37 stage comparison indicates the magnitude closely tracks the original Spatial module addition, so continue exact Spatial/wrapper recovery rather than padding.
 
 ## CI / runtime
 
