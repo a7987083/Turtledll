@@ -28,16 +28,21 @@ def main() -> None:
     if not target_src.is_dir() or not build.is_file() or not dllmain.is_file():
         die(f"invalid recovery source root: {root}")
 
-    # Only copy modules that have been compiled against the no-CRT/no-MSVC-STL
-    # recovery toolchain. Cooldown/Spatial are added to this list after their
-    # newer reconstructed implementations pass the same compile gate.
+    # Every file in this list has passed the same i686 clang-cl no-STL /
+    # no-default-lib compile gate used by the recovered API37 tree.
     names = [
         "custom_event_bridge.h",
         "custom_event_bridge.cpp",
+        "cooldown_classifier.h",
+        "cooldown_transition.h",
+        "cooldown_core.h",
+        "cooldown_core.cpp",
         "unit_state_descriptor_layout.h",
         "unit_state_lifecycle.h",
         "unit_state_core.h",
         "unit_state_core.cpp",
+        "spatial_core.h",
+        "spatial_core.cpp",
     ]
     copied = []
     for name in names:
