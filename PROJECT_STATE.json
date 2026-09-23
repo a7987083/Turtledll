@@ -16,45 +16,64 @@
     "known_callable_api_count": 118,
     "broad_dotted_string_count": 129
   },
-  "combined_build": {
+  "current_candidate": {
     "succeeded": true,
-    "sha256": "86f2c854770225bb8e3223f30cdde59bf7b1df3411a52b04e954eb5111b55998",
-    "size_bytes": 371200,
-    "size_delta_to_target": 9728,
-    "pe": "PE32 i386 Windows 5.01",
-    "includes_latest": ["Cooldown_CD1R2", "UnitState_US1R2", "Spatial_S5R1F1"],
-    "critical_api_event_strings_ok": true,
+    "sha256": "6bd0239cd15e66486c47267f70ef9dc6f31cc70b6878e12f08ffa49cfaabb393",
+    "size_bytes": 373760,
+    "size_delta_to_target": 7168,
+    "strict_callable_api": {"recovery": 118, "target": 118, "missing": 0, "extra": 0},
     "broad_dotted_strings": {"recovery": 129, "target": 129, "missing": 0, "extra": 0},
-    "strict_callable_api_118_regression_pending": true,
+    "includes_latest": ["Cooldown_CD1R2", "UnitState_US1R2", "Spatial_S5R1F1"],
     "runtime_verified": false
   },
   "modules": {
     "Foundation_F1": {"status": "substantially-disassembly-confirmed", "runtime_verified": false},
-    "Cooldown_CD1R2": {"status": "integrated-compile-verified", "runtime_verified": false},
-    "UnitState_US1R2": {"status": "integrated-compile-verified", "runtime_verified": false},
-    "Spatial_S5R1F1": {"status": "integrated-compile-verified", "runtime_verified": false, "experimental_105_degree_note": "unfinished observation only; not implemented as a threshold"}
+    "Cooldown_CD1R2": {
+      "status": "exact-surface-integrated-compile-verified",
+      "success_status": "READY_NATIVEBUS_ENGINE_QUERY",
+      "engine_query": "0x006E2EA0",
+      "world_leave_reset": true,
+      "runtime_verified": false
+    },
+    "UnitState_US1R2": {
+      "status": "exact-public-surface-integrated-compile-verified",
+      "success_status": "READY_TRACKED_UPDATEOBJECT_GATE",
+      "fast_guid_lookup": "0x00464870",
+      "capacity": 128,
+      "get_requires_track": false,
+      "untrack_not_tracked_is_success": true,
+      "clear_returns": [true, "CLEARED"],
+      "world_leave_reset": true,
+      "runtime_verified": false
+    },
+    "Spatial_S5R1F1": {
+      "status": "integrated-compile-verified",
+      "facing_semantics": "rearDot=-forwardDot; rearDot>0 behind",
+      "experimental_105_degree_note": "unfinished observation only; no threshold implemented",
+      "runtime_verified": false
+    }
   },
-  "build_notes": {
-    "resolved_error": "clang-cl rejected single-line MS x87 inline assembly in local Spatial transcription; restored multiline __asm blocks for fsqrt/fsincos",
-    "overlay_script_updated": true,
-    "overlay_now_copies": ["custom_event_bridge", "cooldown_classifier", "cooldown_transition", "cooldown_core", "unit_state_descriptor_layout", "unit_state_lifecycle", "unit_state_core", "spatial_core"]
-  },
+  "remaining_behavior_gaps": [
+    "exact UnitState selector helper semantics around client resolver 0x00515940",
+    "xref/owner for target string UNIT_RESOLVER_UNAVAILABLE",
+    "investigate remaining 7168-byte target/recovery delta without padding"
+  ],
   "ci": {
     "workflow": "Recovery Build",
-    "blocker": "recovery/archive.parts remains incomplete/truncated; CI cannot yet reconstruct the source base"
+    "blocker": "recovery/archive.parts remains incomplete/truncated; local build is authoritative"
   },
   "evidence_priority": [
     "final target DLL disassembly",
     "historical project branches/source handoffs",
     "Aug 25-31 diagnostic plugins",
-    "Turtle/Tortoise 1.18.1 protocol/server-semantics cross-check",
+    "Turtle/Tortoise 1.18.1 protocol/server semantics only",
     "other 1.12 client references"
   ],
   "next_actions": [
-    "strict callable API regression against count 118",
-    "inspect 9728-byte code/section delta without padding",
-    "repair CI source reconstruction",
-    "package combined candidate DLL",
-    "live runtime regression"
+    "recover exact unit selector helper",
+    "xref UNIT_RESOLVER_UNAVAILABLE",
+    "inspect remaining binary delta",
+    "repair CI reconstruction",
+    "perform live runtime regression"
   ]
 }
