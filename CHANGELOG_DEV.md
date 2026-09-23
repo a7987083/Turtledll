@@ -2,6 +2,18 @@
 
 ## 2026-09-23
 
+### Cooldown CD1-R2 exact integration
+
+- Integrated the previously disassembly-confirmed kind/source classifier and STARTED/CHANGED/READY transition state machine into `recovered/api37-s5r1f1/src/cooldown_core.cpp`.
+- Added source-preserving dirty reconciliation: packet causes 1..5 are not overwritten by later deadline/explicit rechecks.
+- Added local-player filtering for `SMSG_SPELL_GO`, `SMSG_SPELL_COOLDOWN`, `SMSG_COOLDOWN_EVENT`, `SMSG_CLEAR_COOLDOWN`, and `SMSG_COOLDOWN_CHEAT`.
+- Restored SpellRec-based classification fields using the existing client Spell DB view: RecoveryTime `+0x4C`, CategoryRecoveryTime `+0x50`, StartRecoveryCategory `+0x274`, StartRecoveryTime `+0x278`.
+- Wired `TYS_COOLDOWN_STARTED`, `TYS_COOLDOWN_CHANGED`, and `TYS_COOLDOWN_READY` through the recovered API33 FrameScript custom-event bridge.
+- Restored CLEAR/CHEAT diagnostic transitions including ready and SPELL->GCD counters.
+- Converted `cooldown_classifier.h`, `cooldown_transition.h`, and the integrated Cooldown core to the existing no-STL/no-default-lib recovery toolchain.
+- Local compile test succeeded. Compile-test DLL SHA256: `828e7c683ad6c623c37f1b38a95fc5dd74e0242bc7946af13254dad863fa3907`.
+- Cross-checked server-side reset semantics against `tortoise-wow/tortoise-wow` 1.18.1 source: the server distinguishes `RemoveSpellCooldown` from `RemoveAllSpellCooldown`; this is supporting protocol evidence only, not a replacement for final DLL behavior.
+
 ### UnitState US1-R2 exact recovery
 
 - Created/continued branch `recovery/unitstate-us1r2-exact`.
@@ -29,7 +41,7 @@
 
 ### Maintenance
 
-- Established the required five-file maintenance set for this long-running recovery project:
+- Maintained the required five-file project state set:
   - ROADMAP.md
   - CHANGELOG_DEV.md
   - HANDOFF.md
