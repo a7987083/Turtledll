@@ -1,51 +1,18 @@
 #pragma once
-
 #include <windows.h>
-#include <cstdint>
-
 namespace TysCustomEvents {
-
 constexpr unsigned EVENT_COUNT_EXPANDED = 700u;
-
 bool available();
 int claim(const char* name);
 int find(const char* name);
-
 bool ensureUnitStateEvents();
-bool emitUnitHealth(unsigned long long guid,
-                    std::uint32_t oldHealth,
-                    std::uint32_t newHealth,
-                    std::uint32_t maxHealth,
-                    bool dead);
-bool emitUnitPower(unsigned long long guid,
-                   std::uint32_t powerType,
-                   std::uint32_t oldPower,
-                   std::uint32_t newPower,
-                   std::uint32_t maxPower,
-                   std::uint32_t changeMask);
-bool emitUnitCombat(unsigned long long guid,
-                    bool oldCombat,
-                    bool newCombat);
-
+bool emitUnitHealth(unsigned long long guid,unsigned long oldHealth,unsigned long newHealth,unsigned long maxHealth,bool dead);
+bool emitUnitPower(unsigned long long guid,unsigned long powerType,unsigned long oldPower,unsigned long newPower,unsigned long maxPower,unsigned long changeMask);
+bool emitUnitCombat(unsigned long long guid,bool oldCombat,bool newCombat);
 bool ensureCooldownEvents();
-bool emitCooldownStarted(std::uint32_t spellId, std::uint32_t startMs,
-                         std::uint32_t durationMs, std::uint32_t endMs,
-                         std::uint32_t remainingMs, std::uint32_t enable,
-                         std::uint32_t kind, std::uint32_t source);
-bool emitCooldownChanged(std::uint32_t spellId, std::uint32_t startMs,
-                         std::uint32_t durationMs, std::uint32_t endMs,
-                         std::uint32_t remainingMs, std::uint32_t enable,
-                         std::uint32_t kind, std::uint32_t source);
-bool emitCooldownReady(std::uint32_t spellId, std::uint32_t startMs,
-                       std::uint32_t durationMs, std::uint32_t endMs,
-                       std::uint32_t remainingMs, std::uint32_t enable,
-                       std::uint32_t kind, std::uint32_t source);
-
-int unitHealthSlot();
-int unitPowerSlot();
-int unitCombatSlot();
-int cooldownStartedSlot();
-int cooldownChangedSlot();
-int cooldownReadySlot();
-
+bool emitCooldownStarted(unsigned long spellId,unsigned long startMs,unsigned long durationMs,unsigned long endMs,unsigned long remainingMs,unsigned long enable,unsigned long kind,unsigned long source);
+bool emitCooldownChanged(unsigned long spellId,unsigned long startMs,unsigned long durationMs,unsigned long endMs,unsigned long remainingMs,unsigned long enable,unsigned long kind,unsigned long source);
+bool emitCooldownReady(unsigned long spellId,unsigned long startMs,unsigned long durationMs,unsigned long endMs,unsigned long remainingMs,unsigned long enable,unsigned long kind,unsigned long source);
+int unitHealthSlot();int unitPowerSlot();int unitCombatSlot();
+int cooldownStartedSlot();int cooldownChangedSlot();int cooldownReadySlot();
 } // namespace TysCustomEvents
