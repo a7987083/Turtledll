@@ -28,8 +28,6 @@ def main() -> None:
     if not target_src.is_dir() or not build.is_file() or not dllmain.is_file():
         die(f"invalid recovery source root: {root}")
 
-    # Every file in this list has passed the same i686 clang-cl no-STL /
-    # no-default-lib compile gate used by the recovered API37 tree.
     names = [
         "custom_event_bridge.h",
         "custom_event_bridge.cpp",
@@ -69,13 +67,30 @@ def main() -> None:
     build.write_text(b)
 
     d = dllmain.read_text()
-    d = replace_once(
-        d,
-        "        TysProfiler::onWorldLeaving(L);\n",
-        "        TysProfiler::onWorldLeaving(L);\n"
-        "        TysUnitStateCore::onWorldLeaving();\n",
-        "UnitState PLAYER_LEAVING_WORLD bridge",
-    )
+    if "TysCooldownCore::onWorldLeaving();" not in d:
+        if "        TysUnitStateCore::onWorldLeaving();\n" in d:
+            d = d.replace(
+                "        TysUnitStateCore::onWorldLeaving();\n",
+                "        TysCooldownCore::onWorldLeaving();\n"
+                "        TysUnitStateCore::onWorldLeaving();\n",
+                1,
+            )
+        else:
+            d = replace_once(
+                d,
+                "        TysProfiler::onWorldLeaving(L);\n",
+                "        TysProfiler::onWorldLeaving(L);\n"
+                "        TysCooldownCore::onWorldLeaving();\n"
+                "        TysUnitStateCore::onWorldLeaving();\n",
+                "Cooldown/UnitState PLAYER_LEAVING_WORLD bridge",
+            )
+    elif "TysUnitStateCore::onWorldLeaving();" not in d:
+        d = d.replace(
+            "        TysCooldownCore::onWorldLeaving();\n",
+            "        TysCooldownCore::onWorldLeaving();\n"
+            "        TysUnitStateCore::onWorldLeaving();\n",
+            1,
+        )
     dllmain.write_text(d)
 
     print("overlay copied:", ", ".join(copied))
