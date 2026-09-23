@@ -6,6 +6,7 @@
 #include "wow112_offsets.h"
 #include "custom_event_bridge.h"
 #include "unit_state_descriptor_layout.h"
+#include "unit_state_lifecycle.h"
 
 namespace TysUnitStateCore {
 namespace {
@@ -51,7 +52,6 @@ static bool readableProtection(DWORD protection){
     return p==PAGE_READONLY||p==PAGE_READWRITE||p==PAGE_WRITECOPY||
            p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY;
 }
-
 static bool canRead(std::uintptr_t address,std::size_t bytes){
     if(!address||!bytes)return false;
     MEMORY_BASIC_INFORMATION m={};
@@ -61,7 +61,6 @@ static bool canRead(std::uintptr_t address,std::size_t bytes){
     const std::uintptr_t end=begin+m.RegionSize;
     return address>=begin&&address<=end&&bytes<=end-address;
 }
-
 static bool executable(std::uintptr_t a){
     MEMORY_BASIC_INFORMATION m={};
     if(!a||VirtualQuery((const void*)a,&m,sizeof(m))!=sizeof(m)||m.State!=MEM_COMMIT||(m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;
@@ -70,7 +69,6 @@ static bool executable(std::uintptr_t a){
 }
 
 static bool hexNibble(char c,unsigned*o){if(c>='0'&&c<='9'){*o=(unsigned)(c-'0');return true;}if(c>='a'&&c<='f'){*o=(unsigned)(c-'a'+10);return true;}if(c>='A'&&c<='F'){*o=(unsigned)(c-'A'+10);return true;}return false;}
-
 static bool parseGuidText(const char*s,unsigned long long*out){
     if(!s||!out)return false;*out=0;
     while(*s==' '||*s=='\t'||*s=='\r'||*s=='\n')++s;
@@ -79,7 +77,6 @@ static bool parseGuidText(const char*s,unsigned long long*out){
     for(;*s&&digits<16;++s,++digits){unsigned n=0;if(!hexNibble(*s,&n))return false;v=(v<<4)|n;}
     if(*s||digits==0||v==0)return false;*out=v;return true;
 }
-
 static bool resolveGuid(Lua50::State L,int idx,unsigned long long*out){
     if(!out)return false;*out=0;
     if(Lua50::IsNumber(L,idx)){const double n=Lua50::ToNumber(L,idx);if(n<=0)return false;*out=(unsigned long long)n;return *out!=0;}
@@ -92,7 +89,6 @@ static bool resolveGuid(Lua50::State L,int idx,unsigned long long*out){
     }
     return parseGuidText(s,out);
 }
-
 static void formatGuid(char*b,std::size_t n,unsigned long long guid){
     if(!b||n<2)return;
 #if defined(_MSC_VER)
@@ -109,7 +105,6 @@ static Entry* track(unsigned long long guid,bool*isNew){
     for(unsigned i=0;i<MAX_TRACKED;++i)if(!g_entries[i].used){g_entries[i]=Entry{};g_entries[i].used=true;g_entries[i].dirty=true;g_entries[i].guid=guid;if(isNew)*isNew=true;return &g_entries[i];}
     return 0;
 }
-
 static void markDirtyAll(){
     for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used){if(g_entries[i].dirty)++g_coalescedSignals;else{g_entries[i].dirty=true;++g_dirtySignals;}}
 }
@@ -134,20 +129,24 @@ static bool reconcileEntry(Entry&e){
     ++g_recordsChecked;
     std::uint32_t object=0;
     if(!resolveObject(e.guid,&object)){
+        // Final DLL call site treats this as an authoritative no-live-object
+        // result, distinct from a descriptor/snapshot failure.
         ++g_objectUnavailable;
-        if(e.valid)++g_descriptorUnbinds;
         e.valid=false;e.powerValid=false;e.dirty=false;
         return false;
     }
 
     const std::uint32_t descriptor=*(const std::uint32_t*)((std::uintptr_t)object+TysUnitStateLayout::OBJECT_DESCRIPTOR_PTR);
     if(!descriptor){
-        ++g_descriptorEmptyPreserves;
+        // Final contract preserves the old authoritative cache when UnitFields
+        // is transiently absent. The exact diagnostic empty-preserve counter
+        // increment is intentionally not synthesized until its binary site is mapped.
+        ++g_descriptorFailures;
         e.dirty=false;
         return e.valid;
     }
     if((descriptor&3u)!=0u||!canRead((std::uintptr_t)descriptor+TysUnitStateLayout::DESC_RANGE_START,TysUnitStateLayout::DESC_RANGE_BYTES)){
-        ++g_descriptorFailures;e.dirty=false;return false;
+        ++g_descriptorFailures;e.dirty=false;return e.valid;
     }
 
     const std::uint32_t health=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::DESC_HEALTH);
@@ -156,7 +155,7 @@ static bool reconcileEntry(Entry&e){
     const std::uint32_t dynamicFlags=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::DESC_DYNAMIC_FLAGS);
     const std::uint32_t packedPowerType=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::DESC_POWER_TYPE_PACKED);
     const std::uint32_t powerType=TysUnitStateLayout::powerTypeFromPacked(packedPowerType);
-    if(powerType>MAX_POWER_TYPE){++g_descriptorFailures;e.dirty=false;return false;}
+    if(powerType>MAX_POWER_TYPE){++g_descriptorFailures;e.dirty=false;return e.valid;}
     const std::uint32_t power=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::powerOffset(powerType));
     const std::uint32_t maxPower=*(const std::uint32_t*)((std::uintptr_t)descriptor+TysUnitStateLayout::maxPowerOffset(powerType));
     const bool combat=TysUnitStateLayout::inCombat(flags);
@@ -175,11 +174,7 @@ static bool reconcileEntry(Entry&e){
     unsigned long changedMask=0;
     if(had&&(oldHealth!=e.health||oldMaxHealth!=e.maxHealth||oldDead!=e.dead)){
         if(TysCustomEvents::emitUnitHealth(e.guid,oldHealth,e.health,e.maxHealth,e.dead))++g_healthEvents;
-        changedMask|=0x08u;
-    }
-    if(had&&oldCombat!=e.combatFlag){
-        if(TysCustomEvents::emitUnitCombat(e.guid,oldCombat!=0,e.combatFlag!=0))++g_combatEvents;
-        changedMask|=0x10u;
+        changedMask|=TysUnitStateLifecycle::CHANGE_HEALTH;
     }
     if(had&&hadPower){
         unsigned long powerMask=0;
@@ -188,8 +183,12 @@ static bool reconcileEntry(Entry&e){
         if(oldMaxPower!=e.maxPower)powerMask|=TysUnitStateLayout::POWER_MAX_CHANGED;
         if(powerMask){
             if(TysCustomEvents::emitUnitPower(e.guid,e.powerType,oldPower,e.power,e.maxPower,powerMask))++g_powerEvents;
-            changedMask|=powerMask;
+            changedMask|=TysUnitStateLifecycle::CHANGE_POWER;
         }
+    }
+    if(had&&oldCombat!=e.combatFlag){
+        if(TysCustomEvents::emitUnitCombat(e.guid,oldCombat!=0,e.combatFlag!=0))++g_combatEvents;
+        changedMask|=TysUnitStateLifecycle::CHANGE_COMBAT;
     }
     if(changedMask){g_lastChangedGuid=e.guid;g_lastChangedMask=changedMask;}
     return true;
@@ -226,7 +225,7 @@ int dispatchStatus(Lua50::State L){
     unsigned tracked=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used)++tracked;setNum(L,"tracked",tracked);
     setNum(L,"fastGuidLookupAddress",FAST_GUID_LOOKUP);setNum(L,"updatePackets",g_updatePackets);setNum(L,"compressedUpdatePackets",g_compressedUpdatePackets);setNum(L,"dirtySignals",g_dirtySignals);setNum(L,"coalescedSignals",g_coalescedSignals);setNum(L,"reconcilePasses",g_reconcilePasses);setNum(L,"recordsChecked",g_recordsChecked);setNum(L,"objectUnavailable",g_objectUnavailable);setNum(L,"snapshotCalls",g_snapshotCalls);setNum(L,"untrackCalls",g_untrackCalls);setNum(L,"descriptorReconciles",g_descriptorReconciles);setNum(L,"descriptorFailures",g_descriptorFailures);setNum(L,"descriptorClears",g_descriptorClears);setNum(L,"descriptorEmptyPreserves",g_descriptorEmptyPreserves);setNum(L,"descriptorUnbinds",g_descriptorUnbinds);setNum(L,"healthEvents",g_healthEvents);setNum(L,"powerEvents",g_powerEvents);setNum(L,"combatEvents",g_combatEvents);
     if(g_lastChangedGuid)pushGuid(L,"lastChangedGuid",g_lastChangedGuid);else{Lua50::PushString(L,"lastChangedGuid");Lua50::PushNil(L);Lua50::SetTable(L,-3);}setNum(L,"lastChangedMask",g_lastChangedMask);
-    setStr(L,"powerSemantics","ACTIVE_POWER_ONLY_TYPE_VALUE_MAX");setStr(L,"powerMaskSemantics","BIT0_TYPE_BIT1_VALUE_BIT2_MAX");setStr(L,"descriptorReadPolicy","ONE_OBJECT_RANGE_PLUS_ONE_DESCRIPTOR_RANGE_PER_SNAPSHOT");setStr(L,"descriptorPolicy","UNITFIELDS_PRESENCE_AUTHORITY; EMPTY_DESCRIPTOR_PRESERVES_CACHE");
+    setStr(L,"lastChangedMaskSemantics","BIT0_HEALTH_BIT1_POWER_BIT2_COMBAT");setStr(L,"powerSemantics","ACTIVE_POWER_ONLY_TYPE_VALUE_MAX");setStr(L,"powerMaskSemantics","BIT0_TYPE_BIT1_VALUE_BIT2_MAX");setStr(L,"descriptorReadPolicy","ONE_OBJECT_RANGE_PLUS_ONE_DESCRIPTOR_RANGE_PER_SNAPSHOT");setStr(L,"descriptorPolicy","UNITFIELDS_PRESENCE_AUTHORITY; EMPTY_DESCRIPTOR_PRESERVES_CACHE");
     setBool(L,"packetBodyParsing",false);setBool(L,"zlibDecompression",false);setBool(L,"compressedDecompression",false);setBool(L,"objectManagerPolling",false);setBool(L,"directHook",false);setBool(L,"timer",false);setBool(L,"backgroundThread",false);setBool(L,"idleTickPath",true);return 1;
 }
 
