@@ -1,55 +1,32 @@
 # CHANGELOG_DEV
 
+## 2026-09-24
+
+### Full latest API37 combined build
+
+- Reconstructed a local build tree from `TaiYangShenDian_API37_S5R1F1_RECOVERED_SOURCE_20260922.zip` and overlaid the latest recovered UnitState, Cooldown, Spatial, classifier/transition helpers and API33-derived custom-event bridge.
+- Patched the existing historical `PLAYER_LEAVING_WORLD` funnel to call `TysUnitStateCore::onWorldLeaving()`; no new lifecycle hook was introduced.
+- Added `custom_event_bridge.cpp` to the no-default-lib link path.
+- First compile attempt exposed a clang-cl inline-assembly formatting error in Spatial x87 `fsqrt/fsincos`; corrected it by restoring multiline MS-style `__asm` blocks from the compile-verified Spatial record.
+- Rebuild then succeeded.
+- Combined DLL: SHA256 `86f2c854770225bb8e3223f30cdde59bf7b1df3411a52b04e954eb5111b55998`, size `371200` bytes, PE32 i386 / Windows 5.01.
+- Target remains SHA256 `1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae`, size `380928` bytes; current size delta is `9728` bytes.
+- Verified critical Foundation/Cooldown/UnitState/Spatial API strings plus all six recovered `TYS_COOLDOWN_*` / `TYS_UNIT_*` events.
+- Broad dotted-string comparison against the final target is exact: `129` vs `129`, zero missing, zero extra.
+- Updated `apply_overlay.py` so future overlay builds copy latest Cooldown + UnitState + Spatial together.
+
 ## 2026-09-23
 
 ### Cooldown CD1-R2 exact integration
 
-- Integrated the previously disassembly-confirmed kind/source classifier and STARTED/CHANGED/READY transition state machine into `recovered/api37-s5r1f1/src/cooldown_core.cpp`.
-- Added source-preserving dirty reconciliation: packet causes 1..5 are not overwritten by later deadline/explicit rechecks.
-- Added local-player filtering for `SMSG_SPELL_GO`, `SMSG_SPELL_COOLDOWN`, `SMSG_COOLDOWN_EVENT`, `SMSG_CLEAR_COOLDOWN`, and `SMSG_COOLDOWN_CHEAT`.
-- Restored SpellRec-based classification fields using the existing client Spell DB view: RecoveryTime `+0x4C`, CategoryRecoveryTime `+0x50`, StartRecoveryCategory `+0x274`, StartRecoveryTime `+0x278`.
-- Wired `TYS_COOLDOWN_STARTED`, `TYS_COOLDOWN_CHANGED`, and `TYS_COOLDOWN_READY` through the recovered API33 FrameScript custom-event bridge.
-- Restored CLEAR/CHEAT diagnostic transitions including ready and SPELL->GCD counters.
-- Converted `cooldown_classifier.h`, `cooldown_transition.h`, and the integrated Cooldown core to the existing no-STL/no-default-lib recovery toolchain.
-- Local compile test succeeded. Compile-test DLL SHA256: `828e7c683ad6c623c37f1b38a95fc5dd74e0242bc7946af13254dad863fa3907`.
-- Cross-checked server-side reset semantics against `tortoise-wow/tortoise-wow` 1.18.1 source: the server distinguishes `RemoveSpellCooldown` from `RemoveAllSpellCooldown`; this is supporting protocol evidence only, not a replacement for final DLL behavior.
+- Integrated binary-confirmed kind/source classification, STARTED/CHANGED/READY transitions, packet-source preservation, SpellRec fields and custom events.
+- Compile-test DLL SHA256: `828e7c683ad6c623c37f1b38a95fc5dd74e0242bc7946af13254dad863fa3907`.
 
 ### UnitState US1-R2 exact recovery
 
-- Created/continued branch `recovery/unitstate-us1r2-exact`.
-- Materialized and rechecked the final target DLL SHA lineage (`1d170507...`).
-- Confirmed final UnitState world-tick reconcile at `0x100450AF` and snapshot helper at `0x100469FE`.
-- Corrected descriptor access from historical `object+0x110 -> UnitFields` approximation to final-target `object+0x08 -> descriptor`.
-- Confirmed descriptor absolute offsets for health, active power lanes, max health/power, packed power type, unit flags, and dynamic flags.
-- Identified `+0x23C` as `UNIT_DYNAMIC_FLAGS`; dead policy includes `UNIT_DYNFLAG_DEAD (0x20)` in addition to zero health.
-- Confirmed `lastChangedMask`: bit0 HEALTH, bit1 POWER, bit2 COMBAT.
-- Confirmed Track/Untrack handlers and 128-record capacity.
-- Confirmed `worldGeneration` at `0x100595F4`, advanced by the PLAYER_LEAVING_WORLD reset path.
-- Mapped exact UnitState Status counter globals:
-  - recordsChecked `0x1021B750`
-  - objectUnavailable `0x1021B754`
-  - descriptorFailures `0x1021B758`
-  - healthEvents `0x1021B75C`
-  - powerEvents `0x1021B760`
-  - combatEvents `0x1021B764`
-  - trackCalls `0x1021B768`
-  - untrackCalls `0x1021B76C`
-  - capacityFailures `0x1021B770`
-- Corrected a prior recovery assumption: final `UnitState.Status` does not expose descriptorClears/descriptorEmptyPreserves/descriptorReconciles/descriptorUnbinds.
-- Added `recovery/API36_UNITSTATE_STATUS_EXACT.md`.
-- Continued cross-checking against Turtle/Tortoise 1.18.1 update-field definitions and historical UnitXP/API33 infrastructure.
+- Recovered final descriptor path `object+0x08 -> descriptor`, exact health/power/combat/dead fields, category mask, Track/Untrack, 128-slot capacity, Status surface and `worldGeneration` leave-world lifecycle.
+- Compile-test DLL SHA256: `d44302b3227c5a13ae9132db4d1b080512dede81820f32a60aeb0782f4c92099`.
 
 ### Maintenance
 
-- Maintained the required five-file project state set:
-  - ROADMAP.md
-  - CHANGELOG_DEV.md
-  - HANDOFF.md
-  - PROJECT_STATE.json
-  - KNOWN_ISSUES.md
-
-## 2026-09-22
-
-- Recovered API37 Spatial historical range formulas and S5-R1F1 rear-axis geometry.
-- Recovered UnitState active power descriptor semantics and API33-derived custom event bridge.
-- Recovered Cooldown packet reset layouts, wrap-safe timing, kind/source classifier and transition helper/state machine.
+- Continue maintaining `ROADMAP.md`, `CHANGELOG_DEV.md`, `HANDOFF.md`, `PROJECT_STATE.json`, `KNOWN_ISSUES.md` after each recovery/build/validation step.
