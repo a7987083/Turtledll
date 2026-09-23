@@ -1,172 +1,78 @@
 #include <windows.h>
-#include <cstdint>
 #include "cooldown_core.h"
 #include "native_bus.h"
 #include "wow112_offsets.h"
+#include "custom_event_bridge.h"
+#include "cooldown_classifier.h"
+#include "cooldown_transition.h"
 
-namespace TysCooldownCore {
-namespace {
-
+namespace TysCooldownCore { namespace {
 constexpr unsigned MAX_TRACKED=128;
-constexpr std::uintptr_t UNIT_GUID_FN=0x00515970u;
+constexpr unsigned long UNIT_GUID_FN=0x00515970u;
 
 struct Entry {
     unsigned long spellId;
-    std::uint32_t startMs;
-    std::uint32_t durationMs;
-    std::uint32_t enable;
-    std::uint32_t lastQueryMs;
-    bool used;
-    bool valid;
+    unsigned long startMs,durationMs,enable,lastQueryMs;
+    unsigned long recoveryTimeMs,categoryRecoveryTimeMs,startRecoveryCategory,startRecoveryTimeMs;
+    TysCooldownClassifier::Kind kind;
+    TysCooldownClassifier::Source source;
+    TysCooldownClassifier::Source dirtySource;
+    bool used,haveSnapshot,active,dirty;
 };
 
 static Entry g_entries[MAX_TRACKED]={};
 static volatile LONG g_init=0,g_inSub=0,g_tickSub=0;
-static volatile LONG g_engineQueries=0,g_queryFailures=0,g_spellCooldownPackets=0,g_clearCooldownPackets=0,g_cooldownCheatPackets=0,g_cooldownEventPackets=0,g_ignoredRemotePackets=0,g_deadlineWakes=0;
-static volatile LONG g_dirtyEntries=0,g_deadlineRequeries=0;
+static volatile LONG g_engineQueries=0,g_queryFailures=0,g_parseFailure=0,g_dirtyOverflow=0;
+static volatile LONG g_spellGoPackets=0,g_spellCooldownPackets=0,g_clearCooldownPackets=0,g_cooldownCheatPackets=0,g_cooldownEventPackets=0,g_ignoredRemotePackets=0,g_deadlineWakes=0;
+static volatile LONG g_started=0,g_changed=0,g_ready=0,g_clearMatchedActive=0,g_clearReady=0,g_clearToGcd=0,g_resetAffected=0,g_resetReady=0,g_resetToGcd=0;
 static unsigned long g_lastPacketSpellId=0,g_lastChangedSpellId=0,g_lastChangeMs=0;
 static char g_status[96]="NOT_INITIALIZED";
 
-// The 1.12 engine cooldown query writes duration, start and enable as unsigned
-// 32-bit millisecond values. Keep the same unsigned clock domain used by
-// GetTime()/the client helper; signed ticks break after 2^31 ms uptime.
-using QueryFn = void (__fastcall *)(unsigned long spellId,
-                                    unsigned long bookType,
-                                    std::uint32_t* durationMs,
-                                    std::uint32_t* startMs,
-                                    std::uint32_t* enable);
-using UnitGuidFn = unsigned long long(__fastcall*)(const char*);
+using QueryFn=void(__fastcall*)(unsigned long,unsigned long,unsigned long*,unsigned long*,unsigned long*);
+using UnitGuidFn=unsigned long long(__fastcall*)(const char*);
 
-static bool executable(std::uintptr_t a){
-    MEMORY_BASIC_INFORMATION m={};
-    if(!a||VirtualQuery((void*)a,&m,sizeof(m))!=sizeof(m)||m.State!=MEM_COMMIT||(m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;
-    DWORD p=m.Protect&0xff;
-    return p==PAGE_EXECUTE||p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY;
+static bool readableProtection(DWORD p0){DWORD p=p0&0xffu;return p==PAGE_READONLY||p==PAGE_READWRITE||p==PAGE_WRITECOPY||p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY;}
+static bool readable(unsigned long a,unsigned long n){if(!a||!n)return false;MEMORY_BASIC_INFORMATION m={};if(VirtualQuery((const void*)a,&m,sizeof(m))!=sizeof(m))return false;if(m.State!=MEM_COMMIT||(m.Protect&(PAGE_GUARD|PAGE_NOACCESS))||!readableProtection(m.Protect))return false;unsigned long b=(unsigned long)m.BaseAddress,e=b+m.RegionSize;return a>=b&&a<=e&&n<=e-a;}
+static bool executable(unsigned long a){MEMORY_BASIC_INFORMATION m={};if(!a||VirtualQuery((const void*)a,&m,sizeof(m))!=sizeof(m)||m.State!=MEM_COMMIT||(m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;DWORD p=m.Protect&0xffu;return p==PAGE_EXECUTE||p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY;}
+static void setStr(Lua50::State L,const char*k,const char*v){Lua50::PushString(L,k);Lua50::PushString(L,v);Lua50::SetTable(L,-3);} static void setNum(Lua50::State L,const char*k,double v){Lua50::PushString(L,k);Lua50::PushNumber(L,v);Lua50::SetTable(L,-3);} static void setBool(Lua50::State L,const char*k,bool v){Lua50::PushString(L,k);Lua50::PushBool(L,v);Lua50::SetTable(L,-3);}
+static unsigned long nowMs(){return (unsigned long)GetTickCount();}
+static bool reached(unsigned long now,unsigned long deadline){return (long)(now-deadline)>=0;}
+static unsigned long remaining(unsigned long now,unsigned long start,unsigned long duration){if(!duration)return 0;const unsigned long end=start+duration;return reached(now,end)?0u:(end-now);}
+static unsigned long long playerGuid(){if(!executable(UNIT_GUID_FN))return 0;return ((UnitGuidFn)UNIT_GUID_FN)("player");}
+static bool isLocalGuid(unsigned long long g){unsigned long long p=playerGuid();return g&&p&&g==p;}
+
+static Entry* slot(unsigned long spell,bool create){if(!spell)return 0;unsigned freei=MAX_TRACKED;for(unsigned i=0;i<MAX_TRACKED;++i){if(g_entries[i].used&&g_entries[i].spellId==spell)return &g_entries[i];if(!g_entries[i].used&&freei==MAX_TRACKED)freei=i;}if(!create)return 0;if(freei==MAX_TRACKED){++g_dirtyOverflow;return 0;}Entry&e=g_entries[freei];e=Entry{};e.used=true;e.spellId=spell;e.kind=TysCooldownClassifier::KIND_NONE;e.source=TysCooldownClassifier::SOURCE_EXPLICIT_ENGINE_QUERY;e.dirtySource=TysCooldownClassifier::SOURCE_EXPLICIT_ENGINE_QUERY;return &e;}
+
+static bool spellRecovery(unsigned long spell,TysCooldownClassifier::SpellRecoveryFields*out){if(!out)return false;out->available=false;out->recoveryTime=out->categoryRecoveryTime=out->startRecoveryCategory=out->startRecoveryTime=0;if(!spell||!readable((unsigned long)WoW112::SPELL_DB,20))return false;struct SpellDbView{void*records;unsigned long numRecords;unsigned char**recordsById;unsigned long maxId;int loaded;};SpellDbView*db=(SpellDbView*)WoW112::SPELL_DB;if(!db->recordsById||spell>db->maxId||!readable((unsigned long)(db->recordsById+spell),sizeof(void*)))return false;unsigned char*r=db->recordsById[spell];if(!r||!readable((unsigned long)r,0x27Cu))return false;out->recoveryTime=*(unsigned long*)(r+0x4Cu);out->categoryRecoveryTime=*(unsigned long*)(r+0x50u);out->startRecoveryCategory=*(unsigned long*)(r+0x274u);out->startRecoveryTime=*(unsigned long*)(r+0x278u);out->available=true;return true;}
+
+static TysCooldownTransition::Snapshot toSnapshot(const Entry&e,unsigned long now){TysCooldownTransition::Snapshot s={};s.queryOk=e.haveSnapshot;s.active=e.active;s.spellId=e.spellId;s.startMs=e.startMs;s.durationMs=e.durationMs;s.endMs=e.startMs+e.durationMs;s.remainingMs=e.active?remaining(now,e.startMs,e.durationMs):0;s.enable=e.enable;s.kind=e.kind;s.source=e.source;return s;}
+
+static bool queryState(unsigned long spell,TysCooldownClassifier::Source source,Entry*out){if(!spell||!out||!executable(WoW112::COOLDOWN_QUERY_HELPER))return false;++g_engineQueries;unsigned long duration=0,start=0,enable=0;((QueryFn)WoW112::COOLDOWN_QUERY_HELPER)(spell,0,&duration,&start,&enable);const unsigned long now=nowMs();TysCooldownClassifier::SpellRecoveryFields rf={};spellRecovery(spell,&rf);const unsigned long rem=remaining(now,start,duration);const bool active=(enable!=0u&&duration!=0u&&rem!=0u);out->spellId=spell;out->startMs=start;out->durationMs=duration;out->enable=enable;out->lastQueryMs=now;out->recoveryTimeMs=rf.recoveryTime;out->categoryRecoveryTimeMs=rf.categoryRecoveryTime;out->startRecoveryCategory=rf.startRecoveryCategory;out->startRecoveryTimeMs=rf.startRecoveryTime;out->kind=TysCooldownClassifier::classify(active,source,rf);out->source=source;out->active=active;out->haveSnapshot=true;out->dirty=false;return true;}
+
+static bool packetSource(TysCooldownClassifier::Source s){return s>=TysCooldownClassifier::SOURCE_SPELL_GO&&s<=TysCooldownClassifier::SOURCE_COOLDOWN_CHEAT;}
+static void markDirty(Entry*e,TysCooldownClassifier::Source source){if(!e)return;if(e->dirty){if(packetSource(e->dirtySource)&&!packetSource(source))return;if(packetSource(source)||!packetSource(e->dirtySource))e->dirtySource=source;return;}e->dirty=true;e->dirtySource=source;}
+static void markAll(TysCooldownClassifier::Source source){for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used)markDirty(&g_entries[i],source);}
+
+static void emitTransition(Entry&oldE,bool hadOld,Entry&newE,TysCooldownClassifier::Source source){const unsigned long now=nowMs();TysCooldownTransition::Snapshot oldS=toSnapshot(oldE,now),newS=toSnapshot(newE,now);newS.source=source;TysCooldownTransition::Event ev=TysCooldownTransition::decide(hadOld,oldS,newS);if(ev==TysCooldownTransition::EVENT_NONE)return;bool ok=false;if(ev==TysCooldownTransition::EVENT_STARTED){ok=TysCustomEvents::emitCooldownStarted(newS.spellId,newS.startMs,newS.durationMs,newS.endMs,newS.remainingMs,newS.enable,(unsigned long)newS.kind,(unsigned long)source);if(ok)++g_started;}else if(ev==TysCooldownTransition::EVENT_CHANGED){ok=TysCustomEvents::emitCooldownChanged(newS.spellId,newS.startMs,newS.durationMs,newS.endMs,newS.remainingMs,newS.enable,(unsigned long)newS.kind,(unsigned long)source);if(ok)++g_changed;}else if(ev==TysCooldownTransition::EVENT_READY){ok=TysCustomEvents::emitCooldownReady(newS.spellId,newS.startMs,newS.durationMs,newS.endMs,newS.remainingMs,newS.enable,(unsigned long)newS.kind,(unsigned long)source);if(ok)++g_ready;}
+    if(source==TysCooldownClassifier::SOURCE_CLEAR_COOLDOWN){if(hadOld&&oldS.active)++g_clearMatchedActive;if(ev==TysCooldownTransition::EVENT_READY)++g_clearReady;if(ev==TysCooldownTransition::EVENT_CHANGED&&TysCooldownTransition::isSpellToGcd(oldS,newS))++g_clearToGcd;}
+    if(source==TysCooldownClassifier::SOURCE_COOLDOWN_CHEAT){if(hadOld&&oldS.active)++g_resetAffected;if(ev==TysCooldownTransition::EVENT_READY)++g_resetReady;if(ev==TysCooldownTransition::EVENT_CHANGED&&TysCooldownTransition::isSpellToGcd(oldS,newS))++g_resetToGcd;}
+    g_lastChangedSpellId=newS.spellId;g_lastChangeMs=now;
 }
 
-static void setStr(Lua50::State L,const char*k,const char*v){Lua50::PushString(L,k);Lua50::PushString(L,v);Lua50::SetTable(L,-3);}
-static void setNum(Lua50::State L,const char*k,double v){Lua50::PushString(L,k);Lua50::PushNumber(L,v);Lua50::SetTable(L,-3);}
-static void setBool(Lua50::State L,const char*k,bool v){Lua50::PushString(L,k);Lua50::PushBool(L,v);Lua50::SetTable(L,-3);}
+static bool reconcile(Entry&e,TysCooldownClassifier::Source source){Entry old=e,n=e;const bool had=e.haveSnapshot;if(!queryState(e.spellId,source,&n)){++g_queryFailures;return false;}emitTransition(old,had,n,source);e=n;return true;}
 
-static std::uint32_t tickNow(){return static_cast<std::uint32_t>(GetTickCount());}
-static std::uint32_t elapsed32(std::uint32_t now,std::uint32_t then){return now-then;}
-static std::uint32_t remaining32(const Entry&e,std::uint32_t now){if(!e.valid||e.durationMs==0)return 0;const std::uint32_t elapsed=elapsed32(now,e.startMs);return elapsed>=e.durationMs?0u:e.durationMs-elapsed;}
-static bool activeNow(const Entry&e,std::uint32_t now){return e.valid&&e.enable!=0&&e.durationMs!=0&&remaining32(e,now)!=0;}
+static void parseSpellGo(TysNativeBus::CDataStoreView*p){++g_spellGoPackets;if(!p)return;unsigned long long item=0,caster=0;unsigned long spell=0;short flags=0;unsigned char hits=0;if(!TysNativeBus::readPackedGuid(p,&item)||!TysNativeBus::readPackedGuid(p,&caster)||!TysNativeBus::read(p,&spell)||!TysNativeBus::read(p,&flags)||!TysNativeBus::read(p,&hits)){++g_parseFailure;return;}if(!isLocalGuid(caster)||!spell)return;g_lastPacketSpellId=spell;markDirty(slot(spell,false),TysCooldownClassifier::SOURCE_SPELL_GO);}
+static void onIncoming(unsigned long op,TysNativeBus::CDataStoreView*p){if(op==WoW112::SMSG_SPELL_GO_OPCODE){parseSpellGo(p);return;}if(!p)return;if(op==WoW112::SMSG_SPELL_COOLDOWN_OPCODE){++g_spellCooldownPackets;unsigned long long guid=0;if(!TysNativeBus::read(p,&guid)){++g_parseFailure;return;}if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}markAll(TysCooldownClassifier::SOURCE_SPELL_COOLDOWN);return;}if(op==WoW112::SMSG_CLEAR_COOLDOWN_OPCODE){++g_clearCooldownPackets;unsigned long spell=0;unsigned long long guid=0;if(!TysNativeBus::read(p,&spell)||!TysNativeBus::read(p,&guid)){++g_parseFailure;return;}if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}g_lastPacketSpellId=spell;markDirty(slot(spell,false),TysCooldownClassifier::SOURCE_CLEAR_COOLDOWN);return;}if(op==WoW112::SMSG_COOLDOWN_CHEAT_OPCODE){++g_cooldownCheatPackets;unsigned long long guid=0;if(!TysNativeBus::read(p,&guid)){++g_parseFailure;return;}if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}g_lastPacketSpellId=0;markAll(TysCooldownClassifier::SOURCE_COOLDOWN_CHEAT);return;}if(op==WoW112::SMSG_COOLDOWN_EVENT_OPCODE){++g_cooldownEventPackets;unsigned long spell=0;unsigned long long guid=0;if(!TysNativeBus::read(p,&spell)||!TysNativeBus::read(p,&guid)){++g_parseFailure;return;}if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}g_lastPacketSpellId=spell;markDirty(slot(spell,false),TysCooldownClassifier::SOURCE_COOLDOWN_EVENT);}}
 
-static unsigned long long playerGuid(){
-    if(!executable(UNIT_GUID_FN))return 0;
-    return ((UnitGuidFn)UNIT_GUID_FN)("player");
+static void onTick(){const unsigned long now=nowMs();for(unsigned i=0;i<MAX_TRACKED;++i){Entry&e=g_entries[i];if(!e.used)continue;if(e.dirty){TysCooldownClassifier::Source src=e.dirtySource;reconcile(e,src);continue;}if(e.haveSnapshot&&e.active&&reached(now,e.startMs+e.durationMs)){++g_deadlineWakes;reconcile(e,TysCooldownClassifier::SOURCE_DEADLINE_RECHECK);}}}
+
+static int pushEntry(Lua50::State L,const Entry&e){const unsigned long now=nowMs();Lua50::NewTable(L);setNum(L,"spellId",e.spellId);setBool(L,"active",e.haveSnapshot&&e.active);setStr(L,"kindName",TysCooldownClassifier::kindName(e.kind));setNum(L,"kind",(unsigned long)e.kind);setNum(L,"source",(unsigned long)e.source);setStr(L,"sourceName",TysCooldownClassifier::sourceName(e.source));setNum(L,"startMs",e.startMs);setNum(L,"durationMs",e.durationMs);setNum(L,"endMs",e.startMs+e.durationMs);setNum(L,"remainingMs",e.haveSnapshot&&e.active?remaining(now,e.startMs,e.durationMs):0);setNum(L,"enable",e.enable);setNum(L,"recoveryTimeMs",e.recoveryTimeMs);setNum(L,"categoryRecoveryTimeMs",e.categoryRecoveryTimeMs);setNum(L,"startRecoveryCategory",e.startRecoveryCategory);setNum(L,"startRecoveryTimeMs",e.startRecoveryTimeMs);return 1;}
+static unsigned countActive(){unsigned n=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&g_entries[i].haveSnapshot&&g_entries[i].active)++n;return n;} static unsigned countDirty(){unsigned n=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&g_entries[i].dirty)++n;return n;}
 }
 
-static Entry* slot(unsigned long spell,bool create){
-    if(!spell)return 0;unsigned freei=MAX_TRACKED;
-    for(unsigned i=0;i<MAX_TRACKED;++i){if(g_entries[i].used&&g_entries[i].spellId==spell)return &g_entries[i];if(!g_entries[i].used&&freei==MAX_TRACKED)freei=i;}
-    if(!create||freei==MAX_TRACKED)return 0;Entry&e=g_entries[freei];e=Entry{};e.used=true;e.spellId=spell;return &e;
-}
-
-static bool query(unsigned long spell,Entry*out){
-    if(!spell||!out||!executable(WoW112::COOLDOWN_QUERY_HELPER))return false;
-    ++g_engineQueries;std::uint32_t start=0,duration=0,enable=0;
-    ((QueryFn)WoW112::COOLDOWN_QUERY_HELPER)(spell,0,&duration,&start,&enable);
-    out->spellId=spell;out->startMs=start;out->durationMs=duration;out->enable=enable;out->lastQueryMs=tickNow();out->valid=true;return true;
-}
-
-static bool stateChanged(const Entry&a,const Entry&b){return !a.valid||a.startMs!=b.startMs||a.durationMs!=b.durationMs||a.enable!=b.enable;}
-static void markDirty(Entry*e){if(e&&e->valid){e->valid=false;++g_dirtyEntries;}}
-static void markDirtyAllTracked(){for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used)markDirty(&g_entries[i]);}
-static bool isLocalGuid(unsigned long long guid){const unsigned long long me=playerGuid();return guid!=0&&me!=0&&guid==me;}
-
-static void onIncoming(unsigned long op,TysNativeBus::CDataStoreView*p){
-    if(!p)return;
-
-    // Vanilla 1.12 packet layouts are confirmed by the classic protocol:
-    // SPELL_COOLDOWN : uint64 casterGuid, repeated {uint32 spellId,uint32 ms}
-    // CLEAR_COOLDOWN : uint32 spellId, uint64 targetGuid
-    // COOLDOWN_CHEAT : uint64 targetGuid (clear all cooldowns for that unit)
-    // COOLDOWN_EVENT : uint32 spellId, uint64 casterGuid
-    if(op==WoW112::SMSG_SPELL_COOLDOWN_OPCODE){
-        ++g_spellCooldownPackets;
-        unsigned long long guid=0;
-        if(!TysNativeBus::read(p,&guid))return;
-        if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}
-        // The packet may contain multiple spell/cooldown pairs. Existing tracked
-        // records are invalidated in one pass and reconciled from the engine
-        // after the stock handler consumes the packet; no packet-body cooldown
-        // value is treated as authoritative by this module.
-        markDirtyAllTracked();
-        return;
-    }
-
-    if(op==WoW112::SMSG_CLEAR_COOLDOWN_OPCODE){
-        ++g_clearCooldownPackets;
-        unsigned long s=0;unsigned long long guid=0;
-        if(!TysNativeBus::read(p,&s)||!TysNativeBus::read(p,&guid))return;
-        if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}
-        g_lastPacketSpellId=s;markDirty(slot(s,false));
-        return;
-    }
-
-    if(op==WoW112::SMSG_COOLDOWN_CHEAT_OPCODE){
-        ++g_cooldownCheatPackets;
-        unsigned long long guid=0;
-        if(!TysNativeBus::read(p,&guid))return;
-        if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}
-        g_lastPacketSpellId=0;
-        // Server semantics: RemoveAllSpellCooldown() then SMSG_COOLDOWN_CHEAT
-        // carrying only the target GUID. Every tracked cooldown must requery.
-        markDirtyAllTracked();
-        return;
-    }
-
-    if(op==WoW112::SMSG_COOLDOWN_EVENT_OPCODE){
-        ++g_cooldownEventPackets;
-        unsigned long s=0;unsigned long long guid=0;
-        if(!TysNativeBus::read(p,&s)||!TysNativeBus::read(p,&guid))return;
-        if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}
-        g_lastPacketSpellId=s;markDirty(slot(s,false));
-    }
-}
-
-static void onTick(){
-    const std::uint32_t now=tickNow();
-    for(unsigned i=0;i<MAX_TRACKED;++i){
-        Entry&e=g_entries[i];if(!e.used)continue;
-        bool needQuery=!e.valid;
-        if(!needQuery&&e.durationMs>0&&remaining32(e,now)==0){++g_deadlineWakes;++g_deadlineRequeries;needQuery=true;}
-        if(!needQuery)continue;
-        Entry n=e;
-        if(query(e.spellId,&n)){
-            const bool changed=stateChanged(e,n);e=n;
-            if(changed){g_lastChangedSpellId=e.spellId;g_lastChangeMs=now;}
-        }else ++g_queryFailures;
-    }
-}
-
-static int pushEntry(Lua50::State L,const Entry&e){
-    Lua50::NewTable(L);const std::uint32_t now=tickNow();const std::uint32_t remain=remaining32(e,now);
-    setNum(L,"spellId",e.spellId);setBool(L,"valid",e.valid);setBool(L,"active",activeNow(e,now));setNum(L,"startMs",e.startMs);setNum(L,"durationMs",e.durationMs);setNum(L,"recoveryTimeMs",e.durationMs);setNum(L,"startRecoveryTimeMs",e.startMs);setNum(L,"enable",e.enable);setNum(L,"remainingMs",remain);setBool(L,"ready",e.valid&&remain==0);setStr(L,"querySource","CLIENT_ENGINE_COOLDOWN_MANAGER");return 1;
-}
-
-} // namespace
-
-bool initialize(){
-    if(InterlockedCompareExchange(&g_init,1,0)!=0)return true;
-    bool a=TysNativeBus::subscribeIncoming(&onIncoming);bool b=TysNativeBus::subscribeWorldTick(&onTick);
-    InterlockedExchange(&g_inSub,a?1:0);InterlockedExchange(&g_tickSub,b?1:0);
-    const char*s=(a&&b&&executable(WoW112::COOLDOWN_QUERY_HELPER))?"READY_COOLDOWN_CORE_C1R2":"PARTIAL_COOLDOWN_CORE_C1R2";
-    unsigned i=0;for(;s[i]&&i+1<sizeof(g_status);++i)g_status[i]=s[i];g_status[i]=0;return a&&b;
-}
+bool initialize(){if(InterlockedCompareExchange(&g_init,1,0)!=0)return true;bool a=TysNativeBus::subscribeIncoming(&onIncoming),b=TysNativeBus::subscribeWorldTick(&onTick),c=TysCustomEvents::ensureCooldownEvents();InterlockedExchange(&g_inSub,a?1:0);InterlockedExchange(&g_tickSub,b?1:0);const char*s=(a&&b&&c&&executable(WoW112::COOLDOWN_QUERY_HELPER))?"READY_COOLDOWN_CORE_C1R2":"PARTIAL_COOLDOWN_CORE_C1R2";unsigned i=0;for(;s[i]&&i+1<sizeof(g_status);++i)g_status[i]=s[i];g_status[i]=0;return a&&b;}
 const char* status(){return g_status;}
-
-int dispatchStatus(Lua50::State L){
-    initialize();Lua50::NewTable(L);setStr(L,"stage","CD1-R2");setStr(L,"status",g_status);setBool(L,"incomingSubscribed",g_inSub!=0);setBool(L,"worldTickSubscribed",g_tickSub!=0);setNum(L,"queryHelperAddress",WoW112::COOLDOWN_QUERY_HELPER);setBool(L,"queryHelperReady",executable(WoW112::COOLDOWN_QUERY_HELPER));setNum(L,"engineQueries",g_engineQueries);setNum(L,"queryFailures",g_queryFailures);setNum(L,"spellCooldownPackets",g_spellCooldownPackets);setNum(L,"clearCooldownPackets",g_clearCooldownPackets);setNum(L,"cooldownCheatPackets",g_cooldownCheatPackets);setNum(L,"cooldownEventPackets",g_cooldownEventPackets);setNum(L,"ignoredRemotePackets",g_ignoredRemotePackets);setNum(L,"deadlineWakes",g_deadlineWakes);setNum(L,"deadlineRequeries",g_deadlineRequeries);setNum(L,"dirty",g_dirtyEntries);setNum(L,"lastPacketSpellId",g_lastPacketSpellId);setNum(L,"lastChangedSpellId",g_lastChangedSpellId);setNum(L,"lastChangeMs",g_lastChangeMs);setStr(L,"clockSemantics","UINT32_WRAP_SAFE_MILLISECONDS");setStr(L,"readySemantics","READY_ONLY_WHEN_ENGINE_REPORTS_NO_COOLDOWN");setStr(L,"resetSemantics","CLEAR_ONE_CHEAT_ALL_POST_STOCK_ENGINE_REQUERY");setStr(L,"packetLayoutSemantics","VANILLA1121_GUID_FILTERED");setBool(L,"spellbookPolling",false);setBool(L,"backgroundThread",false);setBool(L,"directHook",false);setBool(L,"idleTickPath",true);return 1;
-}
-
-int dispatchGet(Lua50::State L){
-    initialize();if(Lua50::GetTop(L)<2||!Lua50::IsNumber(L,2)){Lua50::PushNil(L);Lua50::PushString(L,"BAD_SPELL_ID");return 2;}
-    unsigned long s=(unsigned long)Lua50::ToNumber(L,2);Entry*e=slot(s,true);if(!e){Lua50::PushNil(L);Lua50::PushString(L,"CAPACITY");return 2;}Entry n=*e;
-    if(!query(s,&n)){++g_queryFailures;Lua50::PushNil(L);Lua50::PushString(L,"QUERY_FAILED");return 2;}*e=n;return pushEntry(L,*e);
-}
+int dispatchStatus(Lua50::State L){initialize();Lua50::NewTable(L);setStr(L,"stage","CD1-R2");setStr(L,"status",g_status);setBool(L,"incomingSubscribed",g_inSub!=0);setBool(L,"worldTickSubscribed",g_tickSub!=0);setBool(L,"customEventsReady",TysCustomEvents::ensureCooldownEvents());setNum(L,"queryHelperAddress",WoW112::COOLDOWN_QUERY_HELPER);setNum(L,"active",countActive());setNum(L,"dirty",countDirty());setNum(L,"engineQueries",g_engineQueries);setNum(L,"deadlineWakes",g_deadlineWakes);setNum(L,"parseFailure",g_parseFailure);setNum(L,"queryFailures",g_queryFailures);setNum(L,"dirtyOverflow",g_dirtyOverflow);setBool(L,"directHook",false);setBool(L,"spellbookPolling",false);setBool(L,"objectManagerPolling",false);setBool(L,"backgroundThread",false);setNum(L,"started",g_started);setNum(L,"changed",g_changed);setNum(L,"ready",g_ready);setNum(L,"spellGoPackets",g_spellGoPackets);setNum(L,"spellCooldownPackets",g_spellCooldownPackets);setNum(L,"clearCooldownPackets",g_clearCooldownPackets);setNum(L,"clearMatchedActive",g_clearMatchedActive);setNum(L,"clearReady",g_clearReady);setNum(L,"clearToGcd",g_clearToGcd);setNum(L,"cooldownCheatPackets",g_cooldownCheatPackets);setNum(L,"resetAffected",g_resetAffected);setNum(L,"resetReady",g_resetReady);setNum(L,"resetToGcd",g_resetToGcd);setBool(L,"idleTickPath",true);setNum(L,"eventStartedSlot",TysCustomEvents::cooldownStartedSlot());setNum(L,"eventChangedSlot",TysCustomEvents::cooldownChangedSlot());setNum(L,"eventReadySlot",TysCustomEvents::cooldownReadySlot());setStr(L,"clockSemantics","UINT32_WRAP_SAFE_MILLISECONDS");setStr(L,"resetSemantics","CLEAR_ONE_CHEAT_ALL_POST_STOCK_ENGINE_REQUERY");return 1;}
+int dispatchGet(Lua50::State L){initialize();if(Lua50::GetTop(L)<2||!Lua50::IsNumber(L,2)){Lua50::PushNil(L);Lua50::PushString(L,"BAD_SPELL_ID");return 2;}unsigned long spell=(unsigned long)Lua50::ToNumber(L,2);Entry*e=slot(spell,true);if(!e){Lua50::PushNil(L);Lua50::PushString(L,"CAPACITY");return 2;}TysCooldownClassifier::Source src=e->dirty?e->dirtySource:TysCooldownClassifier::SOURCE_EXPLICIT_ENGINE_QUERY;if(!reconcile(*e,src)){Lua50::PushNil(L);Lua50::PushString(L,"QUERY_FAILED");return 2;}return pushEntry(L,*e);}
 int dispatchList(Lua50::State L){initialize();Lua50::NewTable(L);int idx=1;for(unsigned i=0;i<MAX_TRACKED;++i){if(!g_entries[i].used)continue;Lua50::PushNumber(L,idx++);pushEntry(L,g_entries[i]);Lua50::SetTable(L,-3);}return 1;}
-
-} // namespace TysCooldownCore
+}
