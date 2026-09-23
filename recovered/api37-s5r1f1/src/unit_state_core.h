@@ -3,6 +3,8 @@
 namespace TysUnitStateCore {
 bool initialize();
 const char* status();
+void onWorldLeaving();
+unsigned long worldGeneration();
 int dispatchStatus(Lua50::State L);
 int dispatchGet(Lua50::State L);
 int dispatchTrack(Lua50::State L);
