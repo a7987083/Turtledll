@@ -4,11 +4,11 @@
 
 `recovery/unitstate-us1r2-exact`
 
-This branch now contains the latest compile-verified UnitState, Cooldown and Spatial recovery sources plus an overlay script that applies all three together.
+This branch is the current API34-37 behavior-equivalent recovery line. API33 remains the last source-authentic baseline.
 
 ## Source-authentic baseline
 
-Last source-authentic handoff: `TaiYangShenDian_ARX1_API33_DW1_LOS1_HANDOFF_20260830.zip`.
+`TaiYangShenDian_ARX1_API33_DW1_LOS1_HANDOFF_20260830.zip`
 
 - API 33
 - exact rebuild SHA256 `aa598a044ee3236c31a87d25d1646cf35a3cf9c3e85a120eea542645af96ba3e`
@@ -20,48 +20,70 @@ Last source-authentic handoff: `TaiYangShenDian_ARX1_API33_DW1_LOS1_HANDOFF_2026
 - API 37
 - SHA256 `1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae`
 - size `380928`
+- known callable API count `118`
+- broad dotted-string count `129`
 
-## Current combined recovery build
+## Current exact-surface recovery candidate
 
-A local all-latest overlay build succeeded with UnitState + Cooldown + Spatial simultaneously:
+Latest local compile:
 
-- SHA256 `86f2c854770225bb8e3223f30cdde59bf7b1df3411a52b04e954eb5111b55998`
-- size `371200`
-- PE32 i386, Windows 5.01
-- target size delta `9728` bytes
+- SHA256 `6bd0239cd15e66486c47267f70ef9dc6f31cc70b6878e12f08ffa49cfaabb393`
+- size `373760`
+- target delta `7168`
+- strict callable APIs: `118/118`, missing `0`, extra `0`
+- broad dotted strings: `129/129`, missing `0`, extra `0`
+- runtime verified: **no**
 
-Static regression completed so far:
+Do not pad the remaining binary-size delta. API34-37 source is reconstructed behavior-equivalent C++, not the original lost source text.
 
-- critical Foundation/Cooldown/UnitState/Spatial command strings present
-- `TYS_COOLDOWN_STARTED`, `TYS_COOLDOWN_CHANGED`, `TYS_COOLDOWN_READY` present
-- `TYS_UNIT_HEALTH_CHANGED`, `TYS_UNIT_POWER_CHANGED`, `TYS_UNIT_COMBAT_CHANGED` present
-- broad dotted-string set: recovery `129`, target `129`, missing `0`, extra `0`
+## Cooldown CD1-R2
 
-Do not yet call this byte-identical or runtime-verified. API34-37 C++ remains behavior-equivalent reconstruction, not the lost original source text.
+Recovered and integrated:
 
-## Important implementation notes
+- engine query `0x006E2EA0`
+- uint32 wrap-safe timing
+- kinds NONE/GCD/SPELL/UNKNOWN
+- sources 1..7
+- STARTED/CHANGED/READY events
+- CLEAR one / CHEAT all reset semantics
+- SpellRec timing fields `+0x4C`, `+0x50`, `+0x274`, `+0x278`
+- successful init status `READY_NATIVEBUS_ENGINE_QUERY`
+- exact Status/Get policy fields, next-wake state, last-change/source state
+- `onWorldLeaving()` clears records and advances nonzero world generation
+- existing lifecycle funnel used; no new hook
 
-- UnitState: exact `object+0x08 -> descriptor`, active-power semantics, dynamic dead flag, Track/Untrack, 128 capacity, exact Status surface, existing PLAYER_LEAVING_WORLD lifecycle funnel.
-- Cooldown: engine query `0x006E2EA0`, uint32 wrap-safe timing, kind/source 1..7, STARTED/CHANGED/READY, CLEAR/CHEAT reset semantics, SpellRec classification and API33-derived custom events.
-- Spatial: historical range/reach formulas plus S5-R1F1 rear-axis dot semantics. Do not encode experimental ~105° observations; test was unfinished.
+## UnitState US1-R2
 
-## Build issue encountered and resolved
+Recovered and integrated:
 
-The combined build initially failed because the locally transcribed Spatial x87 inline assembly placed `fld/fsqrt/fstp` and `fld/fsincos/fstp` on a single line. clang-cl rejected that syntax. Restoring the multiline MS-style `__asm` form from the prior compile-verified Spatial implementation fixed the build.
+- `GUID -> 0x00464870 -> object -> object+0x08 descriptor`
+- health/power/max-power/flags/dynamic-flags exact descriptor layout
+- dynamic dead mask `0x20`, combat mask `0x00080000`
+- Health/Power/Combat custom events
+- category lastChangedMask `1/2/4`
+- capacity `128`
+- successful init status `READY_TRACKED_UPDATEOBJECT_GATE`
+- Get works for untracked selectors and exposes final table surface: visible/fieldsValid/tracked/initialized, flags, active power, all five power lanes and code
+- Untrack is idempotent for NOT_TRACKED
+- Clear returns `true,"CLEARED"`
+- worldGeneration advances on existing PLAYER_LEAVING_WORLD funnel
 
-## Remaining work
+Remaining UnitState gap: reproduce exact selector helper around client resolver `0x00515940`, including player/target/mouseover/pet/partyN/raidN and exact errors. `UNIT_RESOLVER_UNAVAILABLE` still needs xref ownership before implementation.
 
-1. Run stricter callable API regression against known final count `118`.
-2. Inspect the remaining `9728`-byte target/recovery size delta for missing behavior; do not pad.
-3. Repair `recovery/archive.parts` so GitHub Actions reproduces the local combined build.
-4. Perform live client regression.
+## Spatial S5-R1F1
+
+Recovered historical range/reach formulas and final rear-axis dot semantics. No 105° rule is implemented; the observed ~105° value came from unfinished testing and is not a confirmed threshold.
+
+## Build/CI
+
+Local compile is currently authoritative. GitHub Actions remains blocked by incomplete/truncated `recovery/archive.parts` source reconstruction.
 
 ## Evidence priority
 
 1. final target DLL disassembly
 2. historical project branches/source handoffs
 3. Aug 25-31 diagnostic plugins
-4. Turtle/Tortoise 1.18.1 only for protocol/server-semantic cross-checks
+4. Turtle/Tortoise 1.18.1 for server/protocol cross-check only
 5. other 1.12 client references
 
 ## Maintenance
