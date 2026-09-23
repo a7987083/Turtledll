@@ -13,13 +13,15 @@
 - [x] UnitState.Get/Untrack/Clear public surfaces aligned to final DLL.
 - [x] Cooldown and UnitState success statuses and world-leave lifecycle aligned.
 - [x] UnitState selector helper recovered from final DLL: case-insensitive player/target/mouseover/pet, party1..4, raid1..40 via client resolver `0x00515940`; GUID text has separate 64-bit hex path and exact resolver/not-found/invalid error branches.
-- [x] Current local candidate SHA256 `c97218fcf4c375d385cf088f6883c03c23fe974ae0fe7c302614b7f6609ddb05`, size `374272` bytes.
+- [x] Exact final API37 build id restored through `apply_overlay.py` and locally rebuilt.
+- [x] Meaningful `.rdata` delta reduced from `0x50` to `0x0c` without padding.
+- [x] Current build-id-aligned local candidate SHA256 `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`, size `374272` bytes.
 
 ## Immediate next work
 
-- [ ] Identify the owner/xref of target string `UNIT_RESOLVER_UNAVAILABLE`; do not add it speculatively.
-- [ ] Inspect remaining PE delta: target `380928` vs recovery `374272` = `6656` bytes. Current section deltas are primarily `.text` (`0x489c0` vs `0x47148`), then `.reloc`; `.rdata` is already within `0x50` bytes.
-- [ ] Continue recovering actual implementation differences rather than padding.
+- [ ] Treat `UNIT_RESOLVER_UNAVAILABLE` cautiously: direct/suffix absolute-address scan found no code xref in the final target; do not invent ownership unless another reference form is proven.
+- [ ] Inspect remaining PE delta: target `380928` vs recovery `374272` = `6656` bytes. Remaining section delta is overwhelmingly `.text` (`0x489c0` vs `0x47148`); `.rdata` is now `0xa4fb` vs `0xa4ef`.
+- [ ] Use API36→API37 stage delta to focus on real Spatial implementation/wrapper differences instead of padding.
 - [ ] Repair truncated `recovery/archive.parts` so GitHub Actions reproduces the local build.
 
 ## Runtime validation
