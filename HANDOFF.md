@@ -4,86 +4,68 @@
 
 `recovery/unitstate-us1r2-exact`
 
-This branch is the current API34-37 behavior-equivalent recovery line. API33 remains the last source-authentic baseline.
+API33 is the last source-authentic baseline. API34-37 is behavior-equivalent reconstruction from final DLL disassembly, historical branches/source, diagnostic plugins and supporting references.
 
-## Source-authentic baseline
+## Baseline / target
 
-`TaiYangShenDian_ARX1_API33_DW1_LOS1_HANDOFF_20260830.zip`
+- API33 exact rebuild SHA256 `aa598a044ee3236c31a87d25d1646cf35a3cf9c3e85a120eea542645af96ba3e`.
+- Final API37 target SHA256 `1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae`, size `380928`, callable APIs `118`, broad dotted strings `129`.
 
-- API 33
-- exact rebuild SHA256 `aa598a044ee3236c31a87d25d1646cf35a3cf9c3e85a120eea542645af96ba3e`
+## Current local candidate
 
-## Final target
+- SHA256 `c97218fcf4c375d385cf088f6883c03c23fe974ae0fe7c302614b7f6609ddb05`
+- size `374272`
+- remaining file-size delta `6656`
+- callable APIs `118/118`, missing `0`, extra `0`
+- broad dotted strings `129/129`, missing `0`, extra `0`
+- runtime verified: no
 
-`taiyangshendian_API37_S5_R1F1.dll`
+## Current module state
 
-- API 37
-- SHA256 `1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae`
-- size `380928`
-- known callable API count `118`
-- broad dotted-string count `129`
+### Cooldown CD1-R2
 
-## Current exact-surface recovery candidate
+Engine query `0x006E2EA0`, uint32 timing, kind/source, STARTED/CHANGED/READY, reset semantics, SpellRec classification, exact Status/Get policy surface and world-leave reset are integrated. Successful init status is `READY_NATIVEBUS_ENGINE_QUERY`.
 
-Latest local compile:
+### UnitState US1-R2
 
-- SHA256 `6bd0239cd15e66486c47267f70ef9dc6f31cc70b6878e12f08ffa49cfaabb393`
-- size `373760`
-- target delta `7168`
-- strict callable APIs: `118/118`, missing `0`, extra `0`
-- broad dotted strings: `129/129`, missing `0`, extra `0`
-- runtime verified: **no**
+Descriptor/status/events/lifecycle and public Get/Track/Untrack/Clear surfaces are integrated. Successful init status is `READY_TRACKED_UPDATEOBJECT_GATE`.
 
-Do not pad the remaining binary-size delta. API34-37 source is reconstructed behavior-equivalent C++, not the original lost source text.
+Final selector helper has now been recovered from `0x100466AF`:
 
-## Cooldown CD1-R2
+- case-insensitive `player`, `target`, `mouseover`, `pet`
+- `party1..4`
+- `raid1..40`
+- recognized tokens call client resolver `0x00515940` and read GUID from object `+0x30/+0x34`
+- errors: `RESOLVE_UNIT_UNAVAILABLE`, `UNIT_NOT_FOUND`
+- non-token input follows optional-`0x`, max-16-hex-digit GUID parsing; invalid input -> `GUID_INVALID`
 
-Recovered and integrated:
+This selector behavior is compile-verified locally. `UNIT_RESOLVER_UNAVAILABLE` is still present in the target but its owning API/handler has not been proven; do not invent an association.
 
-- engine query `0x006E2EA0`
-- uint32 wrap-safe timing
-- kinds NONE/GCD/SPELL/UNKNOWN
-- sources 1..7
-- STARTED/CHANGED/READY events
-- CLEAR one / CHEAT all reset semantics
-- SpellRec timing fields `+0x4C`, `+0x50`, `+0x274`, `+0x278`
-- successful init status `READY_NATIVEBUS_ENGINE_QUERY`
-- exact Status/Get policy fields, next-wake state, last-change/source state
-- `onWorldLeaving()` clears records and advances nonzero world generation
-- existing lifecycle funnel used; no new hook
+### Spatial S5-R1F1
 
-## UnitState US1-R2
+Historical range/reach formulas and final rear-axis dot behavior are integrated. The ~105° live-test observation was unfinished and is not a threshold.
 
-Recovered and integrated:
+## Remaining binary delta
 
-- `GUID -> 0x00464870 -> object -> object+0x08 descriptor`
-- health/power/max-power/flags/dynamic-flags exact descriptor layout
-- dynamic dead mask `0x20`, combat mask `0x00080000`
-- Health/Power/Combat custom events
-- category lastChangedMask `1/2/4`
-- capacity `128`
-- successful init status `READY_TRACKED_UPDATEOBJECT_GATE`
-- Get works for untracked selectors and exposes final table surface: visible/fieldsValid/tracked/initialized, flags, active power, all five power lanes and code
-- Untrack is idempotent for NOT_TRACKED
-- Clear returns `true,"CLEARED"`
-- worldGeneration advances on existing PLAYER_LEAVING_WORLD funnel
+Target vs recovery sections now show the remaining difference is mainly code:
 
-Remaining UnitState gap: reproduce exact selector helper around client resolver `0x00515940`, including player/target/mouseover/pet/partyN/raidN and exact errors. `UNIT_RESOLVER_UNAVAILABLE` still needs xref ownership before implementation.
+- target `.text` `0x489c0`; recovery `.text` `0x47148`
+- target `.rdata` `0xa4fb`; recovery `.rdata` `0xa4ab`
+- target `.data` `0x4c00`; recovery `.data` `0x4c00`
+- target `.reloc` `0x4fb0`; recovery `.reloc` `0x4df0`
 
-## Spatial S5-R1F1
+Continue looking for real implementation differences; never pad.
 
-Recovered historical range/reach formulas and final rear-axis dot semantics. No 105° rule is implemented; the observed ~105° value came from unfinished testing and is not a confirmed threshold.
+## CI / runtime
 
-## Build/CI
-
-Local compile is currently authoritative. GitHub Actions remains blocked by incomplete/truncated `recovery/archive.parts` source reconstruction.
+GitHub Actions reconstruction remains blocked by truncated `recovery/archive.parts`; local clang-cl/lld-link compilation is authoritative for now. Live-client regression remains pending.
 
 ## Evidence priority
 
 1. final target DLL disassembly
 2. historical project branches/source handoffs
-3. Aug 25-31 diagnostic plugins
-4. Turtle/Tortoise 1.18.1 for server/protocol cross-check only
+3. Aug 25-31 plugins
+4. Turtle/Tortoise 1.18.1 for protocol/server semantics only
 5. other 1.12 client references
 
 ## Maintenance
