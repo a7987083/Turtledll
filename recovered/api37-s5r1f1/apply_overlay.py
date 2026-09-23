@@ -67,6 +67,12 @@ def main() -> None:
     build.write_text(b)
 
     d = dllmain.read_text()
+    d = replace_once(
+        d,
+        'constexpr const char* BUILD_ID = "RECOVERED-API37-S5R1F1";',
+        'constexpr const char* BUILD_ID = "20260831-v140-api37-foundation-f1-cd1r2-us1r2-stage5-spatial-s5r1f1-facing-axis-calibration";',
+        "exact API37 build id",
+    )
     if "TysCooldownCore::onWorldLeaving();" not in d:
         if "        TysUnitStateCore::onWorldLeaving();\n" in d:
             d = d.replace(
