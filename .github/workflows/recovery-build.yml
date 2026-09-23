@@ -47,6 +47,16 @@ jobs:
           fi
           find /tmp/api37-source -maxdepth 3 -type f | sort | head -200
 
+      - name: Apply current recovered modules
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$(dirname "$(find /tmp/api37-source -type f -path '*/build/build.sh' | head -n1)")/.."
+          ROOT="$(cd "$ROOT" && pwd)"
+          python3 recovered/api37-s5r1f1/apply_overlay.py "$ROOT"
+          grep -n 'TysUnitStateCore::onWorldLeaving' "$ROOT/src/dllmain.cpp"
+          grep -n 'custom_event_bridge.obj' "$ROOT/build/build.sh"
+
       - name: Build recovered DLL
         shell: bash
         run: |
