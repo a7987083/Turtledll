@@ -1,7 +1,15 @@
 {
   "project": "TaiYangShenDian API37 recovery",
-  "date": "2026-09-22",
+  "date": "2026-09-23",
   "repository": "a7987083/Turtledll",
+  "active_branch": "recovery/unitstate-us1r2-exact",
+  "maintenance_files": [
+    "ROADMAP.md",
+    "CHANGELOG_DEV.md",
+    "HANDOFF.md",
+    "PROJECT_STATE.json",
+    "KNOWN_ISSUES.md"
+  ],
   "baseline": {
     "api": 33,
     "name": "ARX1_DW1_LOS1",
@@ -11,115 +19,116 @@
   "target": {
     "api": 37,
     "name": "S5_R1F1",
+    "version": "1.4.0-AURA6D4-R4-CAST1R2-LFX1-ARX1-DW1-LOS1-F1-CD1R2-US1R2-S5R1F1",
+    "build_id": "20260831-v140-api37-foundation-f1-cd1r2-us1r2-stage5-spatial-s5r1f1-facing-axis-calibration",
     "sha256": "1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae",
     "size_bytes": 380928
   },
   "recovery_build": {
-    "build_succeeded": true,
+    "previous_build_succeeded": true,
     "previous_full_recovery_sha256": "d0ac0158fba9d7aade4ee30afb86f14090e282556e7d86e99759ed107a7cbfff",
-    "api_string_set_missing": 0,
-    "api_string_set_extra": 0,
+    "previous_api_string_set_missing": 0,
+    "previous_api_string_set_extra": 0,
+    "current_source_rebuilt": false,
     "runtime_verified": false,
-    "note": "Previous build predates the 2026-09-22 historical-source recovery edits; current source edits are not yet rebuilt because CI source archive reconstruction remains blocked."
-  },
-  "stage_builds": {
-    "API34_Foundation_F1_previous": {
-      "build_succeeded": true,
-      "sha256": "3430a066a332852011a516c89f102449fb768b17f6efd49fde3a1ff533f49b98"
-    },
-    "API34_Foundation_F1_current_scaffold": {
-      "build_succeeded": true,
-      "sha256": "ed376804f577d7eba4cc445116da0880fa5d03944563cf5cc9286f86fe532571",
-      "runtime_equivalent": false
-    },
-    "API35_Cooldown_CD1R2_scaffold": {
-      "build_succeeded": true,
-      "sha256": "ec23f57be99909be37d393778354fdc9f1eb5f7940108293aa634dab592393ae",
-      "commands_present": ["Cooldown.Status", "Cooldown.Get", "Cooldown.List"],
-      "runtime_equivalent": false,
-      "superseded_by_source_edits": true
-    },
-    "API36_UnitState_US1R2_scaffold": {
-      "build_succeeded": true,
-      "sha256": "850645e671cdbd18bcb31c460b7a8d816f037d6f47ccd2176e911a43f213ff50",
-      "commands_present": ["UnitState.Status", "UnitState.Get", "UnitState.Track", "UnitState.Untrack", "UnitState.List", "UnitState.Clear"],
-      "descriptor_reconcile": "descriptor-and-active-power-read-path-recovered; post-handler scheduling architecture recovered",
-      "runtime_equivalent": false,
-      "superseded_by_source_edits": true
-    },
-    "API37_Spatial_S5R1F1_scaffold": {
-      "build_succeeded": true,
-      "sha256": "f165b2206598633fe66d3eb80685345f09bf1288229b4316788809555ea99282",
-      "commands_present": ["Spatial.Status", "Spatial.Get", "Unit.Distance", "Unit.Behind"],
-      "geometry_return_semantics": "historical-range-and-facing-core-recovered",
-      "runtime_equivalent": false,
-      "superseded_by_source_edits": true
-    }
+    "note": "Previous build predates current exact Cooldown/UnitState/Spatial edits and must not be represented as containing them."
   },
   "ci": {
     "workflow": "Recovery Build",
-    "latest_attempt": 3,
-    "latest_run_id": 35699905017,
+    "latest_known_run_id": 35699905017,
     "llvm_setup": "fixed",
-    "current_blocker": "recovery/archive.parts contains only three truncated XZ/base64 parts; xz reports Unexpected end of input",
-    "source_compile_reached": false
+    "current_blocker": "recovery/archive.parts is incomplete/truncated; xz previously failed with Unexpected end of input before source compilation"
   },
   "modules": {
     "Foundation_F1": {
       "status": "counter-semantics-disassembly-confirmed",
-      "dispatcher_compare": "0x10003EC7",
-      "status_handler": "0x1000584B",
       "fast_guid_address": "0x00464870",
-      "guid_counter_update_sites": "confirmed",
-      "los_counter_update_sites": "confirmed",
       "runtime_verified": false
     },
     "Cooldown_CD1R2": {
-      "status": "engine-query-clock-reset-packet-and-shared-event-bridge-recovered",
-      "status_handler": "0x10042F0A",
-      "get_handler": "0x10043C4E",
-      "list_handler": "0x100442E1",
+      "status": "core-behavior-substantially-recovered",
       "engine_query": "0x006E2EA0",
-      "engine_query_abi": "uint32 duration,start,enable; duration output precedes start output",
       "clock_semantics": "uint32-wrap-safe-ms",
-      "deadline_semantics": "active deadline revalidation; no 50ms engine polling",
-      "clear_packet_layout": "uint32 spellId + uint64 targetGuid",
-      "cooldown_cheat_packet_layout": "uint64 targetGuid; resets all cooldowns for target",
-      "reset_reconcile_architecture": "NativeBus incoming marks dirty before stock dispatch; shared worldTick callback runs after original world tick and re-queries engine state",
-      "custom_event_transport": "API33 dynamic FrameScript slot claim + SignalEventParam recovered",
-      "custom_event_transition_call_sites": "pending-wiring",
-      "kind_gcd_classification": "pending-final-binary-calibration",
+      "reset_semantics": "CLEAR one spell; CHEAT all tracked cooldowns for local target; post-stock engine requery",
+      "kind_mapping": {
+        "0": "NONE",
+        "1": "GCD",
+        "2": "SPELL",
+        "3": "UNKNOWN"
+      },
+      "source_mapping": {
+        "1": "SMSG_SPELL_GO",
+        "2": "SMSG_SPELL_COOLDOWN",
+        "3": "SMSG_COOLDOWN_EVENT",
+        "4": "SMSG_CLEAR_COOLDOWN",
+        "5": "SMSG_COOLDOWN_CHEAT",
+        "6": "DEADLINE_RECHECK",
+        "7": "EXPLICIT_ENGINE_QUERY"
+      },
+      "event_transitions": "STARTED on absent->active; READY on active->inactive; CHANGED on active->active state change; unchanged emits nothing",
+      "custom_event_transport": "API33 dynamic FrameScript slot claim + SignalEventParam",
+      "main_core_integration_pending": true,
       "runtime_verified": false
     },
     "UnitState_US1R2": {
-      "status": "descriptor-active-power-and-post-handler-architecture-recovered",
-      "dirty_gate": "UPDATE_OBJECT/COMPRESSED_UPDATE_OBJECT",
-      "fast_guid_lookup": "0x00464870",
-      "descriptor_layout_recovered": {
-        "unit_fields_ptr": "object+0x110",
-        "health": "+0x40",
-        "power1": "+0x44 + powerType*4",
-        "maxHealth": "+0x58",
-        "maxPower1": "+0x5C + powerType*4",
-        "powerType": "+0x7B",
-        "combatFlags": "+0xA0 bit 0x00080000"
+      "status": "exact-descriptor-and-status-surface-mostly-recovered",
+      "handlers": {
+        "Status": "0x10045A02",
+        "Track": "0x1004715F",
+        "Untrack": "0x10047589",
+        "List": "0x100476DD",
+        "Clear": "0x1004775C"
       },
-      "descriptor_empty_policy": "preserve-cache",
+      "snapshot_helper": "0x100469FE",
+      "world_tick_reconcile": "0x100450AF",
+      "dirty_gate": ["SMSG_UPDATE_OBJECT 0x00A9", "SMSG_COMPRESSED_UPDATE_OBJECT 0x01F6"],
+      "fast_guid_lookup": "0x00464870",
+      "capacity": 128,
+      "record_stride": "0x58",
+      "descriptor_layout": {
+        "pointer": "object+0x08",
+        "health": "+0x58",
+        "power1_to_5": "+0x5C..+0x6C",
+        "maxHealth": "+0x70",
+        "maxPower1_to_5": "+0x74..+0x84",
+        "powerType": "+0x90 high byte",
+        "unitFlags": "+0xB8",
+        "combatMask": "0x00080000",
+        "dynamicFlags": "+0x23C",
+        "deadDynamicMask": "0x20"
+      },
       "power_semantics": "ACTIVE_POWER_ONLY_TYPE_VALUE_MAX",
-      "power_mask_semantics": "BIT0_TYPE_BIT1_VALUE_BIT2_MAX",
-      "post_handler_architecture": "API33 NativeBus incoming subscriber marks dirty before original packet dispatch; NativeBus worldTick hook calls original world tick first, then UnitState subscriber reconciles descriptors. This places descriptor reads after stock packet processing without a new per-opcode hook.",
-      "custom_event_transport": "API33 dynamic FrameScript slot claim + SignalEventParam recovered",
+      "power_event_mask": "BIT0_TYPE_BIT1_VALUE_BIT2_MAX",
+      "last_changed_mask": "BIT0_HEALTH_BIT1_POWER_BIT2_COMBAT",
       "custom_event_payloads": {
         "TYS_UNIT_HEALTH_CHANGED": "guid,oldHealth,newHealth,maxHealth,dead",
         "TYS_UNIT_POWER_CHANGED": "guid,powerType,oldPower,newPower,maxPower,mask",
         "TYS_UNIT_COMBAT_CHANGED": "guid,oldCombat,newCombat"
       },
-      "custom_event_transition_call_sites": "pending-wiring",
+      "status_counter_globals": {
+        "reconcilePasses": "0x1021B74C",
+        "recordsChecked": "0x1021B750",
+        "objectUnavailable": "0x1021B754",
+        "descriptorFailures": "0x1021B758",
+        "healthEvents": "0x1021B75C",
+        "powerEvents": "0x1021B760",
+        "combatEvents": "0x1021B764",
+        "trackCalls": "0x1021B768",
+        "untrackCalls": "0x1021B76C",
+        "capacityFailures": "0x1021B770"
+      },
+      "status_surface_correction": "Final UnitState.Status does not expose descriptorClears, descriptorEmptyPreserves, descriptorReconciles or descriptorUnbinds; recovery source must remove those invented public fields.",
+      "world_generation": {
+        "address": "0x100595F4",
+        "advance_condition": "PLAYER_LEAVING_WORLD reset",
+        "per_update_object": false
+      },
+      "lifecycle_funnel_integration_pending": true,
+      "status_source_alignment_pending": true,
       "runtime_verified": false
     },
     "Spatial_S5R1F1": {
-      "status": "historical-range-core-and-s5r1f1-rear-axis-implemented",
-      "command_surface": "confirmed",
+      "status": "historical-range-core-and-final-rear-axis-recovered",
       "range_semantics": {
         "rangedEdgeGap": "max(0,distance3d-actorCombatReach-targetCombatReach)",
         "chainsEdgeGap": "max(0,distance3d-actorBoundingRadius-targetBoundingRadius)",
@@ -127,33 +136,31 @@
         "meleeBaseReach": "max(5.0,max(1.5,actorReach)+max(1.5,targetReach)+1.333333373069763)",
         "meleeBaseGap2d": "max(0,distance2d-meleeBaseReach)"
       },
-      "descriptor_offsets": {
-        "boundingRadius": "unitFields+0x1EC",
-        "combatReach": "unitFields+0x1F0"
-      },
       "facing_semantics": "rearDot=-forwardDot; rearDot>0 behind; rearDot<0 front",
-      "server_backstab_truth": "not-claimed-by-Spatial",
+      "server_backstab_truth": "separate observation only",
+      "experimental_105_degree_note": "incomplete special-target test observation; not a confirmed threshold and not implemented",
       "runtime_verified": false
     }
   },
-  "authentic_api33_shared_infrastructure": {
-    "native_bus_incoming": "0x00537AA0",
-    "native_bus_outgoing": "0x005379A0",
-    "native_bus_world_tick": "0x0066FD50",
-    "framescript_create_events": "0x00703D90",
-    "framescript_set_event_count": "0x007053B0",
-    "framescript_event_object_data": "0x00CEEF68",
-    "signal_event_param": "0x00703F50",
-    "sstr_dup_a": "0x0064A620",
-    "expanded_event_count": 700,
-    "dynamic_event_policy": "find existing same-name slot else claim first NULL slot from low end; never overwrite occupied names"
+  "evidence_priority": [
+    "final target DLL disassembly",
+    "user historical GitHub/source handoffs",
+    "Aug 25-31 diagnostic plugins",
+    "Turtle/Tortoise 1.18.1 server source for protocol/server semantics",
+    "ClassicAPI/SuperWoW/Nampower for 1.12 client internals"
+  ],
+  "recent_commits": {
+    "unitstate_status_exact_doc": "1f95a56ad6473100007eb620925306c77a1f6cb2",
+    "roadmap_update": "237f77eb87e8ad192a976db31e8eb4fcfcc13c33",
+    "handoff_update": "e12f8ac9ae8b66d2a9f455402cfa7221fe29a01e",
+    "changelog_created": "827948c105d1a087ff7406623a06ff23809a57d2",
+    "known_issues_created": "b4de75b036b5eb8864f71f372f6f7d2a0d1d8041"
   },
-  "source_edits_20260922": {
-    "spatial_core_commit": "29ec33ebf6d0a9b90cc906ff20837f7f1804fbd8",
-    "cooldown_core_commit": "087373b86dd0ca95738052d32551c361fd208f15",
-    "unit_state_core_commit": "9e3959df36b01499b2c8858a29da0f5413360a75",
-    "custom_event_bridge_header_commit": "94f5398abc0fe59ba965badf4c3567d338b6cf0c",
-    "custom_event_bridge_cpp_commit": "92d4c6f3a2c7b788f79a571038bbb69f316ca6cd",
-    "custom_event_evidence_commit": "fe4a14714bae8dd231511520a444ea0703c9a9c1"
-  }
+  "next_actions": [
+    "rewrite UnitState Status bookkeeping/output to exact binary-confirmed surface",
+    "restore PLAYER_LEAVING_WORLD lifecycle callback through historical NativeBus/event infrastructure",
+    "integrate exact Cooldown helpers into cooldown_core.cpp",
+    "repair CI source archive reconstruction and rebuild",
+    "perform live runtime regression"
+  ]
 }
