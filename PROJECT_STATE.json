@@ -24,20 +24,20 @@
     "sha256": "1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae",
     "size_bytes": 380928
   },
-  "recovery_build": {
-    "previous_build_succeeded": true,
-    "previous_full_recovery_sha256": "d0ac0158fba9d7aade4ee30afb86f14090e282556e7d86e99759ed107a7cbfff",
-    "previous_api_string_set_missing": 0,
-    "previous_api_string_set_extra": 0,
-    "current_source_rebuilt": false,
+  "build_validation": {
+    "unitstate_overlay_compile_succeeded": true,
+    "unitstate_overlay_sha256": "d44302b3227c5a13ae9132db4d1b080512dede81820f32a60aeb0782f4c92099",
+    "cooldown_integration_compile_succeeded": true,
+    "cooldown_integration_sha256": "828e7c683ad6c623c37f1b38a95fc5dd74e0242bc7946af13254dad863fa3907",
+    "full_latest_unitstate_cooldown_spatial_build_succeeded": false,
     "runtime_verified": false,
-    "note": "Previous build predates current exact Cooldown/UnitState/Spatial edits and must not be represented as containing them."
+    "note": "The two current SHA values are stage-specific compile tests. Neither is the final all-latest API37 build."
   },
   "ci": {
     "workflow": "Recovery Build",
     "latest_known_run_id": 35699905017,
     "llvm_setup": "fixed",
-    "current_blocker": "recovery/archive.parts is incomplete/truncated; xz previously failed with Unexpected end of input before source compilation"
+    "current_blocker": "recovery/archive.parts remains incomplete/truncated; GitHub Actions cannot reconstruct the full source archive"
   },
   "modules": {
     "Foundation_F1": {
@@ -46,10 +46,10 @@
       "runtime_verified": false
     },
     "Cooldown_CD1R2": {
-      "status": "core-behavior-substantially-recovered",
+      "status": "exact-classifier-transition-events-integrated-and-compile-tested",
       "engine_query": "0x006E2EA0",
       "clock_semantics": "uint32-wrap-safe-ms",
-      "reset_semantics": "CLEAR one spell; CHEAT all tracked cooldowns for local target; post-stock engine requery",
+      "reset_semantics": "CLEAR one tracked spell; CHEAT all tracked cooldowns for local target; post-stock engine requery",
       "kind_mapping": {
         "0": "NONE",
         "1": "GCD",
@@ -65,20 +65,20 @@
         "6": "DEADLINE_RECHECK",
         "7": "EXPLICIT_ENGINE_QUERY"
       },
+      "spellrec_fields": {
+        "RecoveryTime": "+0x4C",
+        "CategoryRecoveryTime": "+0x50",
+        "StartRecoveryCategory": "+0x274",
+        "StartRecoveryTime": "+0x278"
+      },
       "event_transitions": "STARTED on absent->active; READY on active->inactive; CHANGED on active->active state change; unchanged emits nothing",
+      "dirty_source_policy": "packet sources 1..5 are preserved over later deadline/explicit rechecks",
       "custom_event_transport": "API33 dynamic FrameScript slot claim + SignalEventParam",
-      "main_core_integration_pending": true,
+      "compile_test_sha256": "828e7c683ad6c623c37f1b38a95fc5dd74e0242bc7946af13254dad863fa3907",
       "runtime_verified": false
     },
     "UnitState_US1R2": {
-      "status": "exact-descriptor-and-status-surface-mostly-recovered",
-      "handlers": {
-        "Status": "0x10045A02",
-        "Track": "0x1004715F",
-        "Untrack": "0x10047589",
-        "List": "0x100476DD",
-        "Clear": "0x1004775C"
-      },
+      "status": "exact-descriptor-status-lifecycle-integrated-and-compile-tested",
       "snapshot_helper": "0x100469FE",
       "world_tick_reconcile": "0x100450AF",
       "dirty_gate": ["SMSG_UPDATE_OBJECT 0x00A9", "SMSG_COMPRESSED_UPDATE_OBJECT 0x01F6"],
@@ -97,38 +97,17 @@
         "dynamicFlags": "+0x23C",
         "deadDynamicMask": "0x20"
       },
-      "power_semantics": "ACTIVE_POWER_ONLY_TYPE_VALUE_MAX",
-      "power_event_mask": "BIT0_TYPE_BIT1_VALUE_BIT2_MAX",
       "last_changed_mask": "BIT0_HEALTH_BIT1_POWER_BIT2_COMBAT",
-      "custom_event_payloads": {
-        "TYS_UNIT_HEALTH_CHANGED": "guid,oldHealth,newHealth,maxHealth,dead",
-        "TYS_UNIT_POWER_CHANGED": "guid,powerType,oldPower,newPower,maxPower,mask",
-        "TYS_UNIT_COMBAT_CHANGED": "guid,oldCombat,newCombat"
-      },
-      "status_counter_globals": {
-        "reconcilePasses": "0x1021B74C",
-        "recordsChecked": "0x1021B750",
-        "objectUnavailable": "0x1021B754",
-        "descriptorFailures": "0x1021B758",
-        "healthEvents": "0x1021B75C",
-        "powerEvents": "0x1021B760",
-        "combatEvents": "0x1021B764",
-        "trackCalls": "0x1021B768",
-        "untrackCalls": "0x1021B76C",
-        "capacityFailures": "0x1021B770"
-      },
-      "status_surface_correction": "Final UnitState.Status does not expose descriptorClears, descriptorEmptyPreserves, descriptorReconciles or descriptorUnbinds; recovery source must remove those invented public fields.",
       "world_generation": {
         "address": "0x100595F4",
-        "advance_condition": "PLAYER_LEAVING_WORLD reset",
+        "advance_condition": "PLAYER_LEAVING_WORLD existing lifecycle funnel",
         "per_update_object": false
       },
-      "lifecycle_funnel_integration_pending": true,
-      "status_source_alignment_pending": true,
+      "compile_test_sha256": "d44302b3227c5a13ae9132db4d1b080512dede81820f32a60aeb0782f4c92099",
       "runtime_verified": false
     },
     "Spatial_S5R1F1": {
-      "status": "historical-range-core-and-final-rear-axis-recovered",
+      "status": "source-and-evidence-recovered; latest compile integration pending",
       "range_semantics": {
         "rangedEdgeGap": "max(0,distance3d-actorCombatReach-targetCombatReach)",
         "chainsEdgeGap": "max(0,distance3d-actorBoundingRadius-targetBoundingRadius)",
@@ -142,25 +121,23 @@
       "runtime_verified": false
     }
   },
+  "external_reference": {
+    "tortoise_repo": "tortoise-wow/tortoise-wow",
+    "observed_commit": "4f4fcaa158904a4996a8fb84e10d6ebb0cc0d9ca",
+    "cooldown_crosscheck": "server source exposes separate RemoveSpellCooldown and RemoveAllSpellCooldown paths; used only as supporting protocol evidence"
+  },
   "evidence_priority": [
     "final target DLL disassembly",
-    "user historical GitHub/source handoffs",
+    "user historical GitHub/source handoffs and branches",
     "Aug 25-31 diagnostic plugins",
     "Turtle/Tortoise 1.18.1 server source for protocol/server semantics",
     "ClassicAPI/SuperWoW/Nampower for 1.12 client internals"
   ],
-  "recent_commits": {
-    "unitstate_status_exact_doc": "1f95a56ad6473100007eb620925306c77a1f6cb2",
-    "roadmap_update": "237f77eb87e8ad192a976db31e8eb4fcfcc13c33",
-    "handoff_update": "e12f8ac9ae8b66d2a9f455402cfa7221fe29a01e",
-    "changelog_created": "827948c105d1a087ff7406623a06ff23809a57d2",
-    "known_issues_created": "b4de75b036b5eb8864f71f372f6f7d2a0d1d8041"
-  },
   "next_actions": [
-    "rewrite UnitState Status bookkeeping/output to exact binary-confirmed surface",
-    "restore PLAYER_LEAVING_WORLD lifecycle callback through historical NativeBus/event infrastructure",
-    "integrate exact Cooldown helpers into cooldown_core.cpp",
-    "repair CI source archive reconstruction and rebuild",
+    "convert/integrate latest Spatial S5-R1F1 source into compile-verified overlay",
+    "build latest UnitState + Cooldown + Spatial together",
+    "run API/string/static regression against final target",
+    "repair GitHub CI source reconstruction",
     "perform live runtime regression"
   ]
 }
