@@ -15,37 +15,33 @@ API33 is the last source-authentic baseline. API34-37 is behavior-equivalent rec
 
 - SHA256 `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`
 - size `374272`
-- previous size delta `6656`
+- previous size delta `6656` (stale after latest source corrections)
 - callable APIs `118/118`, missing `0`, extra `0`
 - dotted strings `129/129`, missing `0`, extra `0`
-- exact target build id restored
 - runtime verified: no
 
-This DLL predates the newest UnitState/Spatial selector and Spatial degenerate-mode corrections. Do not present it as the latest behavior-complete build.
+This DLL predates the newest selector, Spatial, and fast-GUID ABI/fallback corrections. Do not present it as the latest behavior-complete build.
 
 ## Cooldown CD1-R2
 
-Engine query `0x006E2EA0`, uint32 timing, source/kind classification, STARTED/CHANGED/READY transitions, reset semantics, exact Status/Get policy surface and world-leave reset are integrated. Successful init status is `READY_NATIVEBUS_ENGINE_QUERY`.
+Engine query `0x006E2EA0`, source/kind classification, STARTED/CHANGED/READY transitions, reset semantics, exact Status/Get policy surface and world-leave reset are integrated. Successful init status is `READY_NATIVEBUS_ENGINE_QUERY`.
 
 ## UnitState US1-R2
 
-Descriptor/status/events/lifecycle are recovered. Final descriptor path is `object+0x08 -> descriptor`, with health/power/flags fields documented in `recovery/API36_UNITSTATE_US1R2_EXACT_DISASSEMBLY.md`.
+Final descriptor path is `object+0x08 -> descriptor`; health/power/flags/event/lifecycle behavior is documented in `recovery/API36_UNITSTATE_US1R2_EXACT_DISASSEMBLY.md`.
 
-### Selector correction
+Final selector helper `0x100466AF`:
 
-Final selector helper `0x100466AF` has now been rechecked. Earlier recovery behavior was too permissive.
+- Get/Track/Untrack public selector is string-only
+- case-insensitive player/target/mouseover/pet/party1..4/raid1..40
+- token resolver `0x00515940` returns object pointer
+- live GUID read from object `+0x30/+0x34`
+- non-token path: optional `0x`, 1..16 hex digits, surrounding spaces/tabs, nonzero
+- errors: `BAD_SELECTOR`, `RESOLVE_UNIT_UNAVAILABLE`, `UNIT_NOT_FOUND`, `GUID_INVALID`
 
-- public Get/Track/Untrack argument 2 is string-only
-- recognized tokens: case-insensitive player/target/mouseover/pet/party1..4/raid1..40
-- token resolver: client `0x00515940`, returning object pointer
-- GUID read: object `+0x30/+0x34`, nonzero
-- non-token syntax: optional `0x`, 1..16 hex digits, surrounding spaces/tabs only, nonzero
-- precise errors: `BAD_SELECTOR`, `RESOLVE_UNIT_UNAVAILABLE`, `UNIT_NOT_FOUND`, `GUID_INVALID`
-- success helper status: `OK`
+UnitState snapshot fast lookup `0x00464870` is now modeled with the binary-confirmed ABI `__stdcall(low32, high32)` in the exact post-overlay.
 
-`apply_overlay.py` now transforms the earlier simplified UnitState selector implementation into this final public contract before build.
-
-`UNIT_RESOLVER_UNAVAILABLE` is a different target string whose owning code path remains unproven; do not assign it speculatively.
+`UNIT_RESOLVER_UNAVAILABLE` is a separate target string whose owner remains unproven; do not conflate it with `RESOLVE_UNIT_UNAVAILABLE`.
 
 ## Spatial S5-R1F1
 
@@ -58,34 +54,53 @@ Public handlers:
 
 Confirmed behavior:
 
-- Spatial public selectors are string-only.
-- token resolver is `0x00515940`; non-token input is a hex GUID path.
-- current reconstructed direct GUID lookup uses `0x00464870`; target helper `0x1000BB5D` appears to keep an additional ObjectManager fallback path, still pending exact recovery.
-- Unit.Distance aliases are ASCII case-insensitive via helper `0x100057EE`.
-- exact RANGED/CHAINS/MELEE formulas are target-confirmed.
-- reach helper uses `object+0x08 -> descriptor+0x204/+0x208`, finite `[0,100]`.
-- position/facing validation and eight-iteration Newton sqrt are target-confirmed.
-- Behind validates targetFacing before distance branch.
-- if XY distance `<=0.0001`, Behind helper succeeds with false/dot0.
-- otherwise final S5-R1F1 calibrated score is `(actor.x-target.x)/distance2d`; targetFacing is diagnostic/output only in this build.
+- selectors are string-only
+- token resolver `0x00515940`; non-token input uses optional-`0x`, 1..16-digit hex GUID parser
+- Unit.Distance aliases are ASCII case-insensitive via helper `0x100057EE`
+- exact RANGED/CHAINS/MELEE formulas target-confirmed
+- reach helper `object+0x08 -> descriptor+0x204/+0x208`, finite `[0,100]`
+- facing `object+0x118 -> movement+0x1c`, finite `[-100,100]`
+- eight-iteration Newton sqrt path
+- Behind validates facing before distance handling
+- XY distance `<=0.0001` succeeds false/dot0
+- otherwise S5-R1F1 calibrated score is `(actor.x-target.x)/distance2d`; targetFacing remains diagnostic/output only
 
-This is client calibration behavior, not server Backstab truth. S5-R2 ~105° remains unfinished observation only and must not become a threshold.
+### Literal GUID object lookup
+
+Target helper `0x1000BB5D` is now recovered more completely:
+
+1. call `0x00464870` using `__stdcall(low32, high32)`;
+2. validate returned object range/GUID;
+3. on miss/reject, bounded explicit ObjectManager walk using:
+   - global manager pointer `0x00B41414`
+   - head `manager+0xAC`
+   - next-link base offset `manager+0xA4`
+   - next `*(current + nextBase + 4)`
+   - max 4096 candidates
+   - stop on zero/cycle/bad link
+
+This is explicit-query fallback, not background ObjectManager polling. Recovery implementation is carried by `post_overlay_exact.py` after the main overlay.
+
+S5-R2 ~105° remains unfinished observation only; no threshold is implemented.
 
 ## Build / CI
 
-`apply_overlay.py` currently carries the newest UnitState and Spatial exact-target corrections. GitHub Actions now syntax-checks the overlay before source reconstruction; that syntax step passes.
+Build transformation order:
 
-Full CI relink remains blocked earlier in source reconstruction because `recovery/archive.parts` contains only three 12KB base64 pieces of an incomplete XZ stream. Previous log shows `xz: Unexpected end of input`.
+1. authentic API33 source base
+2. `recovered/api37-s5r1f1/apply_overlay.py`
+3. `recovered/api37-s5r1f1/post_overlay_exact.py`
+4. existing clang-cl/lld-link build
 
-A complete self-consistent API33 source archive must replace all existing parts; appending unrelated chunks is invalid because the current parts belong to a different compressed stream.
+Both Python overlay scripts pass CI syntax validation. GitHub Actions still fails before overlay/build because `recovery/archive.parts` is a truncated XZ stream. Existing parts must be replaced by one complete self-consistent archive; unrelated chunks cannot be appended.
 
 ## Next steps
 
-1. replace/fix CI source archive or otherwise materialize the authentic API33 source base;
-2. apply current overlay and full-link API37;
+1. replace/fix the API33 source archive used by CI;
+2. full-link API37 with both overlays;
 3. rerun callable API `118/118` and dotted strings `129/129`;
 4. recalculate PE section delta;
-5. recover target GUID-object fallback traversal if it remains a meaningful behavior difference;
+5. inspect remaining binary behavior differences only if static delta justifies it;
 6. live-client regression.
 
 Never pad to match binary size.
