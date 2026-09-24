@@ -50,16 +50,28 @@ def main() -> None:
         shutil.copy2(src, target_src / name)
         copied.append(name)
 
-    # Final S5-R1F1 disassembly shows the calibrated rear-axis score is the
-    # normalized actor-target X delta. Target facing is validated and returned
-    # for diagnostics, but it is not used in the dot computation in this build.
     spatial = target_src / "spatial_core.cpp"
     s = spatial.read_text()
+
+    # Final S5-R1F1 uses a case-insensitive ASCII compare helper at 0x100057EE
+    # for Unit.Distance mode aliases.
     s = replace_once(
         s,
-        "float sv=0.0f,cv=0.0f;sincosf_x87(f,&sv,&cv);float nx=dx/d2,ny=dy/d2,forwardDot=nx*cv+ny*sv;s->targetFacing=f;s->behindDot=-forwardDot;",
-        "s->targetFacing=f;s->behindDot=dx/d2;",
-        "S5-R1F1 calibrated rear-axis dot",
+        "static bool sameText(const char*a,const char*b){if(!a||!b)return false;for(unsigned i=0;;++i){if(a[i]!=b[i])return false;if(!a[i])return true;}}",
+        "static unsigned char foldAscii(unsigned char c){if(c>='A'&&c<='Z')return (unsigned char)(c|0x20u);return c;}static bool sameText(const char*a,const char*b){if(!a||!b)return false;for(unsigned i=0;;++i){unsigned char ac=(unsigned char)a[i],bc=(unsigned char)b[i];if(foldAscii(ac)!=foldAscii(bc))return false;if(!ac||!bc)return ac==bc;}}",
+        "S5-R1F1 case-insensitive mode compare",
+    )
+
+    # Final behind helper 0x1000B7CB validates target facing before evaluating
+    # the calibrated rear-axis score. The score itself is normalized X delta;
+    # targetFacing remains diagnostic/output data in this build. A <=0.0001 XY
+    # distance succeeds with behind=false and dot=0 instead of returning an
+    # unavailable error.
+    s = replace_once(
+        s,
+        "static bool sampleBehind(SpatialSample*s){if(!s)return false;Vec3 ap={},tp={};if(!unitPosition(s->actorObject,&ap)||!unitPosition(s->targetObject,&tp))return false;float dx=ap.x-tp.x,dy=ap.y-tp.y,d2sq=dx*dx+dy*dy;if(!(d2sq>EPSILON_XY*EPSILON_XY))return false;float d2=sqrtApprox(d2sq),f=0.0f;if(!unitFacing(s->targetObject,&f))return false;float sv=0.0f,cv=0.0f;sincosf_x87(f,&sv,&cv);float nx=dx/d2,ny=dy/d2,forwardDot=nx*cv+ny*sv;s->targetFacing=f;s->behindDot=-forwardDot;s->behindKnown=finitef(s->behindDot);s->behind=s->behindKnown&&s->behindDot>0.0f;return s->behindKnown;}",
+        "static bool sampleBehind(SpatialSample*s){if(!s)return false;Vec3 ap={},tp={};if(!unitPosition(s->actorObject,&ap)||!unitPosition(s->targetObject,&tp))return false;float f=0.0f;if(!unitFacing(s->targetObject,&f))return false;s->targetFacing=f;float dx=ap.x-tp.x,dy=ap.y-tp.y,d2sq=dx*dx+dy*dy;float d2=sqrtApprox(d2sq);s->behindKnown=true;if(!(d2>EPSILON_XY)){s->behindDot=0.0f;s->behind=false;return true;}s->behindDot=dx/d2;s->behindKnown=finitef(s->behindDot);s->behind=s->behindKnown&&s->behindDot>0.0f;return s->behindKnown;}",
+        "S5-R1F1 calibrated rear-axis and degenerate XY path",
     )
     spatial.write_text(s)
 
