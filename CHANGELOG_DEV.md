@@ -15,9 +15,11 @@
 - Disassembled target position/reach/facing helpers. Corrected Spatial reach from historical `object+0x110` approximation to final `object+0x08 -> descriptor+0x204/+0x208`; radius/reach must be finite and within `[0,100]`.
 - Added final facing range validation `[-100,100]`.
 - Replaced x87 `fsqrt` reconstruction with the target's eight-iteration Newton sqrt approximation initialized with `max(value,1.0)`.
-- Corrected source compiles successfully under the existing i686 clang-cl no-STL/no-default-lib flags; object SHA256 `fd7ecdd871e5dbbef58eab16cb88d5aa4a531296a3690b1183697b447e673554`.
-- Added `recovery/API37_SPATIAL_S5R1F1_PUBLIC_SURFACE_DISASSEMBLY.md`.
-- Full latest DLL relink has not yet been completed, so the last valid full-candidate SHA remains `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`.
+- Rechecked final behind helper `0x1000B7CB` instruction-by-instruction. The calibrated score is not the earlier conventional cos/sin facing dot; target code zeroes the Y coefficient before accumulation, yielding `behindDot=(actor.x-target.x)/distance2d`, with `behind = behindDot > 0`. `targetFacing` is validated and returned only as diagnostic/output data in S5-R1F1.
+- Added an overlay-time exact rear-axis patch so future full builds use the disassembly-confirmed normalized-X behavior.
+- Exact Spatial source object compile previously succeeded under the existing i686 clang-cl no-STL/no-default-lib flags; full latest DLL relink is still pending.
+- Added/updated `recovery/API37_SPATIAL_S5R1F1_PUBLIC_SURFACE_DISASSEMBLY.md`.
+- Last valid full-candidate SHA remains `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34` until a new complete relink succeeds.
 
 ### Build-id alignment and binary-delta investigation
 
