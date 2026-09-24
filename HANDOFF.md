@@ -15,95 +15,87 @@ API33 is the last source-authentic baseline. API34-37 is behavior-equivalent rec
 
 - SHA256 `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`
 - size `374272`
-- previous known size delta `6656`
+- previous size delta `6656`
 - callable APIs `118/118`, missing `0`, extra `0`
 - dotted strings `129/129`, missing `0`, extra `0`
 - exact target build id restored
 - runtime verified: no
 
-A newer Spatial source/overlay revision is more exact than this DLL but has not yet been full-linked. Do not assign a newer DLL SHA until relink succeeds.
+This DLL predates the newest UnitState/Spatial selector and Spatial degenerate-mode corrections. Do not present it as the latest behavior-complete build.
 
-## Current module state
+## Cooldown CD1-R2
 
-### Cooldown CD1-R2
+Engine query `0x006E2EA0`, uint32 timing, source/kind classification, STARTED/CHANGED/READY transitions, reset semantics, exact Status/Get policy surface and world-leave reset are integrated. Successful init status is `READY_NATIVEBUS_ENGINE_QUERY`.
 
-Engine query `0x006E2EA0`, uint32 timing, kind/source, STARTED/CHANGED/READY, reset semantics, SpellRec classification, exact Status/Get policy surface and world-leave reset are integrated. Successful init status is `READY_NATIVEBUS_ENGINE_QUERY`.
+## UnitState US1-R2
 
-### UnitState US1-R2
+Descriptor/status/events/lifecycle are recovered. Final descriptor path is `object+0x08 -> descriptor`, with health/power/flags fields documented in `recovery/API36_UNITSTATE_US1R2_EXACT_DISASSEMBLY.md`.
 
-Descriptor/status/events/lifecycle and public Get/Track/Untrack/Clear surfaces are integrated. Final selector helper at `0x100466AF` supports player/target/mouseover/pet/party1..4/raid1..40 through resolver `0x00515940`, plus GUID text parsing.
+### Selector correction
 
-`UNIT_RESOLVER_UNAVAILABLE` remains unowned; do not invent an API association.
+Final selector helper `0x100466AF` has now been rechecked. Earlier recovery behavior was too permissive.
 
-### Spatial S5-R1F1
+- public Get/Track/Untrack argument 2 is string-only
+- recognized tokens: case-insensitive player/target/mouseover/pet/party1..4/raid1..40
+- token resolver: client `0x00515940`, returning object pointer
+- GUID read: object `+0x30/+0x34`, nonzero
+- non-token syntax: optional `0x`, 1..16 hex digits, surrounding spaces/tabs only, nonzero
+- precise errors: `BAD_SELECTOR`, `RESOLVE_UNIT_UNAVAILABLE`, `UNIT_NOT_FOUND`, `GUID_INVALID`
+- success helper status: `OK`
 
-Final public handlers are mapped:
+`apply_overlay.py` now transforms the earlier simplified UnitState selector implementation into this final public contract before build.
+
+`UNIT_RESOLVER_UNAVAILABLE` is a different target string whose owning code path remains unproven; do not assign it speculatively.
+
+## Spatial S5-R1F1
+
+Public handlers:
 
 - `Spatial.Status 0x1000649D`
 - `Spatial.Get 0x10006623`
 - `Unit.Distance 0x100077F0`
 - `Unit.Behind 0x10007AD8`
 
-Exact public surfaces now recovered:
+Confirmed behavior:
 
-- Status fields/policies/no-background-work flags and UnitFields indices 129/130.
-- Get exact table fields, semantic strings and errors.
-- four-decimal numeric rounding.
-- Distance exact modes/aliases, two-return success contract, `BAD_MODE` and `MELEE_Z_SEPARATION` errors.
-- Behind exact four-return tuple `(bool,"CLIENT_GEOMETRY",dot,facing)` and `BEHIND_UNAVAILABLE`.
+- Spatial public selectors are string-only.
+- token resolver is `0x00515940`; non-token input is a hex GUID path.
+- current reconstructed direct GUID lookup uses `0x00464870`; target helper `0x1000BB5D` appears to keep an additional ObjectManager fallback path, still pending exact recovery.
+- Unit.Distance aliases are ASCII case-insensitive via helper `0x100057EE`.
+- exact RANGED/CHAINS/MELEE formulas are target-confirmed.
+- reach helper uses `object+0x08 -> descriptor+0x204/+0x208`, finite `[0,100]`.
+- position/facing validation and eight-iteration Newton sqrt are target-confirmed.
+- Behind validates targetFacing before distance branch.
+- if XY distance `<=0.0001`, Behind helper succeeds with false/dot0.
+- otherwise final S5-R1F1 calibrated score is `(actor.x-target.x)/distance2d`; targetFacing is diagnostic/output only in this build.
 
-Internal helper corrections:
+This is client calibration behavior, not server Backstab truth. S5-R2 ~105° remains unfinished observation only and must not become a threshold.
 
-- pair resolver `0x1000B527`
-- geometry helper `0x1000B5A4`
-- behind helper `0x1000B7CB`
-- position helper `0x1000BD44`
-- reach helper `0x1000BE24`
-- final reach path is `object+0x08 -> descriptor+0x204/+0x208`, not historical `object+0x110`.
-- radius/reach accepted range `[0,100]`.
-- facing path `object+0x118 -> +0x1c`, accepted range `[-100,100]`.
-- target uses eight Newton sqrt iterations from `max(value,1.0)` for geometry normalization.
+## Build / CI
 
-### Important S5-R1F1 rear-axis correction
+`apply_overlay.py` currently carries the newest UnitState and Spatial exact-target corrections. GitHub Actions now syntax-checks the overlay before source reconstruction; that syntax step passes.
 
-The final target behind helper was rechecked instruction-by-instruction. The previous conventional facing-vector reconstruction was wrong for this build.
+Full CI relink remains blocked earlier in source reconstruction because `recovery/archive.parts` contains only three 12KB base64 pieces of an incomplete XZ stream. Previous log shows `xz: Unexpected end of input`.
 
-Actual calibrated path:
+A complete self-consistent API33 source archive must replace all existing parts; appending unrelated chunks is invalid because the current parts belong to a different compressed stream.
 
-- `dx = actor.x - target.x`
-- `dy = actor.y - target.y`
-- `distance2d = sqrt(dx^2+dy^2)`
-- if `distance2d <= 0.0001`, helper succeeds with `behind=false` and dot `0`
-- otherwise `behindDot = dx / distance2d`
-- `behind = behindDot > 0`
+## Next steps
 
-The target explicitly zeroes the Y coefficient before accumulation. `targetFacing` is still validated and returned, but is not used in the calibrated dot score in S5-R1F1. `apply_overlay.py` now patches this exact behavior into future builds.
-
-This is client calibration behavior, not server Backstab truth. The S5-R2 ~105° observation remains unfinished and is not a rule.
-
-See `recovery/API37_SPATIAL_S5R1F1_PUBLIC_SURFACE_DISASSEMBLY.md`.
-
-## Next build step
-
-Full relink API37 with latest Cooldown + UnitState + exact Spatial overlay, then rerun:
-
-1. callable API `118/118`
-2. dotted strings `129/129`
-3. section-size delta
-4. target-vs-recovery static surface checks
+1. replace/fix CI source archive or otherwise materialize the authentic API33 source base;
+2. apply current overlay and full-link API37;
+3. rerun callable API `118/118` and dotted strings `129/129`;
+4. recalculate PE section delta;
+5. recover target GUID-object fallback traversal if it remains a meaningful behavior difference;
+6. live-client regression.
 
 Never pad to match binary size.
-
-## CI / runtime
-
-GitHub Actions reconstruction remains blocked by truncated `recovery/archive.parts`; local clang-cl/lld-link compilation is authoritative for now. Live-client regression remains pending.
 
 ## Evidence priority
 
 1. final target DLL disassembly
 2. historical project branches/source handoffs
 3. Aug 25-31 plugins
-4. Turtle/Tortoise 1.18.1 for protocol/server semantics only
+4. Turtle/Tortoise 1.18.1 for supporting server/protocol semantics only
 5. other 1.12 client references
 
 ## Maintenance
