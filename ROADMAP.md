@@ -5,34 +5,36 @@
 - [x] API33 source-authentic baseline recovered and exact rebuild proven.
 - [x] API34 Foundation F1 substantially disassembly-confirmed.
 - [x] API35 Cooldown CD1-R2 exact surface integrated and compile-tested.
-- [x] API36 UnitState US1-R2 descriptor/status/events/lifecycle integrated and compile-tested.
-- [x] API37 Spatial S5-R1F1 public Status/Get/Distance/Behind surfaces recovered from final DLL disassembly.
-- [x] Spatial exact modes/aliases, return counts, error codes and four-decimal output rounding recovered.
-- [x] Spatial final reach helper recovered: `object+0x08 -> descriptor+0x204/+0x208`, values finite and in `[0,100]`.
-- [x] Spatial facing validation recovered: `object+0x118 -> movement+0x1c`, finite and in `[-100,100]`.
-- [x] Spatial distance normalization aligned to target eight-iteration Newton sqrt path.
-- [x] S5-R1F1 behind helper rechecked instruction-by-instruction: calibrated `behindDot = (actor.x-target.x)/distance2d`; targetFacing is diagnostic/output only in this build. Overlay patch added.
-- [x] Exact-wrapper/reach/sqrt Spatial source compiles with the existing i686 clang-cl no-STL/no-default-lib flags.
-- [x] Latest UnitState + Cooldown + prior Spatial version compiled together successfully.
-- [x] Strict callable API regression: target `118`, recovery `118`, missing `0`, extra `0`.
-- [x] Broad dotted-string regression: target `129`, recovery `129`, missing `0`, extra `0`.
+- [x] API36 UnitState descriptor/status/events/lifecycle recovered from final target.
+- [x] API37 Spatial Status/Get/Distance/Behind public surfaces recovered from final target.
+- [x] Spatial final reach path: `object+0x08 -> descriptor+0x204/+0x208`, finite range `[0,100]`.
+- [x] Spatial facing path: `object+0x118 -> movement+0x1c`, finite range `[-100,100]`.
+- [x] Spatial distance normalization: target eight-iteration Newton sqrt path.
+- [x] Spatial ranged/chains/melee formulas independently confirmed against final API37 target.
+- [x] Unit.Distance mode comparison confirmed ASCII case-insensitive; exact aliases preserved.
+- [x] S5-R1F1 behind helper confirmed: facing validated first; degenerate XY succeeds false/0; calibrated `behindDot=(actor.x-target.x)/distance2d`.
+- [x] UnitState selector helper `0x100466AF` rechecked: public Get/Track/Untrack are string-only, token resolver is `0x00515940`, non-token path is 1..16-digit hexadecimal GUID parsing, and precise selector errors are preserved.
+- [x] Recovery overlay updated for UnitState selector semantics and Spatial selector/mode/behind semantics.
+- [x] Recovery overlay Python syntax validated by GitHub Actions.
+- [x] Previous combined candidate reached strict callable APIs `118/118` and broad dotted strings `129/129`.
 - [x] Exact final API37 build id restored through `apply_overlay.py`.
-- [x] Last full linked candidate SHA256 `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`, size `374272` bytes.
+- [x] Last full linked candidate remains SHA256 `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`, size `374272` bytes.
 
 ## Immediate next work
 
-- [ ] Full relink with the newly exact Spatial wrapper/reach/sqrt/rear-axis behavior; assign a new candidate SHA only after link succeeds.
-- [ ] Re-run strict `118/118` callable API and `129/129` dotted-string regression on that new DLL.
-- [ ] Recalculate section deltas against target and continue function-level Spatial helper comparison; never pad.
-- [ ] Treat `UNIT_RESOLVER_UNAVAILABLE` cautiously: owner/xref remains unproven.
-- [ ] Repair truncated `recovery/archive.parts` so GitHub Actions reproduces the local build.
+- [ ] Complete a full API37 relink with the newest selector + Spatial corrections; do not assign a new DLL SHA before link succeeds.
+- [ ] Re-run strict `118/118` callable API and `129/129` dotted-string regression on the new DLL.
+- [ ] Recalculate PE section deltas; prior `6656`-byte gap is stale after these source changes.
+- [ ] Recover the final Spatial/GUID object-resolution fallback after fast GUID lookup; current overlay mirrors token/hex surface but the target helper `0x1000BB5D` appears to retain an ObjectManager fallback path.
+- [ ] Treat `UNIT_RESOLVER_UNAVAILABLE` cautiously: target string exists but owning code path remains unproven.
+- [ ] Replace the truncated `recovery/archive.parts` with one complete, self-consistent API33 source archive so CI can reach overlay/build/link stages.
 
 ## Runtime validation
 
 - [ ] Foundation.Status comparison.
-- [ ] Cooldown events/reset/deadline/world-leave regression.
-- [ ] UnitState selector/Get/Track/Untrack/Clear/events/world-leave regression.
-- [ ] Spatial.Get exact table/value/error regression.
-- [ ] Unit.Distance mode/alias/return-code regression.
-- [ ] Unit.Behind return tuple/calibrated rear-axis regression.
+- [ ] Cooldown event/reset/deadline/world-leave regression.
+- [ ] UnitState exact selector/error/Get/Track/Untrack/Clear/events/world-leave regression.
+- [ ] Spatial selector/Get exact table/value/error regression.
+- [ ] Unit.Distance case-insensitive mode/alias/return-code regression.
+- [ ] Unit.Behind tuple/degenerate-XY/calibrated rear-axis regression.
 - [ ] S5-R2 ~105° remains unfinished experimental observation only; never encode it as a threshold.
