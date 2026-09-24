@@ -2,32 +2,34 @@
 
 ## 2026-09-24
 
+### Spatial S5-R1F1 exact public-surface/helper recovery
+
+- Disassembled final target handlers: `Spatial.Status 0x1000649D`, `Spatial.Get 0x10006623`, `Unit.Distance 0x100077F0`, `Unit.Behind 0x10007AD8`.
+- Recovered exact `Spatial.Status` fields including `EXPLICIT_QUERY_NO_BACKGROUND_WORK`, S5-R1F1 rear-axis/facing policies, no-hook/thread/timer/object-manager-scan flags, and field indices 129/130.
+- Recovered exact `Spatial.Get` table shape, fixed semantic strings and `(nil, code)` error surface.
+- Confirmed numeric float outputs are rounded to four decimal places.
+- Recovered exact `Unit.Distance` modes/aliases: CENTER3D/GAUSSIAN, CENTER2D, RANGED/RANGED_EDGE, CHAINS/CHAINS_EDGE, MELEE/MELEE_BASE_GAP.
+- Confirmed Unit.Distance success returns two values: normal `(value,"OK")`; melee `(value,"SERVER_INSPIRED_BASE_NO_LEEWAY")`; exact errors include `MELEE_Z_SEPARATION` and `BAD_MODE`.
+- Confirmed Unit.Behind success returns four values: `(bool,"CLIENT_GEOMETRY",behindDot,targetFacing)`; exact error includes `BEHIND_UNAVAILABLE`.
+- Split geometry and behind sampling in recovery to match target call graph: Behind does not require reach geometry; Spatial.Get tolerates unavailable behind data.
+- Disassembled target position/reach/facing helpers. Corrected Spatial reach from historical `object+0x110` approximation to final `object+0x08 -> descriptor+0x204/+0x208`; radius/reach must be finite and within `[0,100]`.
+- Added final facing range validation `[-100,100]`.
+- Replaced x87 `fsqrt` reconstruction with the target's eight-iteration Newton sqrt approximation initialized with `max(value,1.0)`.
+- Corrected source compiles successfully under the existing i686 clang-cl no-STL/no-default-lib flags; object SHA256 `fd7ecdd871e5dbbef58eab16cb88d5aa4a531296a3690b1183697b447e673554`.
+- Added `recovery/API37_SPATIAL_S5R1F1_PUBLIC_SURFACE_DISASSEMBLY.md`.
+- Full latest DLL relink has not yet been completed, so the last valid full-candidate SHA remains `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`.
+
 ### Build-id alignment and binary-delta investigation
 
-- Restored the exact final API37 build id: `20260831-v140-api37-foundation-f1-cd1r2-us1r2-stage5-spatial-s5r1f1-facing-axis-calibration`.
-- Added the build-id patch to `recovered/api37-s5r1f1/apply_overlay.py` so rebuilt source bases receive it automatically.
-- Local clang-cl/lld-link rebuild succeeded; SHA256 `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`, size `374272`.
-- `.rdata` moved from `0xa4ab` to `0xa4ef`; final target is `0xa4fb`, leaving only `0x0c` bytes of meaningful rdata delta.
-- File-size delta remains `6656` because PE file alignment does not change for this string-only correction.
-- Final target string `UNIT_RESOLVER_UNAVAILABLE` has no direct absolute address xref, nor an absolute xref to any suffix position of the string, in a raw image scan. Ownership remains unproven and is not being invented.
-- API36→API37 stage comparison shows the final Spatial addition grows target `.text` by roughly the same magnitude as the remaining recovery `.text` gap, so next recovery work is focused on exact Spatial implementation/wrappers rather than padding.
+- Restored exact final API37 build id `20260831-v140-api37-foundation-f1-cd1r2-us1r2-stage5-spatial-s5r1f1-facing-axis-calibration` through `apply_overlay.py`.
+- Last full clang-cl/lld-link candidate succeeded: SHA256 `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`, size `374272`.
+- Meaningful `.rdata` delta was reduced to `0x0c`; remaining known delta is mainly code.
+- `UNIT_RESOLVER_UNAVAILABLE` has no proven direct/suffix absolute xref and remains unowned.
 
 ### UnitState selector exact recovery
 
-- Disassembled final selector helper at `0x100466AF`.
-- Confirmed case-insensitive unit-token recognition for `player`, `target`, `mouseover`, `pet`, `party1..4`, and `raid1..40`.
-- Confirmed recognized tokens use client resolver `0x00515940`, then validate/read object GUID at `+0x30/+0x34`.
-- Confirmed resolver failures return `RESOLVE_UNIT_UNAVAILABLE` or `UNIT_NOT_FOUND`.
-- Confirmed non-token selector path parses a trimmed optional-`0x` hexadecimal GUID with at most 16 digits; invalid/zero/trailing-garbage input returns `GUID_INVALID`.
-- Integrated equivalent selector behavior locally and rebuilt successfully.
-- Strict callable API check remains exact: `118/118`, missing `0`, extra `0`.
-
-### Exact-surface API37 recovery
-
-- UnitState.Get works without prior Track and exposes final table fields.
-- UnitState.Untrack/Clear return semantics aligned.
-- Cooldown successful status aligned to `READY_NATIVEBUS_ENGINE_QUERY`; UnitState to `READY_TRACKED_UPDATEOBJECT_GATE`.
-- Cooldown and UnitState both reset through existing PLAYER_LEAVING_WORLD funnel.
+- Recovered final selector helper at `0x100466AF`, client resolver `0x00515940`, unit-token set and GUID parser/error paths.
+- Strict callable API check remained exact at `118/118`; broad dotted strings `129/129`.
 
 ## Maintenance
 
