@@ -11,6 +11,7 @@
 - [x] Spatial final reach helper recovered: `object+0x08 -> descriptor+0x204/+0x208`, values finite and in `[0,100]`.
 - [x] Spatial facing validation recovered: `object+0x118 -> movement+0x1c`, finite and in `[-100,100]`.
 - [x] Spatial distance normalization aligned to target eight-iteration Newton sqrt path.
+- [x] S5-R1F1 behind helper rechecked instruction-by-instruction: calibrated `behindDot = (actor.x-target.x)/distance2d`; targetFacing is diagnostic/output only in this build. Overlay patch added.
 - [x] Exact-wrapper/reach/sqrt Spatial source compiles with the existing i686 clang-cl no-STL/no-default-lib flags.
 - [x] Latest UnitState + Cooldown + prior Spatial version compiled together successfully.
 - [x] Strict callable API regression: target `118`, recovery `118`, missing `0`, extra `0`.
@@ -20,7 +21,7 @@
 
 ## Immediate next work
 
-- [ ] Full relink with the newly exact Spatial wrapper/reach/sqrt source; assign a new candidate SHA only after link succeeds.
+- [ ] Full relink with the newly exact Spatial wrapper/reach/sqrt/rear-axis behavior; assign a new candidate SHA only after link succeeds.
 - [ ] Re-run strict `118/118` callable API and `129/129` dotted-string regression on that new DLL.
 - [ ] Recalculate section deltas against target and continue function-level Spatial helper comparison; never pad.
 - [ ] Treat `UNIT_RESOLVER_UNAVAILABLE` cautiously: owner/xref remains unproven.
@@ -33,5 +34,5 @@
 - [ ] UnitState selector/Get/Track/Untrack/Clear/events/world-leave regression.
 - [ ] Spatial.Get exact table/value/error regression.
 - [ ] Unit.Distance mode/alias/return-code regression.
-- [ ] Unit.Behind return tuple/facing regression.
+- [ ] Unit.Behind return tuple/calibrated rear-axis regression.
 - [ ] S5-R2 ~105° remains unfinished experimental observation only; never encode it as a threshold.
