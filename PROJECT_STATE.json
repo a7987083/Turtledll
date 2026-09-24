@@ -19,17 +19,19 @@
     "full_linked": false,
     "spatial_object_compile_succeeded": true,
     "spatial_object_sha256": "fd7ecdd871e5dbbef58eab16cb88d5aa4a531296a3690b1183697b447e673554",
-    "note": "Exact Spatial wrapper/reach/sqrt source is newer than the last full DLL candidate; a new DLL SHA must not be assigned until full relink succeeds."
+    "overlay_has_exact_rear_axis_patch": true,
+    "note": "Newest Spatial behavior is newer than the last full DLL candidate; a new DLL SHA must not be assigned until full relink succeeds."
   },
   "modules": {
     "Cooldown_CD1R2": {"status": "exact-surface-integrated-compile-verified", "success_status": "READY_NATIVEBUS_ENGINE_QUERY", "runtime_verified": false},
     "UnitState_US1R2": {"status": "exact-public-surface-and-selector-integrated-locally-compile-verified", "success_status": "READY_TRACKED_UPDATEOBJECT_GATE", "selector_helper": "0x100466AF", "client_unit_resolver": "0x00515940", "runtime_verified": false},
     "Spatial_S5R1F1": {
-      "status": "exact-public-surface-helper-reach-sqrt-object-compile-verified",
+      "status": "exact-public-surface-helper-reach-sqrt-rear-axis-mapped",
       "handlers": {"Status": "0x1000649D", "Get": "0x10006623", "Unit.Distance": "0x100077F0", "Unit.Behind": "0x10007AD8"},
       "helpers": {"pair": "0x1000B527", "geometry": "0x1000B5A4", "behind": "0x1000B7CB", "position": "0x1000BD44", "reach": "0x1000BE24"},
       "reach_layout": {"descriptor_pointer": "object+0x08", "boundingRadius": "+0x204", "combatReach": "+0x208", "accepted_range": "0..100"},
-      "facing": {"path": "object+0x118 -> +0x1c", "accepted_range": "-100..100"},
+      "facing": {"path": "object+0x118 -> +0x1c", "accepted_range": "-100..100", "used_in_calibrated_dot": false},
+      "behind_calibration": {"epsilon": 0.0001, "dot": "(actor.x-target.x)/distance2d", "behind": "dot>0", "target_facing_is_diagnostic_output": true},
       "distance_modes": ["CENTER3D/GAUSSIAN", "CENTER2D", "RANGED/RANGED_EDGE", "CHAINS/CHAINS_EDGE", "MELEE/MELEE_BASE_GAP"],
       "rounding": "four decimals",
       "sqrt": "8 Newton iterations from max(value,1.0)",
@@ -42,5 +44,5 @@
     "padding_policy": "never pad to match binary size"
   },
   "ci": {"workflow": "Recovery Build", "blocker": "recovery/archive.parts incomplete/truncated; local build authoritative"},
-  "next_actions": ["full relink with exact Spatial source", "rerun 118/118 and 129/129 regressions", "recalculate PE section delta", "continue helper fidelity analysis", "repair CI reconstruction", "live runtime regression"]
+  "next_actions": ["full relink with exact Spatial overlay", "rerun 118/118 and 129/129 regressions", "recalculate PE section delta", "continue helper fidelity analysis", "repair CI reconstruction", "live runtime regression"]
 }
