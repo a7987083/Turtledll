@@ -7,6 +7,8 @@ SHA-256: `1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae`
 
 - `UnitState.Status` -> `0x10045A02`
 - `UnitState.Get` -> `0x1004654F`
+- `UnitState.Track` -> `0x1004715F`
+- `UnitState.Untrack` -> `0x10047589`
 - `UnitState.List` -> `0x100476DD`
 - `UnitState.Clear` -> `0x1004775C`
 
@@ -15,7 +17,7 @@ SHA-256: `1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae`
 Initializer `0x10044F05` confirms US1-R2 reuses the existing NativeBus funnels rather than adding a new packet hook/thread:
 
 - fast GUID helper `0x00464870`
-- unit token/GUID helper `0x00515940` lineage check
+- unit-token object resolver `0x00515940`
 - incoming subscriber callback `0x10045068`
 - world-tick subscriber callback `0x100450AF`
 - custom event registration via the existing dynamic FrameScript event bridge
@@ -28,6 +30,48 @@ Incoming callback `0x10045068` treats only:
 as dirty signals. It does not parse UPDATE_OBJECT bodies and does not decompress compressed update packets.
 
 The world-tick callback `0x100450AF` performs the tracked-GUID reconcile after the stock client has processed the packet, matching the frozen contract string `post-handler descriptor reconcile`.
+
+## Exact selector resolver contract
+
+Selector helper: `0x100466AF`.
+
+`UnitState.Get`, `UnitState.Track`, and `UnitState.Untrack` first require Lua argument 2 to be a **string**. Numeric selectors are not accepted by these final handlers.
+
+The selector helper recognizes these unit tokens case-insensitively:
+
+- `player`
+- `target`
+- `mouseover`
+- `pet`
+- `party1..party4`
+- `raid1..raid40`
+
+Recognized tokens call client resolver `0x00515940`. This resolver returns an object pointer, not a GUID scalar. The target then validates/reads the live 64-bit GUID at `object+0x30/+0x34`; a zero/unreadable result is not accepted.
+
+Exact selector error surface:
+
+- malformed/missing non-string public argument -> `BAD_SELECTOR`
+- recognized unit token but `0x00515940` unavailable -> `RESOLVE_UNIT_UNAVAILABLE`
+- recognized token but resolver/object/GUID unavailable -> `UNIT_NOT_FOUND`
+- non-token text that is not a valid GUID literal -> `GUID_INVALID`
+- success -> internal status `OK`
+
+Non-token text follows a separate hexadecimal GUID parser:
+
+- trim leading spaces/tabs only
+- optional `0x` / `0X`
+- 1..16 hexadecimal digits
+- trim trailing spaces/tabs only
+- reject trailing non-whitespace garbage
+- reject zero
+
+The public handlers preserve the helper's precise error string rather than collapsing every selector failure to `BAD_SELECTOR`:
+
+- `Get` failure -> `(nil, error)`
+- `Track` failure -> `(nil, error)`
+- `Untrack` failure -> `(false, error)`
+
+The recovery overlay now patches the earlier simplified `0x00515970`/numeric-selector path to this final selector contract before compilation.
 
 ## Exact descriptor snapshot path
 
@@ -69,9 +113,7 @@ Therefore the target's derived `dead` state is:
 health == 0  OR  (UNIT_DYNAMIC_FLAGS & 0x20) != 0
 ```
 
-This closes the previously unnamed `+0x23C` field.
-
-Active power is selected only from the current power type (0..4), matching `ACTIVE_POWER_ONLY_TYPE_VALUE_MAX`.
+Active power is selected only from current power type 0..4, matching `ACTIVE_POWER_ONLY_TYPE_VALUE_MAX`.
 
 ## Snapshot authority / empty descriptor behavior
 
@@ -83,13 +125,13 @@ Active power is selected only from the current power type (0..4), matching `ACTI
 
 Main reconcile loop is inside `0x100450AF`.
 
-For an existing cached record the DLL compares old vs new snapshot and independently derives three public changes:
+For an existing cached record the DLL compares old vs new snapshot and independently derives three public changes.
 
 ### Health event
 
-Health-change is true when any of current health, max health, or the derived dead state changes. The event is emitted through `SignalEventParam(0x00703F50)` using the registered `TYS_UNIT_HEALTH_CHANGED` slot.
+Change when current health, max health, or derived dead state changes. Event: `TYS_UNIT_HEALTH_CHANGED`.
 
-Payload order:
+Payload:
 
 ```text
 guid, oldHealth, newHealth, maxHealth, dead
@@ -97,7 +139,7 @@ guid, oldHealth, newHealth, maxHealth, dead
 
 ### Power event
 
-Power-change mask is exactly the frozen public contract:
+Power mask:
 
 ```text
 bit0 = active power type changed
@@ -105,7 +147,7 @@ bit1 = active power value changed
 bit2 = active max-power changed
 ```
 
-Only the active power lane is compared/emitted. Event: `TYS_UNIT_POWER_CHANGED`.
+Only active power is compared/emitted. Event: `TYS_UNIT_POWER_CHANGED`.
 
 Payload:
 
@@ -115,28 +157,30 @@ guid, powerType, oldPower, newPower, maxPower, mask
 
 ### Combat event
 
-Combat is derived from descriptor `+0xB8`, bit 19 (`0x00080000`). A boolean transition emits `TYS_UNIT_COMBAT_CHANGED` with:
+Combat is descriptor `+0xB8`, bit 19 (`0x00080000`). Event: `TYS_UNIT_COMBAT_CHANGED`.
+
+Payload:
 
 ```text
 guid, oldCombat, newCombat
 ```
 
-The three event counters are incremented only after their corresponding `SignalEventParam` path is taken.
+The event counters increment only after their corresponding `SignalEventParam` path is taken.
 
 ## worldGeneration
 
-Global world-generation counter is at `0x100595F4`.
+Global counter: `0x100595F4`.
 
-Reset routine `0x100459BE` clears per-record live/dirty state and increments `worldGeneration` with nonzero progression.
+Reset routine `0x100459BE` clears per-record live/dirty state and advances `worldGeneration` with nonzero progression. It is called by the central `PLAYER_LEAVING_WORLD` path, not ordinary UPDATE_OBJECT traffic.
 
-The only write to `0x100595F4` in the target DLL is this reset routine. It is called from the central event path for `PLAYER_LEAVING_WORLD`; the adjacent path handles `PLAYER_ENTERING_WORLD` separately. Therefore the target uses `worldGeneration` to invalidate/unbind cached unit snapshots across world-leave transitions rather than incrementing on ordinary UPDATE_OBJECT packets.
+## Important corrections to earlier recovery scaffolds
 
-## Important correction to the earlier recovery scaffold
-
-Earlier recovered code used the historical UnitXP-style `object+0x110 -> UnitFields` representation. That representation is useful for historical cross-checking but is **not** the exact final API37 implementation path. The final target uses `object+0x08 -> descriptor` and absolute descriptor offsets listed above. Recovery code should be aligned to this final binary path.
+1. Historical UnitXP `object+0x110 -> UnitFields` is useful lineage evidence but is not the final API37 snapshot path. Final snapshot uses `object+0x08 -> descriptor`.
+2. Earlier recovery used `0x00515970` as if a unit-string helper returned a GUID and also accepted numeric Lua selectors. Final UnitState handlers are string-only and use `0x00515940` as an object resolver for recognized unit tokens, with a separate hexadecimal GUID parser for non-token strings.
 
 ## Confidence
 
+- selector token set / resolver address / handler string-only contract / error branches: **binary-confirmed**
 - descriptor pointer and offsets: **binary-confirmed**
 - `+0x23C = UNIT_DYNAMIC_FLAGS`, dead bit `0x20`: **binary + Turtle 1.18.1 source confirmed**
 - UPDATE_OBJECT/COMPRESSED_UPDATE_OBJECT dirty gate: **binary-confirmed**
