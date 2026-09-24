@@ -81,7 +81,23 @@ Success returns exactly four values:
 
 `(behindBool, "CLIENT_GEOMETRY", round4(behindDot), round4(targetFacing))`.
 
-The S5-R2 ~105 degree observation is unfinished experimental data only and is not implemented as a threshold.
+### Final S5-R1F1 calibrated rear-axis computation
+
+The target helper at `0x1000B7CB` was rechecked instruction-by-instruction. This corrects the earlier reconstruction that used `cos(targetFacing)` / `sin(targetFacing)` in a conventional forward-vector dot product.
+
+After validating/reading both XY positions and validating `targetFacing` from `target+0x118 -> movement+0x1C`, the final target computes:
+
+- `dx = actor.x - target.x`
+- `dy = actor.y - target.y`
+- `distance2d = sqrt(dx*dx + dy*dy)` using the same 8-iteration Newton path
+- if `distance2d <= 0.0001`, `behind=false`, dot output `0`, and the helper still succeeds
+- otherwise normalize `dx` and `dy`
+- the final instruction sequence zeroes the Y-axis coefficient before the dot accumulation, so the actual calibrated score is **`behindDot = dx / distance2d`**
+- `behind = behindDot > 0`
+
+`targetFacing` is validated and returned to Lua for diagnostics, but in this final S5-R1F1 build it is **not multiplied into the calibrated dot score**. This oddity is directly supported by the target machine code (`xorps xmm1,xmm1; mulss normalizedDy,xmm1; addss normalizedDx`). It matches the stage's `RAW_MOVEMENT_AXIS_TREATED_AS_REAR_FROM_S5R2_LIVE_SAMPLES` calibration wording better than the earlier conventional-facing reconstruction.
+
+This is a client calibration artifact, not server Backstab truth. It does not create a 105° rule. The S5-R2 ~105° observation remains unfinished experimental data only.
 
 ## Internal helpers
 
@@ -104,12 +120,12 @@ Both values must be finite and in `[0, 100]`.
 
 ### Distance sqrt helper behavior
 
-Geometry and behind distance normalization use an inlined eight-iteration Newton square-root approximation initialized with `max(value, 1.0)`, rather than the earlier reconstruction's x87 `fsqrt`. The recovery source now mirrors this path.
+Geometry and behind distance normalization use an inlined eight-iteration Newton square-root approximation initialized with `max(value, 1.0)`, rather than the earlier reconstruction's x87 `fsqrt`. The recovery build overlay now mirrors this path.
 
 ### Facing validation
 
-Facing comes from the movement object path `object+0x118 -> +0x1C` and is rejected if NaN or outside `[-100, 100]`.
+Facing comes from the movement object path `object+0x118 -> +0x1C` and is rejected if NaN or outside `[-100, 100]`. In S5-R1F1 it remains an output/diagnostic value even though the calibrated rear-axis score itself resolves to normalized X.
 
 ## Current compile validation
 
-The exact-wrapper/reach/sqrt Spatial source compiles with the existing i686 `clang-cl` no-STL/no-default-lib recovery flags. Full latest DLL relink is still pending; do not assign a new full-candidate SHA until that relink succeeds.
+The exact-wrapper/reach/sqrt Spatial source compiles with the existing i686 `clang-cl` no-STL/no-default-lib recovery flags. The overlay now additionally patches the final normalized-X rear-axis behavior before build. Full latest DLL relink is still pending; do not assign a new full-candidate SHA until that relink succeeds.
