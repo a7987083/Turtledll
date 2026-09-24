@@ -21,7 +21,7 @@ API33 is the last source-authentic baseline. API34-37 is behavior-equivalent rec
 - exact target build id restored
 - runtime verified: no
 
-A newer Spatial source revision is compile-verified at object level but has **not yet been full-linked**, so do not assign a newer DLL SHA until relink succeeds.
+A newer Spatial source/overlay revision is more exact than this DLL but has not yet been full-linked. Do not assign a newer DLL SHA until relink succeeds.
 
 ## Current module state
 
@@ -64,15 +64,28 @@ Internal helper corrections:
 - facing path `object+0x118 -> +0x1c`, accepted range `[-100,100]`.
 - target uses eight Newton sqrt iterations from `max(value,1.0)` for geometry normalization.
 
-Exact Spatial source compiles with the existing i686 no-STL/no-default-lib clang-cl flags. Object SHA256 `fd7ecdd871e5dbbef58eab16cb88d5aa4a531296a3690b1183697b447e673554`.
+### Important S5-R1F1 rear-axis correction
+
+The final target behind helper was rechecked instruction-by-instruction. The previous conventional facing-vector reconstruction was wrong for this build.
+
+Actual calibrated path:
+
+- `dx = actor.x - target.x`
+- `dy = actor.y - target.y`
+- `distance2d = sqrt(dx^2+dy^2)`
+- if `distance2d <= 0.0001`, helper succeeds with `behind=false` and dot `0`
+- otherwise `behindDot = dx / distance2d`
+- `behind = behindDot > 0`
+
+The target explicitly zeroes the Y coefficient before accumulation. `targetFacing` is still validated and returned, but is not used in the calibrated dot score in S5-R1F1. `apply_overlay.py` now patches this exact behavior into future builds.
+
+This is client calibration behavior, not server Backstab truth. The S5-R2 ~105° observation remains unfinished and is not a rule.
 
 See `recovery/API37_SPATIAL_S5R1F1_PUBLIC_SURFACE_DISASSEMBLY.md`.
 
-The S5-R2 ~105° observation was unfinished testing only; it is not a threshold and must not enter the Spatial core.
-
 ## Next build step
 
-Full relink API37 with latest Cooldown + UnitState + exact Spatial source, then rerun:
+Full relink API37 with latest Cooldown + UnitState + exact Spatial overlay, then rerun:
 
 1. callable API `118/118`
 2. dotted strings `129/129`
