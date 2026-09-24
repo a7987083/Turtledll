@@ -20,6 +20,7 @@ jobs:
         run: |
           set -euxo pipefail
           python3 -m py_compile recovered/api37-s5r1f1/apply_overlay.py
+          python3 -m py_compile recovered/api37-s5r1f1/post_overlay_exact.py
 
       - name: Install LLVM tools
         shell: bash
@@ -60,8 +61,11 @@ jobs:
           ROOT="$(dirname "$(find /tmp/api37-source -type f -path '*/build/build.sh' | head -n1)")/.."
           ROOT="$(cd "$ROOT" && pwd)"
           python3 recovered/api37-s5r1f1/apply_overlay.py "$ROOT"
+          python3 recovered/api37-s5r1f1/post_overlay_exact.py "$ROOT"
           grep -n 'TysUnitStateCore::onWorldLeaving' "$ROOT/src/dllmain.cpp"
           grep -n 'custom_event_bridge.obj' "$ROOT/build/build.sh"
+          grep -n '__stdcall' "$ROOT/src/unit_state_core.cpp"
+          grep -n 'objectManagerState' "$ROOT/src/spatial_core.cpp"
 
       - name: Build recovered DLL
         shell: bash
