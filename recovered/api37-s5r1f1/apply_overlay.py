@@ -50,6 +50,19 @@ def main() -> None:
         shutil.copy2(src, target_src / name)
         copied.append(name)
 
+    # Final S5-R1F1 disassembly shows the calibrated rear-axis score is the
+    # normalized actor-target X delta. Target facing is validated and returned
+    # for diagnostics, but it is not used in the dot computation in this build.
+    spatial = target_src / "spatial_core.cpp"
+    s = spatial.read_text()
+    s = replace_once(
+        s,
+        "float sv=0.0f,cv=0.0f;sincosf_x87(f,&sv,&cv);float nx=dx/d2,ny=dy/d2,forwardDot=nx*cv+ny*sv;s->targetFacing=f;s->behindDot=-forwardDot;",
+        "s->targetFacing=f;s->behindDot=dx/d2;",
+        "S5-R1F1 calibrated rear-axis dot",
+    )
+    spatial.write_text(s)
+
     b = build.read_text()
     b = replace_once(
         b,
@@ -100,6 +113,7 @@ def main() -> None:
     dllmain.write_text(d)
 
     print("overlay copied:", ", ".join(copied))
+    print("patched:", spatial)
     print("patched:", build)
     print("patched:", dllmain)
 
