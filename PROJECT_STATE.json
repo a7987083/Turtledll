@@ -6,7 +6,7 @@
   "maintenance_files": ["ROADMAP.md", "CHANGELOG_DEV.md", "HANDOFF.md", "PROJECT_STATE.json", "KNOWN_ISSUES.md"],
   "baseline": {"api": 33, "source_authentic": true, "exact_rebuild_sha256": "aa598a044ee3236c31a87d25d1646cf35a3cf9c3e85a120eea542645af96ba3e"},
   "target": {"api": 37, "sha256": "1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae", "size_bytes": 380928, "known_callable_api_count": 118, "broad_dotted_string_count": 129, "build_id": "20260831-v140-api37-foundation-f1-cd1r2-us1r2-stage5-spatial-s5r1f1-facing-axis-calibration"},
-  "current_candidate": {
+  "last_full_candidate": {
     "sha256": "dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34",
     "size_bytes": 374272,
     "size_delta_to_target": 6656,
@@ -15,28 +15,32 @@
     "exact_build_id_restored": true,
     "runtime_verified": false
   },
-  "sections": {
-    "target": {"text": "0x489c0", "rdata": "0xa4fb", "data": "0x4c00", "reloc": "0x4fb0"},
-    "recovery": {"text": "0x47148", "rdata": "0xa4ef", "data": "0x4c00", "reloc": "0x4df0"}
+  "latest_source_validation": {
+    "full_linked": false,
+    "spatial_object_compile_succeeded": true,
+    "spatial_object_sha256": "fd7ecdd871e5dbbef58eab16cb88d5aa4a531296a3690b1183697b447e673554",
+    "note": "Exact Spatial wrapper/reach/sqrt source is newer than the last full DLL candidate; a new DLL SHA must not be assigned until full relink succeeds."
   },
   "modules": {
     "Cooldown_CD1R2": {"status": "exact-surface-integrated-compile-verified", "success_status": "READY_NATIVEBUS_ENGINE_QUERY", "runtime_verified": false},
-    "UnitState_US1R2": {
-      "status": "exact-public-surface-and-selector-integrated-locally-compile-verified",
-      "success_status": "READY_TRACKED_UPDATEOBJECT_GATE",
-      "selector_helper": "0x100466AF",
-      "client_unit_resolver": "0x00515940",
-      "unit_tokens": ["player", "target", "mouseover", "pet", "party1..4", "raid1..40"],
-      "selector_errors": ["BAD_SELECTOR", "RESOLVE_UNIT_UNAVAILABLE", "UNIT_NOT_FOUND", "GUID_INVALID"],
+    "UnitState_US1R2": {"status": "exact-public-surface-and-selector-integrated-locally-compile-verified", "success_status": "READY_TRACKED_UPDATEOBJECT_GATE", "selector_helper": "0x100466AF", "client_unit_resolver": "0x00515940", "runtime_verified": false},
+    "Spatial_S5R1F1": {
+      "status": "exact-public-surface-helper-reach-sqrt-object-compile-verified",
+      "handlers": {"Status": "0x1000649D", "Get": "0x10006623", "Unit.Distance": "0x100077F0", "Unit.Behind": "0x10007AD8"},
+      "helpers": {"pair": "0x1000B527", "geometry": "0x1000B5A4", "behind": "0x1000B7CB", "position": "0x1000BD44", "reach": "0x1000BE24"},
+      "reach_layout": {"descriptor_pointer": "object+0x08", "boundingRadius": "+0x204", "combatReach": "+0x208", "accepted_range": "0..100"},
+      "facing": {"path": "object+0x118 -> +0x1c", "accepted_range": "-100..100"},
+      "distance_modes": ["CENTER3D/GAUSSIAN", "CENTER2D", "RANGED/RANGED_EDGE", "CHAINS/CHAINS_EDGE", "MELEE/MELEE_BASE_GAP"],
+      "rounding": "four decimals",
+      "sqrt": "8 Newton iterations from max(value,1.0)",
+      "experimental_105_degree_note": "unfinished observation only; no threshold implemented",
       "runtime_verified": false
-    },
-    "Spatial_S5R1F1": {"status": "integrated-compile-verified", "experimental_105_degree_note": "unfinished observation only; no threshold implemented", "runtime_verified": false}
+    }
   },
   "analysis": {
-    "unit_resolver_unavailable": "string exists in target but raw image scan found no direct absolute xref to its start or suffix positions; owner unresolved",
-    "api36_to_api37_text_growth": "approximately matches remaining recovery text gap; next focus is exact Spatial implementation/wrapper differences",
+    "unit_resolver_unavailable": "string exists in target but owner/xref remains unproven",
     "padding_policy": "never pad to match binary size"
   },
   "ci": {"workflow": "Recovery Build", "blocker": "recovery/archive.parts incomplete/truncated; local build authoritative"},
-  "next_actions": ["recover exact Spatial implementation/wrappers", "continue code-delta analysis", "repair CI reconstruction", "live runtime regression"]
+  "next_actions": ["full relink with exact Spatial source", "rerun 118/118 and 129/129 regressions", "recalculate PE section delta", "continue helper fidelity analysis", "repair CI reconstruction", "live runtime regression"]
 }
