@@ -26,10 +26,11 @@
     "runtime_verified": false,
     "stale_for_latest_source": true
   },
-  "latest_overlay": {
-    "selector_and_spatial_corrections_committed": true,
-    "python_syntax_ci_verified": true,
-    "full_linked": false
+  "build_transform": {
+    "main_overlay": "recovered/api37-s5r1f1/apply_overlay.py",
+    "exact_post_overlay": "recovered/api37-s5r1f1/post_overlay_exact.py",
+    "both_python_syntax_ci_verified": true,
+    "latest_full_linked": false
   },
   "modules": {
     "Cooldown_CD1R2": {
@@ -38,19 +39,33 @@
       "runtime_verified": false
     },
     "UnitState_US1R2": {
-      "status": "descriptor-events-lifecycle-confirmed-selector-overlay-corrected-awaiting-full-relink",
+      "status": "descriptor-events-lifecycle-selector-and-fast-guid-abi-recovered-awaiting-full-relink",
       "selector_helper": "0x100466AF",
       "client_unit_resolver": "0x00515940",
       "public_selector_type": "string-only",
       "unit_tokens": ["player", "target", "mouseover", "pet", "party1..4", "raid1..40"],
       "guid_literal": "optional 0x; 1..16 hex; leading/trailing space-tab only; nonzero",
       "selector_errors": ["BAD_SELECTOR", "RESOLVE_UNIT_UNAVAILABLE", "UNIT_NOT_FOUND", "GUID_INVALID"],
+      "fast_guid_lookup": {"address": "0x00464870", "abi": "__stdcall(low32,high32)"},
       "runtime_verified": false
     },
     "Spatial_S5R1F1": {
-      "status": "public-surface-formulas-selector-mode-behind-overlay-corrected-awaiting-full-relink",
+      "status": "public-surface-formulas-selector-mode-behind-fast-guid-fallback-recovered-awaiting-full-relink",
       "handlers": {"Status": "0x1000649D", "Get": "0x10006623", "Unit.Distance": "0x100077F0", "Unit.Behind": "0x10007AD8"},
-      "selector": {"public_type": "string-only", "token_resolver": "0x00515940", "guid_fast_lookup": "0x00464870", "fallback": "target helper 0x1000BB5D appears to contain ObjectManager fallback; pending exact recovery"},
+      "selector": {
+        "public_type": "string-only",
+        "token_resolver": "0x00515940",
+        "guid_fast_lookup": {"address": "0x00464870", "abi": "__stdcall(low32,high32)"},
+        "fallback": {
+          "helper": "0x1000BB5D",
+          "manager_global": "0x00B41414",
+          "head": "manager+0xAC",
+          "next_base": "manager+0xA4",
+          "next": "*(current+nextBase+4)",
+          "max_candidates": 4096,
+          "background_scan": false
+        }
+      },
       "mode_compare": "ASCII case-insensitive helper 0x100057EE",
       "reach_layout": {"descriptor_pointer": "object+0x08", "boundingRadius": "+0x204", "combatReach": "+0x208", "accepted_range": "0..100"},
       "facing": {"path": "object+0x118 -> movement+0x1c", "accepted_range": "-100..100", "validated_before_degenerate_xy": true},
@@ -63,21 +78,21 @@
   },
   "ci": {
     "workflow": "Recovery Build",
-    "overlay_syntax_step": "passes",
-    "blocker": "recovery/archive.parts is an incomplete XZ stream (three 12KB base64 parts); xz reports Unexpected end of input before overlay/build"
+    "overlay_syntax_step": "passes for both overlay scripts",
+    "blocker": "recovery/archive.parts is an incomplete XZ stream; reconstruction fails before overlay/build with Unexpected end of input"
   },
   "remaining_behavior_gaps": [
-    "full relink with latest overlay",
-    "Spatial/GUID object lookup fallback traversal after fast lookup",
+    "full relink with latest overlays",
     "owner/xref for UNIT_RESOLVER_UNAVAILABLE",
+    "post-link binary delta inspection",
     "runtime regression"
   ],
   "next_actions": [
-    "replace CI source archive with complete self-consistent API33 source",
+    "replace CI source archive with complete self-consistent authentic API33 source",
     "full relink",
     "rerun 118/118 and 129/129 regressions",
     "recalculate PE section delta",
-    "recover GUID lookup fallback",
+    "inspect only evidence-backed remaining behavior differences",
     "live runtime regression"
   ],
   "padding_policy": "never pad to match binary size"
