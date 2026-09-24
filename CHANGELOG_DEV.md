@@ -2,36 +2,42 @@
 
 ## 2026-09-24
 
+### Fast GUID ABI + ObjectManager fallback recovery
+
+- Rechecked final target helper `0x1000BB5D` and corrected the recovery ABI for client fast GUID lookup `0x00464870`.
+- Target pushes GUID high then GUID low and the callee returns with `ret 8`; recovery now models the function as `__stdcall(low32, high32)`, not `__fastcall(uint64)`.
+- The same ABI correction is applied to UnitState snapshot resolution.
+- Recovered the target's bounded explicit ObjectManager fallback used when Spatial literal-GUID fast lookup misses/rejects:
+  - global ObjectManager pointer `0x00B41414`
+  - head `manager+0xAC`
+  - next-link base offset `manager+0xA4`
+  - next object `*(current + nextBase + 4)`
+  - exact GUID check at `object+0x30/+0x34`
+  - object-range validation through `0x38`
+  - maximum 4096 candidates and cycle/zero/bad-link termination
+- This is an explicit-query fallback and does not contradict `objectManagerScan=false` / no background polling.
+- Added `recovered/api37-s5r1f1/post_overlay_exact.py`; workflow now executes it after `apply_overlay.py`.
+- Both overlay scripts pass GitHub Actions Python syntax validation.
+- Updated Spatial evidence documentation to record fast lookup ABI, fallback layout and call graph.
+
 ### Selector + Spatial fidelity correction
 
-- Rechecked final UnitState selector helper `0x100466AF` and corrected an earlier recovery overclaim.
 - Final `UnitState.Get`, `Track`, and `Untrack` require argument 2 to be a Lua string; numeric selectors are not accepted.
-- Recognized tokens are case-insensitive `player`, `target`, `mouseover`, `pet`, `party1..4`, `raid1..40`.
-- Recognized tokens call client object resolver `0x00515940`, then read nonzero live GUID from `object+0x30/+0x34`.
-- Exact selector errors preserved: `BAD_SELECTOR`, `RESOLVE_UNIT_UNAVAILABLE`, `UNIT_NOT_FOUND`, `GUID_INVALID`; helper success status `OK`.
-- Non-token GUID syntax is optional `0x`, 1..16 hexadecimal digits, surrounding spaces/tabs only, nonzero.
-- Updated `apply_overlay.py` so UnitState handlers preserve the precise final selector errors instead of collapsing failures to `BAD_SELECTOR`.
-- Rechecked Spatial pair resolver: public Spatial selectors are also string-only; tokens use `0x00515940`; GUID literals use the separate hex path. Current recovery still needs the target helper's fast-lookup fallback traversal for full internal parity.
-- Confirmed Unit.Distance mode matching helper `0x100057EE` is ASCII case-insensitive; overlay updated.
-- Confirmed final ranged/chains/melee formulas directly from API37 helper/call-site mapping.
-- Corrected final Behind degenerate path: target facing is validated first; `distance2d <= 0.0001` succeeds with `behind=false`, dot `0`.
-- Recovery overlay syntax is now checked before archive reconstruction in CI; workflow run 48 reached and passed this syntax-check step.
-
-### Spatial S5-R1F1 exact public-surface/helper recovery
-
-- Public handlers: `Spatial.Status 0x1000649D`, `Spatial.Get 0x10006623`, `Unit.Distance 0x100077F0`, `Unit.Behind 0x10007AD8`.
-- Exact reach path is final descriptor `object+0x08 -> +0x204/+0x208`; values finite and `[0,100]`.
-- Facing is `object+0x118 -> movement+0x1c`, finite and `[-100,100]`.
-- Geometry uses eight Newton sqrt iterations from `max(value,1.0)`.
-- S5-R1F1 calibrated rear score is normalized X delta after facing validation. This is a client calibration artifact, not server Backstab truth.
-- ~105° remains unfinished S5-R2 observation only and is not implemented as a threshold.
+- Unit tokens are case-insensitive `player`, `target`, `mouseover`, `pet`, `party1..4`, `raid1..40` and use client object resolver `0x00515940`.
+- Non-token selector is optional `0x`, 1..16 hexadecimal digits, surrounding spaces/tabs only, nonzero.
+- Exact UnitState selector errors preserved: `BAD_SELECTOR`, `RESOLVE_UNIT_UNAVAILABLE`, `UNIT_NOT_FOUND`, `GUID_INVALID`.
+- Spatial public selectors are string-only with the same token/hex split.
+- Unit.Distance mode matching helper `0x100057EE` is ASCII case-insensitive.
+- Final ranged/chains/melee formulas independently confirmed from API37 target helper/call sites.
+- Final Behind order corrected: targetFacing validation occurs before degenerate-distance handling; `distance2d <= 0.0001` succeeds with `behind=false`, dot `0`.
+- Final S5-R1F1 calibrated score is normalized X delta and remains client calibration only.
 
 ### Full-build status
 
 - Last full linked candidate SHA256 remains `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`, size `374272`.
-- That candidate predates the newest selector/Spatial corrections; no newer DLL SHA is claimed yet.
-- Previous strict static regression reached callable APIs `118/118` and dotted strings `129/129`.
-- CI still cannot relink because `recovery/archive.parts` is an incomplete XZ stream; the failure occurs before overlay/build.
+- It predates the newest selector/Spatial/fast-GUID corrections; no newer DLL SHA is claimed yet.
+- Previous static regression reached callable APIs `118/118` and dotted strings `129/129`.
+- GitHub Actions reaches and passes overlay syntax validation, then still fails before overlay/build because `recovery/archive.parts` is an incomplete XZ stream (`xz: Unexpected end of input`).
 
 ## Maintenance
 
