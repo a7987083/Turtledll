@@ -25,10 +25,12 @@
 - [x] Strict callable API regression: `118/118`, missing `0`, extra `0`, exact set equality.
 - [x] Broad dotted-string regression: `129/129`, missing `0`, extra `0`, exact set equality.
 - [x] PE external surface matched: PE32/i386, image base/alignment/subsystem/timestamp, KERNEL32-only import DLL, 40/40 imported functions, 4/4 exports.
+- [x] Exact `118` and `129` reference inventories stored in `recovery/` and enforced by `verify_static_contract.py`.
+- [x] Recovery Build #58 passed the new exact static-contract gate: `dotted 129/129`, `callable 118/118`, missing `0`, extra `0`, `STATIC_CONTRACT=PASS`.
 
 ## Static delta still open
 
-Current target-vs-recovery section deltas after run #57:
+Current target-vs-recovery section deltas after run #57/#58 (same DLL bytes):
 
 - `.text`: recovery `0x44759`, target `0x489C0`, delta `0x4267` (16999 bytes)
 - `.rdata`: recovery `0x9BC7`, target `0xA4FB`, delta `0x934` (2356 bytes)
