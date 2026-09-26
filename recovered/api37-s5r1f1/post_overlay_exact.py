@@ -22,8 +22,9 @@ def main() -> None:
     src = root / "src"
     spatial = src / "spatial_core.cpp"
     unit = src / "unit_state_core.cpp"
-    if not spatial.is_file() or not unit.is_file():
-        die(f"missing generated core sources under {src}")
+    build = root / "build" / "build.sh"
+    if not spatial.is_file() or not unit.is_file() or not build.is_file():
+        die(f"missing generated recovery files under {root}")
 
     s = spatial.read_text()
 
@@ -48,8 +49,18 @@ static bool resolveSelector(const char*s,unsigned long long*out,unsigned long*ob
     u = replace_once(u, old_unit, new_unit, "UnitState fast GUID ABI")
     unit.write_text(u)
 
+    # clang-cl expects /Fo<file>. With newer LLVM, /Fo:foo.obj is parsed as an
+    # output file literally named :foo.obj, while the link step expects
+    # foo.obj. Normalize only after all overlay compile lines have been added.
+    b = build.read_text()
+    b = b.replace("/Fo:", "/Fo")
+    if "/Fo:" in b:
+        die("failed to normalize clang-cl /Fo object output flags")
+    build.write_text(b)
+
     print("post-overlay exact patches applied:", spatial)
     print("post-overlay exact patches applied:", unit)
+    print("post-overlay build flags normalized:", build)
 
 
 if __name__ == "__main__":
