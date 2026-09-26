@@ -1,65 +1,71 @@
 # KNOWN_ISSUES
 
-## Active blockers
+## Active blockers / open verification
 
-### 1. Latest corrections are not full-linked yet
+### 1. Runtime verification remains pending
 
-The latest overlays now include UnitState selector semantics, Spatial selector/mode/Behind semantics, binary-confirmed fast GUID ABI, and the Spatial explicit ObjectManager fallback. The last full DLL predates these changes.
+The latest API34-37 reconstruction is now full-linked and statically accepted, but has not yet been compared against the original API37 DLL in a live WoW/Turtle client.
 
-Last full linked candidate:
+Current candidate:
 
-- SHA256 `dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34`
-- size `374272`
-- previous target delta `6656` (stale)
-- callable APIs `118/118`
-- dotted strings `129/129`
+- source commit `2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc`
+- Recovery Build #57 / run id `36261981451`
+- SHA256 `b30b23ef3df5c24cb285bdb77d10bda4de8c18a1b8a8b99e6b3e50cf1d293f60`
+- size `359424`
+- callable APIs `118/118`, missing `0`, extra `0`
+- dotted strings `129/129`, missing `0`, extra `0`
 
-Do not claim a newer/final DLL SHA until complete relink succeeds.
+Required runtime regression still includes Cooldown ordering/coalescing/reset/deadline, UnitState selector/lifecycle/event timing, Spatial selector/mode/Behind/literal-GUID fallback, and world lifecycle boundaries.
 
-### 2. Stored UnitState/Spatial core source is older than final target; overlays carry exact corrections
+### 2. Residual internal PE delta remains
 
-`apply_overlay.py` and `post_overlay_exact.py` currently transform the stored reconstructed sources before compilation. This is auditable and compile-pipeline safe, but eventually folding the verified corrections directly into the stored core source files would simplify maintenance.
+The current candidate and target match their public API string sets, imports, exports, PE architecture/alignment/subsystem, zero timestamp and `.data` size. They are not byte-identical and the following section deltas remain:
+
+- `.text`: candidate `0x44759`, target `0x489C0`, target larger by `0x4267` / 16999 bytes
+- `.rdata`: candidate `0x9BC7`, target `0xA4FB`, target larger by `0x934` / 2356 bytes
+- `.data`: exact `0x4C00`
+- `.reloc`: candidate `0x4710`, target `0x4FB0`, target larger by `0x8A0` / 2208 bytes
+- full file size: target larger by `21504` bytes
+
+Do not use file size as a behavior-completeness metric by itself. Do not pad. Investigate this delta only where runtime or disassembly identifies a concrete behavior mismatch.
+
+### 3. Stored UnitState/Spatial core source is older than final transformed source
+
+`prepare_exact_base.py`, `apply_overlay.py`, and `post_overlay_exact.py` currently transform the source-authentic baseline plus stored reconstructed modules before compilation. This is auditable and CI-verified, but verified corrections should eventually be folded into the stored reconstructed core files after runtime acceptance.
 
 Important transformed behaviors include:
 
+- later-version engine/opcode constants absent from API33 base
 - UnitState string-only selector + precise errors
-- token resolver `0x00515940`
 - `0x00464870` fast GUID ABI `__stdcall(low32,high32)`
 - Spatial literal-GUID bounded ObjectManager fallback
 - Unit.Distance case-insensitive modes
 - S5-R1F1 degenerate XY Behind handling and normalized-X calibration
+- Cooldown/UnitState target public ready Status values
+- LLVM 18 clang-cl `/Fo` output syntax normalization
 
-### 3. CI source archive is truncated
+### 4. `UNIT_RESOLVER_UNAVAILABLE` ownership remains unresolved
 
-`recovery/archive.parts` contains only three 12KB base64 pieces and decodes to an incomplete XZ stream. Workflow logs fail at reconstruction with:
+The target contains the literal `UNIT_RESOLVER_UNAVAILABLE`, but the current static pass found no absolute 32-bit VA reference and no direct code xref to the literal. It is distinct from confirmed selector error `RESOLVE_UNIT_UNAVAILABLE`.
 
-```text
-xz: Unexpected end of input
-```
+Current policy: do not add the literal or invent an owning branch merely to reduce binary/string delta. Revisit only if a target code path or runtime behavior proves ownership.
 
-Both overlay Python scripts are syntax-checked before reconstruction and pass. The archive itself must be replaced as one complete self-consistent stream; appending chunks from another compression run is invalid.
+## Resolved issues
 
-A complete authentic API33 source archive is available locally for replacement, but has not yet been fully written back into the GitHub split archive.
-
-### 4. Previous PE delta is stale
-
-The previous `6656`-byte file-size delta and section comparison were measured before the latest selector/Spatial/fast-GUID/fallback corrections. Recalculate only after successful full relink. Never pad to match binary size.
-
-### 5. `UNIT_RESOLVER_UNAVAILABLE` ownership remains unresolved
-
-The target contains this string, but its owning handler/xref is still unproven. It is distinct from confirmed UnitState selector error `RESOLVE_UNIT_UNAVAILABLE`. Do not add it speculatively.
-
-### 6. Runtime verification remains pending
-
-The latest reconstructed API34-37 behavior has not yet been compared against the original DLL in a live WoW/Turtle client. Cooldown ordering/coalescing, UnitState selector/lifecycle/event timing, and Spatial selector/mode/Behind/GUID-fallback behavior still require runtime regression.
-
-## Resolved / reduced issues
-
-- Exact UnitState descriptor snapshot path and event/lifecycle behavior are binary-confirmed.
+- Exact API33 LOS1 source baseline rebuilds byte-identically at SHA256 `aa598a044ee3236c31a87d25d1646cf35a3cf9c3e85a120eea542645af96ba3e`.
+- CI source archive is complete; XZ reconstruction/extraction passes.
+- API35 Cooldown engine helper/opcode constants missing from API33 header are restored in exact-base adaptation.
+- API36 UpdateObject opcode constants missing from API33 header are restored in exact-base adaptation.
+- LLVM 18 clang-cl `/Fo:foo.obj` incompatibility is fixed by final `/Fo:` -> `/Fo` normalization.
+- Current API37 source full-links successfully in Recovery Build #56 and #57.
+- Strict callable API regression: `118/118`, exact set equality.
+- Broad dotted strings regression: `129/129`, exact set equality.
+- KERNEL32 imported function set: `40/40`, exact set equality.
+- Exported name set: `4/4`, exact set equality.
+- Cooldown target public ready Status `READY_COOLDOWN_CORE_C1R2` recovered.
+- UnitState target public ready Status `READY_UNITSTATE_US1R2` recovered.
 - UnitState selector final contract is overlay-corrected.
-- Strict callable API regression previously reached `118/118`, missing `0`, extra `0`.
-- Broad dotted strings previously reached `129/129`, missing `0`, extra `0`.
-- Exact final API37 build id restored.
+- Exact UnitState descriptor snapshot path and event/lifecycle behavior are binary-confirmed.
 - Spatial public Status/Get/Distance/Behind surfaces are disassembly-mapped.
 - Unit.Distance exact mode aliases and ASCII case-insensitive matching recovered.
 - Ranged/chains/melee formulas independently target-confirmed.
@@ -69,7 +75,6 @@ The latest reconstructed API34-37 behavior has not yet been compared against the
 - Final S5-R1F1 calibrated rear score corrected to normalized X delta.
 - Fast GUID lookup `0x00464870` ABI corrected to `__stdcall(low32,high32)`.
 - Spatial target ObjectManager fallback recovered: `0x00B41414`, `+0xAC` head, `+0xA4` next-base, 4096 bound.
-- CI overlay Python syntax validation passes for both overlay scripts.
 
 ## Non-blocking cautions
 
