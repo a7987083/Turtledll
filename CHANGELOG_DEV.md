@@ -25,8 +25,7 @@
 
 ### Current full-linked candidate
 
-- Source commit: `2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc`
-- CI run: `Recovery Build #57` / run id `36261981451`
+- Recovery-source commit: `2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc`
 - SHA256: `b30b23ef3df5c24cb285bdb77d10bda4de8c18a1b8a8b99e6b3e50cf1d293f60`
 - Size: `359424` bytes
 - Runtime verified: **no**
@@ -49,6 +48,18 @@ Current section deltas:
 - full file: `21504` bytes smaller than target
 
 These deltas are not treated as missing behavior by themselves. No padding is permitted.
+
+### Exact static contract moved into CI
+
+- Added `recovery/API37_CALLABLE_118.txt` as the target callable inventory.
+- Added `recovery/API37_DOTTED_129.txt` as the target broad dotted inventory.
+- Added `recovery/verify_static_contract.py` to extract printable dotted strings and enforce exact set equality.
+- Updated Recovery Build so changes to the verifier/inventories trigger CI and every built DLL must pass both inventories before artifact upload.
+- Recovery Build #58 / run id `36262396903`, verification commit `1c127fc8d34d101a61afd307df948ae9a56c77f5`, passed:
+  - `dotted: actual=129 expected=129 missing=0 extra=0`
+  - `callable: actual=118 expected=118 missing=0 extra=0`
+  - `STATIC_CONTRACT=PASS`
+- Run #58 reproduced the same candidate SHA256 `b30b23ef3df5c24cb285bdb77d10bda4de8c18a1b8a8b99e6b3e50cf1d293f60`; run #57 and #58 DLLs are byte-identical.
 
 ### `UNIT_RESOLVER_UNAVAILABLE` reassessment
 
