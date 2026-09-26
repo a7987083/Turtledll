@@ -18,14 +18,15 @@
     "build_id": "20260831-v140-api37-foundation-f1-cd1r2-us1r2-stage5-spatial-s5r1f1-facing-axis-calibration"
   },
   "last_full_candidate": {
-    "source_commit": "2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc",
-    "ci_run_number": 57,
-    "ci_run_id": 36261981451,
+    "recovery_source_commit": "2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc",
+    "latest_verification_commit": "1c127fc8d34d101a61afd307df948ae9a56c77f5",
+    "ci_run_number": 58,
+    "ci_run_id": 36262396903,
     "sha256": "b30b23ef3df5c24cb285bdb77d10bda4de8c18a1b8a8b99e6b3e50cf1d293f60",
     "size_bytes": 359424,
     "size_delta_to_target": 21504,
-    "strict_callable_api": {"recovery": 118, "target": 118, "missing": 0, "extra": 0, "set_equal": true},
-    "broad_dotted_strings": {"recovery": 129, "target": 129, "missing": 0, "extra": 0, "set_equal": true},
+    "strict_callable_api": {"recovery": 118, "target": 118, "missing": 0, "extra": 0, "set_equal": true, "ci_enforced": true},
+    "broad_dotted_strings": {"recovery": 129, "target": 129, "missing": 0, "extra": 0, "set_equal": true, "ci_enforced": true},
     "pe": {
       "format": "PE32 i386 Windows GUI 5.1",
       "image_base": "0x10000000",
@@ -45,6 +46,16 @@
     },
     "runtime_verified": false,
     "stale_for_latest_source": false
+  },
+  "static_contract_ci": {
+    "script": "recovery/verify_static_contract.py",
+    "callable_inventory": "recovery/API37_CALLABLE_118.txt",
+    "dotted_inventory": "recovery/API37_DOTTED_129.txt",
+    "latest_result": "STATIC_CONTRACT=PASS",
+    "latest_output": {
+      "dotted": "actual=129 expected=129 missing=0 extra=0",
+      "callable": "actual=118 expected=118 missing=0 extra=0"
+    }
   },
   "build_transform": {
     "exact_base_prepare": "recovered/api37-s5r1f1/prepare_exact_base.py",
@@ -103,13 +114,13 @@
   },
   "ci": {
     "workflow": "Recovery Build",
-    "latest_successful_run_number": 57,
-    "latest_successful_run_id": 36261981451,
-    "latest_successful_commit": "2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc",
+    "latest_successful_run_number": 58,
+    "latest_successful_run_id": 36262396903,
+    "latest_successful_commit": "1c127fc8d34d101a61afd307df948ae9a56c77f5",
     "archive_reconstruction": "pass",
     "overlay_application": "pass",
     "full_link": "pass",
-    "contract_smoke_strings": "pass",
+    "exact_static_contract": "pass",
     "artifact_upload": "pass"
   },
   "remaining_behavior_gaps": [
