@@ -18,9 +18,10 @@ def main() -> None:
     src = root / "src"
     build = root / "build" / "build.sh"
     dllmain = src / "dllmain.cpp"
+    offsets = src / "wow112_offsets.h"
     overlay_src = Path(__file__).resolve().parent / "src"
 
-    for p in (src, build, dllmain, overlay_src):
+    for p in (src, build, dllmain, offsets, overlay_src):
         if not p.exists():
             raise SystemExit(f"missing required path: {p}")
 
@@ -41,6 +42,35 @@ def main() -> None:
             raise SystemExit(f"missing recovery source: {source}")
         shutil.copy2(source, src / name)
         copied.append(name)
+
+    # API35/CD1-R2 depends on engine/opcode constants that do not exist in the
+    # source-authentic API33 LOS1 header. Add them while adapting the exact base
+    # rather than baking target-version offsets into the recovered module.
+    o = offsets.read_text()
+    o = replace_once(
+        o,
+        "constexpr unsigned long SMSG_SPELL_GO_OPCODE = 0x0132UL;\n",
+        "constexpr unsigned long SMSG_SPELL_GO_OPCODE = 0x0132UL;\n"
+        "constexpr unsigned long SMSG_SPELL_COOLDOWN_OPCODE = 0x0134UL;\n"
+        "constexpr unsigned long SMSG_COOLDOWN_EVENT_OPCODE = 0x0135UL;\n",
+        "API35 cooldown packet opcodes",
+    )
+    o = replace_once(
+        o,
+        "constexpr unsigned long MSG_CHANNEL_UPDATE_OPCODE = 0x013AUL;\n",
+        "constexpr unsigned long MSG_CHANNEL_UPDATE_OPCODE = 0x013AUL;\n"
+        "constexpr unsigned long SMSG_CLEAR_COOLDOWN_OPCODE = 0x01DEUL;\n"
+        "constexpr unsigned long SMSG_COOLDOWN_CHEAT_OPCODE = 0x01E1UL;\n",
+        "API35 cooldown reset opcodes",
+    )
+    o = replace_once(
+        o,
+        "constexpr unsigned long RESOLVE_UNIT_TOKEN = 0x00515940UL;\n",
+        "constexpr unsigned long RESOLVE_UNIT_TOKEN = 0x00515940UL;\n"
+        "constexpr unsigned long COOLDOWN_QUERY_HELPER = 0x006E2EA0UL;\n",
+        "API35 cooldown query helper",
+    )
+    offsets.write_text(o)
 
     b = build.read_text()
     compile_anchor = "clang-cl $CPPFLAGS $INC /Fo:corpse_marker.obj ../src/corpse_marker.cpp\n"
@@ -114,6 +144,7 @@ def main() -> None:
 
     print("prepared exact API33 LOS1 base for API37 overlay")
     print("copied:", ", ".join(copied))
+    print("patched:", offsets)
     print("patched:", build)
     print("patched:", dllmain)
 
