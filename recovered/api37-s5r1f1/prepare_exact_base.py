@@ -43,10 +43,18 @@ def main() -> None:
         shutil.copy2(source, src / name)
         copied.append(name)
 
-    # API35/CD1-R2 depends on engine/opcode constants that do not exist in the
-    # source-authentic API33 LOS1 header. Add them while adapting the exact base
-    # rather than baking target-version offsets into the recovered module.
+    # API35/CD1-R2 and API36/US1-R2 depend on engine/opcode constants that do
+    # not exist in the source-authentic API33 LOS1 header. Add them while
+    # adapting the exact base rather than baking target-version constants into
+    # the recovered modules.
     o = offsets.read_text()
+    o = replace_once(
+        o,
+        "constexpr unsigned long CMSG_CAST_SPELL_OPCODE = 0x012EUL;\n",
+        "constexpr unsigned long SMSG_UPDATE_OBJECT_OPCODE = 0x00A9UL;\n"
+        "constexpr unsigned long CMSG_CAST_SPELL_OPCODE = 0x012EUL;\n",
+        "API36 update-object opcode",
+    )
     o = replace_once(
         o,
         "constexpr unsigned long SMSG_SPELL_GO_OPCODE = 0x0132UL;\n",
@@ -62,6 +70,13 @@ def main() -> None:
         "constexpr unsigned long SMSG_CLEAR_COOLDOWN_OPCODE = 0x01DEUL;\n"
         "constexpr unsigned long SMSG_COOLDOWN_CHEAT_OPCODE = 0x01E1UL;\n",
         "API35 cooldown reset opcodes",
+    )
+    o = replace_once(
+        o,
+        "constexpr unsigned long SMSG_SPELL_DELAYED_OPCODE = 0x01E2UL;\n",
+        "constexpr unsigned long SMSG_SPELL_DELAYED_OPCODE = 0x01E2UL;\n"
+        "constexpr unsigned long SMSG_COMPRESSED_UPDATE_OBJECT_OPCODE = 0x01F6UL;\n",
+        "API36 compressed update-object opcode",
     )
     o = replace_once(
         o,
