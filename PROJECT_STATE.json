@@ -1,6 +1,6 @@
 {
   "project": "TaiYangShenDian API37 recovery",
-  "date": "2026-09-24",
+  "date": "2026-09-27",
   "repository": "a7987083/Turtledll",
   "active_branch": "recovery/unitstate-us1r2-exact",
   "maintenance_files": ["ROADMAP.md", "CHANGELOG_DEV.md", "HANDOFF.md", "PROJECT_STATE.json", "KNOWN_ISSUES.md"],
@@ -18,28 +18,53 @@
     "build_id": "20260831-v140-api37-foundation-f1-cd1r2-us1r2-stage5-spatial-s5r1f1-facing-axis-calibration"
   },
   "last_full_candidate": {
-    "sha256": "dccef1c05e0158f9052546bf0a1042a7432102091cffb0ecf5fbada30cab0f34",
-    "size_bytes": 374272,
-    "previous_size_delta_to_target": 6656,
-    "strict_callable_api": {"recovery": 118, "target": 118, "missing": 0, "extra": 0},
-    "broad_dotted_strings": {"recovery": 129, "target": 129, "missing": 0, "extra": 0},
+    "source_commit": "2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc",
+    "ci_run_number": 57,
+    "ci_run_id": 36261981451,
+    "sha256": "b30b23ef3df5c24cb285bdb77d10bda4de8c18a1b8a8b99e6b3e50cf1d293f60",
+    "size_bytes": 359424,
+    "size_delta_to_target": 21504,
+    "strict_callable_api": {"recovery": 118, "target": 118, "missing": 0, "extra": 0, "set_equal": true},
+    "broad_dotted_strings": {"recovery": 129, "target": 129, "missing": 0, "extra": 0, "set_equal": true},
+    "pe": {
+      "format": "PE32 i386 Windows GUI 5.1",
+      "image_base": "0x10000000",
+      "section_alignment": "0x1000",
+      "file_alignment": "0x200",
+      "timestamp_zero": true,
+      "sections": {
+        ".text": {"recovery": "0x44759", "target": "0x489C0", "delta": "0x4267"},
+        ".rdata": {"recovery": "0x9BC7", "target": "0xA4FB", "delta": "0x934"},
+        ".data": {"recovery": "0x4C00", "target": "0x4C00", "delta": "0x0"},
+        ".reloc": {"recovery": "0x4710", "target": "0x4FB0", "delta": "0x8A0"}
+      },
+      "import_dlls": {"recovery": ["KERNEL32.dll"], "target": ["KERNEL32.dll"]},
+      "kernel32_import_count": {"recovery": 40, "target": 40, "set_equal": true},
+      "exports": ["FirstEnterWorld", "Load", "TaiYangShenDianNativeStatus", "_DllMain@12"],
+      "export_set_equal": true
+    },
     "runtime_verified": false,
-    "stale_for_latest_source": true
+    "stale_for_latest_source": false
   },
   "build_transform": {
+    "exact_base_prepare": "recovered/api37-s5r1f1/prepare_exact_base.py",
     "main_overlay": "recovered/api37-s5r1f1/apply_overlay.py",
     "exact_post_overlay": "recovered/api37-s5r1f1/post_overlay_exact.py",
-    "both_python_syntax_ci_verified": true,
-    "latest_full_linked": false
+    "all_python_syntax_ci_verified": true,
+    "latest_full_linked": true,
+    "clang_cl_object_flag_compatibility": "/Fo: normalized to /Fo after all overlays for LLVM 18"
   },
   "modules": {
     "Cooldown_CD1R2": {
-      "status": "exact-surface-integrated-compile-verified",
-      "success_status": "READY_NATIVEBUS_ENGINE_QUERY",
+      "status": "full-linked-static-surface-verified",
+      "internal_success_status": "READY_NATIVEBUS_ENGINE_QUERY",
+      "public_ready_status": "READY_COOLDOWN_CORE_C1R2",
+      "engine_query_helper": "0x006E2EA0",
       "runtime_verified": false
     },
     "UnitState_US1R2": {
-      "status": "descriptor-events-lifecycle-selector-and-fast-guid-abi-recovered-awaiting-full-relink",
+      "status": "full-linked-static-surface-verified",
+      "public_ready_status": "READY_UNITSTATE_US1R2",
       "selector_helper": "0x100466AF",
       "client_unit_resolver": "0x00515940",
       "public_selector_type": "string-only",
@@ -50,7 +75,7 @@
       "runtime_verified": false
     },
     "Spatial_S5R1F1": {
-      "status": "public-surface-formulas-selector-mode-behind-fast-guid-fallback-recovered-awaiting-full-relink",
+      "status": "full-linked-static-surface-verified",
       "handlers": {"Status": "0x1000649D", "Get": "0x10006623", "Unit.Distance": "0x100077F0", "Unit.Behind": "0x10007AD8"},
       "selector": {
         "public_type": "string-only",
@@ -78,22 +103,26 @@
   },
   "ci": {
     "workflow": "Recovery Build",
-    "overlay_syntax_step": "passes for both overlay scripts",
-    "blocker": "recovery/archive.parts is an incomplete XZ stream; reconstruction fails before overlay/build with Unexpected end of input"
+    "latest_successful_run_number": 57,
+    "latest_successful_run_id": 36261981451,
+    "latest_successful_commit": "2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc",
+    "archive_reconstruction": "pass",
+    "overlay_application": "pass",
+    "full_link": "pass",
+    "contract_smoke_strings": "pass",
+    "artifact_upload": "pass"
   },
   "remaining_behavior_gaps": [
-    "full relink with latest overlays",
-    "owner/xref for UNIT_RESOLVER_UNAVAILABLE",
-    "post-link binary delta inspection",
-    "runtime regression"
+    "live runtime regression against original API37 DLL",
+    "target retains UNIT_RESOLVER_UNAVAILABLE literal but no absolute VA/code xref has been found; owner remains unproven",
+    "binary .text/.rdata/.reloc size delta remains despite exact public API and PE import/export surfaces"
   ],
   "next_actions": [
-    "replace CI source archive with complete self-consistent authentic API33 source",
-    "full relink",
-    "rerun 118/118 and 129/129 regressions",
-    "recalculate PE section delta",
-    "inspect only evidence-backed remaining behavior differences",
-    "live runtime regression"
+    "run live Cooldown event/reset/deadline/world-leave regression",
+    "run live UnitState selector/Get/Track/Untrack/Clear/event/lifecycle regression",
+    "run live Spatial Get/Distance/Behind/fast-GUID/fallback regression",
+    "investigate remaining internal binary delta only when runtime or disassembly evidence identifies a behavior mismatch",
+    "fold verified overlay corrections into stored reconstructed core sources after runtime acceptance"
   ],
   "padding_policy": "never pad to match binary size"
 }
