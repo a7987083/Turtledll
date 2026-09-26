@@ -4,16 +4,20 @@
 
 ### 1. Runtime verification remains pending
 
-The latest API34-37 reconstruction is now full-linked and statically accepted, but has not yet been compared against the original API37 DLL in a live WoW/Turtle client.
+The latest API34-37 reconstruction is full-linked and statically accepted, but has not yet been compared against the original API37 DLL in a live WoW/Turtle client.
 
 Current candidate:
 
-- source commit `2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc`
-- Recovery Build #57 / run id `36261981451`
+- recovery-source commit `2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc`
+- latest exact-contract verification commit `1c127fc8d34d101a61afd307df948ae9a56c77f5`
+- Recovery Build #58 / run id `36262396903`
 - SHA256 `b30b23ef3df5c24cb285bdb77d10bda4de8c18a1b8a8b99e6b3e50cf1d293f60`
 - size `359424`
-- callable APIs `118/118`, missing `0`, extra `0`
-- dotted strings `129/129`, missing `0`, extra `0`
+- callable APIs `118/118`, missing `0`, extra `0`, exact set equality
+- dotted strings `129/129`, missing `0`, extra `0`, exact set equality
+- CI static contract: `STATIC_CONTRACT=PASS`
+
+Run #57 and #58 DLLs are byte-identical. Run #58 added verification only; it did not change runtime code.
 
 Required runtime regression still includes Cooldown ordering/coalescing/reset/deadline, UnitState selector/lifecycle/event timing, Spatial selector/mode/Behind/literal-GUID fallback, and world lifecycle boundaries.
 
@@ -57,9 +61,13 @@ Current policy: do not add the literal or invent an owning branch merely to redu
 - API35 Cooldown engine helper/opcode constants missing from API33 header are restored in exact-base adaptation.
 - API36 UpdateObject opcode constants missing from API33 header are restored in exact-base adaptation.
 - LLVM 18 clang-cl `/Fo:foo.obj` incompatibility is fixed by final `/Fo:` -> `/Fo` normalization.
-- Current API37 source full-links successfully in Recovery Build #56 and #57.
-- Strict callable API regression: `118/118`, exact set equality.
-- Broad dotted strings regression: `129/129`, exact set equality.
+- Current API37 source full-links successfully in Recovery Build #56, #57 and #58.
+- Exact target inventories are stored in `recovery/API37_CALLABLE_118.txt` and `recovery/API37_DOTTED_129.txt`.
+- `recovery/verify_static_contract.py` is wired into Recovery Build and CI-enforces exact set equality.
+- Recovery Build #58 verifier passed:
+  - `dotted: actual=129 expected=129 missing=0 extra=0`
+  - `callable: actual=118 expected=118 missing=0 extra=0`
+  - `STATIC_CONTRACT=PASS`
 - KERNEL32 imported function set: `40/40`, exact set equality.
 - Exported name set: `4/4`, exact set equality.
 - Cooldown target public ready Status `READY_COOLDOWN_CORE_C1R2` recovered.
