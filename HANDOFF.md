@@ -18,13 +18,31 @@ API33 is the last source-authentic baseline. API34-37 is behavior-equivalent rec
 
 Current static-accepted build:
 
-- source commit: `2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc`
-- GitHub Actions: Recovery Build #57 / run id `36261981451`
+- recovery-source commit: `2b8c65e8fa2c0701b5c1c13b39a9a54775d360bc`
+- latest exact-contract verification commit: `1c127fc8d34d101a61afd307df948ae9a56c77f5`
+- GitHub Actions: Recovery Build #58 / run id `36262396903`
 - SHA256: `b30b23ef3df5c24cb285bdb77d10bda4de8c18a1b8a8b99e6b3e50cf1d293f60`
 - size: `359424` bytes
 - callable APIs: `118/118`, missing `0`, extra `0`, exact set equality
 - dotted strings: `129/129`, missing `0`, extra `0`, exact set equality
+- static CI result: `STATIC_CONTRACT=PASS`
 - runtime verified: **no**
+
+Recovery Build #57 and #58 produced byte-identical DLLs. Run #58 added the permanent exact-contract gate; it did not change the binary.
+
+Exact static contract references:
+
+- `recovery/API37_CALLABLE_118.txt`
+- `recovery/API37_DOTTED_129.txt`
+- `recovery/verify_static_contract.py`
+
+Run #58 verifier output:
+
+```text
+dotted: actual=129 expected=129 missing=0 extra=0
+callable: actual=118 expected=118 missing=0 extra=0
+STATIC_CONTRACT=PASS
+```
 
 PE external surface also matches the target:
 
@@ -54,11 +72,12 @@ Build transformation order:
 2. `recovered/api37-s5r1f1/prepare_exact_base.py`
 3. `recovered/api37-s5r1f1/apply_overlay.py`
 4. `recovered/api37-s5r1f1/post_overlay_exact.py`
-5. clang-cl/lld-link build
+5. clang-cl/lld-link
+6. `recovery/verify_static_contract.py`
 
-The source archive is complete and CI reconstruction now passes. LLVM 18 requires clang-cl object output syntax `/Fo<file>`; final post-overlay normalizes historical `/Fo:` to `/Fo` after all compile lines are present.
+The source archive is complete and CI reconstruction passes. LLVM 18 requires clang-cl object output syntax `/Fo<file>`; final post-overlay normalizes historical `/Fo:` to `/Fo` after all compile lines are present.
 
-Recovery Build #57 passes archive reconstruction, all overlay steps, compile/link, contract smoke strings and artifact upload.
+Recovery Build #58 passes archive reconstruction, all overlay steps, compile/link, exact 118/129 static contract verification and artifact upload.
 
 ## Cooldown CD1-R2
 
