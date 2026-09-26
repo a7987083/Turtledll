@@ -6,6 +6,8 @@ on:
     paths:
       - 'recovered/**'
       - 'recovery/archive.parts/**'
+      - 'recovery/API37_*.txt'
+      - 'recovery/verify_static_contract.py'
       - '.github/workflows/recovery-build.yml'
 
 jobs:
@@ -22,6 +24,7 @@ jobs:
           python3 -m py_compile recovered/api37-s5r1f1/prepare_exact_base.py
           python3 -m py_compile recovered/api37-s5r1f1/apply_overlay.py
           python3 -m py_compile recovered/api37-s5r1f1/post_overlay_exact.py
+          python3 -m py_compile recovery/verify_static_contract.py
 
       - name: Install LLVM tools
         shell: bash
@@ -83,7 +86,7 @@ jobs:
           sha256sum "$ROOT/taiyangshendian.dll" | tee /tmp/SHA256.txt
           cp "$ROOT/taiyangshendian.dll" /tmp/taiyangshendian-api37-recovered.dll
 
-      - name: Verify API contract strings
+      - name: Verify exact API37 static contract
         shell: bash
         run: |
           set -euxo pipefail
@@ -95,6 +98,7 @@ jobs:
             'Spatial.Status' 'Spatial.Get' 'Unit.Distance' 'Unit.Behind'; do
             strings "$DLL" | grep -Fx "$s"
           done
+          python3 recovery/verify_static_contract.py "$DLL"
 
       - name: Upload recovered DLL
         uses: actions/upload-artifact@v4
