@@ -25,7 +25,7 @@ def main() -> None:
             raise SystemExit(f"missing required path: {p}")
 
     # Files that the historical partial-recovery source already contained, but
-    # the source-authentic API33 LOS1 handoff does not.  Keep the later recovery
+    # the source-authentic API33 LOS1 handoff does not. Keep the later recovery
     # logic in apply_overlay.py/post_overlay_exact.py unchanged.
     copied = []
     for name in (
@@ -91,7 +91,7 @@ def main() -> None:
         "API37 intermediate build id",
     )
 
-    dispatch_anchor = '    if(eq(cmd,"DrinkWalk.Status")) return TysDrinkWalkNative::dispatchStatus(L);\n'
+    dispatch_anchor = '    if(eq(cmd,"DrinkWalk.Status"))return TysDrinkWalkNative::dispatchStatus(callerL?callerL:L);\n'
     dispatch_block = (
         '    if(eq(cmd,"Foundation.Status")) return TysFoundationF1::dispatchStatus(L);\n'
         '    if(eq(cmd,"Cooldown.Status")) return TysCooldownCore::dispatchStatus(L);\n'
