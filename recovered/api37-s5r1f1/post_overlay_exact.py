@@ -22,8 +22,9 @@ def main() -> None:
     src = root / "src"
     spatial = src / "spatial_core.cpp"
     unit = src / "unit_state_core.cpp"
+    cooldown = src / "cooldown_core.cpp"
     build = root / "build" / "build.sh"
-    if not spatial.is_file() or not unit.is_file() or not build.is_file():
+    if not spatial.is_file() or not unit.is_file() or not cooldown.is_file() or not build.is_file():
         die(f"missing generated recovery files under {root}")
 
     s = spatial.read_text()
@@ -47,7 +48,22 @@ static bool resolveSelector(const char*s,unsigned long long*out,unsigned long*ob
     old_unit = "static bool resolveObject(unsigned long long guid,unsigned long*out){if(!guid||!out||!executable(FAST_GUID_LOOKUP))return false;using Fn=unsigned long(__fastcall*)(unsigned long long);unsigned long obj=((Fn)FAST_GUID_LOOKUP)(guid);"
     new_unit = "static bool resolveObject(unsigned long long guid,unsigned long*out){if(!guid||!out||!executable(FAST_GUID_LOOKUP))return false;using Fn=unsigned long(__stdcall*)(unsigned long,unsigned long);unsigned long obj=((Fn)FAST_GUID_LOOKUP)((unsigned long)guid,(unsigned long)(guid>>32));"
     u = replace_once(u, old_unit, new_unit, "UnitState fast GUID ABI")
+    u = replace_once(
+        u,
+        'setStr(L,"status",g_status);',
+        'setStr(L,"status",(g_inSub&&g_tickSub)?"READY_UNITSTATE_US1R2":g_status);',
+        "UnitState.Status ready surface",
+    )
     unit.write_text(u)
+
+    c = cooldown.read_text()
+    c = replace_once(
+        c,
+        'setStr(L,"status",g_status);',
+        'setStr(L,"status",(g_inSub&&g_tickSub)?"READY_COOLDOWN_CORE_C1R2":g_status);',
+        "Cooldown.Status ready surface",
+    )
+    cooldown.write_text(c)
 
     # clang-cl expects /Fo<file>. With newer LLVM, /Fo:foo.obj is parsed as an
     # output file literally named :foo.obj, while the link step expects
@@ -60,6 +76,7 @@ static bool resolveSelector(const char*s,unsigned long long*out,unsigned long*ob
 
     print("post-overlay exact patches applied:", spatial)
     print("post-overlay exact patches applied:", unit)
+    print("post-overlay exact patches applied:", cooldown)
     print("post-overlay build flags normalized:", build)
 
 
