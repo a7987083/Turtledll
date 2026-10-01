@@ -1,8 +1,5 @@
 #include <windows.h>
-#include <cmath>
 #include <cstdint>
-#include <cstdio>
-#include <cstring>
 #include "spatial_core.h"
 
 namespace TysSpatialCore {
@@ -99,8 +96,15 @@ static bool executable(std::uintptr_t a){
     return p==PAGE_EXECUTE||p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY;
 }
 
-static bool finiteVec(const Vec3&v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z)&&std::fabs(v.x)<1000000.0f&&std::fabs(v.y)<1000000.0f&&std::fabs(v.z)<1000000.0f;}
-static float nonNegative(float v){return std::isfinite(v)&&v>0.0f?v:0.0f;}
+static bool finitef(float v){return v==v&&v>-3.4e38f&&v<3.4e38f;}
+static float absf(float v){return v<0.0f?-v:v;}
+static float sqrtfLocal(float v){if(v<=0.0f)return 0.0f;float x=v>1.0f?v:1.0f;for(unsigned i=0;i<10;++i)x=0.5f*(x+v/x);return x;}
+static float wrapPi(float x){const float pi=3.14159265358979323846f,two=6.28318530717958647692f;while(x>pi)x-=two;while(x<-pi)x+=two;return x;}
+static float sinfLocal(float x){x=wrapPi(x);const float x2=x*x;return x*(1.0f-x2*(1.0f/6.0f)+x2*x2*(1.0f/120.0f)-x2*x2*x2*(1.0f/5040.0f));}
+static float cosfLocal(float x){x=wrapPi(x);const float x2=x*x;return 1.0f-x2*0.5f+x2*x2*(1.0f/24.0f)-x2*x2*x2*(1.0f/720.0f);}
+static bool sameText(const char*a,const char*b){if(!a||!b)return false;while(*a&&*b){if(*a++!=*b++)return false;}return *a==*b;}
+static bool finiteVec(const Vec3&v){return finitef(v.x)&&finitef(v.y)&&finitef(v.z)&&absf(v.x)<1000000.0f&&absf(v.y)<1000000.0f&&absf(v.z)<1000000.0f;}
+static float nonNegative(float v){return finitef(v)&&v>0.0f?v:0.0f;}
 static float maxf(float a,float b){return a>b?a:b;}
 static float clampGap(float v){return v>0.0f?v:0.0f;}
 
@@ -192,7 +196,7 @@ static bool unitFacing(std::uint32_t object,float*out){
     std::uint32_t movement=0;
     if(!safeRead((std::uintptr_t)object+0x118u,&movement)||!movement)return false;
     float f=0.0f;
-    if(!safeRead((std::uintptr_t)movement+0x1cu,&f)||!std::isfinite(f))return false;
+    if(!safeRead((std::uintptr_t)movement+0x1cu,&f)||!finitef(f))return false;
     *out=f;
     return true;
 }
@@ -203,7 +207,7 @@ static bool unitReach(std::uint32_t object,float*radius,float*reach){
     if(!safeRead((std::uintptr_t)object+0x110u,&attr)||!attr||(attr&1u))return false;
     float r=0.0f,c=0.0f;
     if(!safeRead((std::uintptr_t)attr+0x1ecu,&r)||!safeRead((std::uintptr_t)attr+0x1f0u,&c))return false;
-    if(!std::isfinite(r)||!std::isfinite(c))return false;
+    if(!finitef(r)||!finitef(c))return false;
     *radius=nonNegative(r);
     *reach=nonNegative(c);
     return true;
@@ -224,9 +228,9 @@ static bool samplePair(Lua50::State L,SpatialSample*out){
     const float d2sq=dx*dx+dy*dy;
     const float d3sq=d2sq+dz*dz;
     if(d2sq<0.0f||d3sq<0.0f)return false;
-    s.distance2d=std::sqrt(d2sq);
-    s.distance3d=std::sqrt(d3sq);
-    s.zDelta=std::fabs(dz);
+    s.distance2d=sqrtfLocal(d2sq);
+    s.distance3d=sqrtfLocal(d3sq);
+    s.zDelta=absf(dz);
     s.rangedEdgeGap=clampGap(s.distance3d-s.actorCombatReach-s.targetCombatReach);
     s.chainsEdgeGap=clampGap(s.distance3d-s.actorBoundingRadius-s.targetBoundingRadius);
 
@@ -245,9 +249,9 @@ static bool samplePair(Lua50::State L,SpatialSample*out){
         // This is algebraically the negative of the old UnitXP forward-axis dot.
         const float nx=dx/s.distance2d;
         const float ny=dy/s.distance2d;
-        const float forwardDot=nx*std::cos(s.targetFacing)+ny*std::sin(s.targetFacing);
+        const float forwardDot=nx*cosfLocal(s.targetFacing)+ny*sinfLocal(s.targetFacing);
         s.behindDot=-forwardDot;
-        s.behindKnown=std::isfinite(s.behindDot);
+        s.behindKnown=finitef(s.behindDot);
         s.behind=s.behindKnown&&s.behindDot>0.0f;
     }
     *out=s;
@@ -258,10 +262,10 @@ static DistanceMeter parseMeter(Lua50::State L){
     if(Lua50::GetTop(L)<4||!Lua50::IsString(L,4))return METER_RANGED;
     const char*m=Lua50::ToString(L,4);
     if(!m)return METER_RANGED;
-    if(std::strcmp(m,"meleeAutoAttack")==0)return METER_MELEE_AUTOATTACK;
-    if(std::strcmp(m,"AoE")==0)return METER_AOE;
-    if(std::strcmp(m,"chains")==0)return METER_CHAINS;
-    if(std::strcmp(m,"Gaussian")==0)return METER_GAUSSIAN;
+    if(sameText(m,"meleeAutoAttack"))return METER_MELEE_AUTOATTACK;
+    if(sameText(m,"AoE"))return METER_AOE;
+    if(sameText(m,"chains"))return METER_CHAINS;
+    if(sameText(m,"Gaussian"))return METER_GAUSSIAN;
     return METER_RANGED;
 }
 
@@ -285,12 +289,8 @@ static float distanceForMeter(const SpatialSample&s,DistanceMeter meter){
 }
 
 static void pushGuidString(Lua50::State L,const char*k,std::uint64_t guid){
-    char b[24]={};
-#if defined(_MSC_VER)
-    std::sprintf(b,"0x%016I64X",(unsigned long long)guid);
-#else
-    std::sprintf(b,"0x%016llX",(unsigned long long)guid);
-#endif
+    static const char h[]="0123456789ABCDEF";char b[24]={};b[0]='0';b[1]='x';
+    for(unsigned i=0;i<16;++i)b[2+i]=h[(unsigned)((guid>>((15-i)*4))&15ULL)];b[18]=0;
     setStr(L,k,b);
 }
 

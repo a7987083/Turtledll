@@ -1,0 +1,6 @@
+## Interface: 11200
+## Title: 太阳神殿 CAST1-R2 统一施法状态测试
+## Notes: CAST1-R2 CastState 中文实机验收；事件驱动，无 OnUpdate 扫描。
+## Author: 太阳神殿
+## Version: 2.0.0-CAST1-R2-CN
+TaiYangCastDiag.lua

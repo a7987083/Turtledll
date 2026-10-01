@@ -1,0 +1,9 @@
+## Interface: 11200
+## Title: 太阳神殿 - 尸体模型选择器
+## Notes: 可拾取尸体固定 M2 预设选择；采集始终保持原版光效。科技感中文界面 + FuBar。
+## Author: 太阳神殿
+## Version: 0.3.0-API32
+## Dependencies: !Libs
+## SavedVariables: TYSLootFXSelectorDB, TYSLootFXSelectorFuDB
+TYSLootFXSelector.lua
+TYSLootFXSelector_FuBar.lua

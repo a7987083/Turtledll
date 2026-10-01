@@ -21,12 +21,12 @@ cd recovered/api37-s5r1f1/build
 bash build.sh
 ```
 
-Local recovery build SHA256 at import time:
+Latest reproducible GitHub Actions recovery build SHA256:
 
-`d0ac0158fba9d7aade4ee30afb86f14090e282556e7d86e99759ed107a7cbfff`
+`fa3664ff368ea1b2365eccaa43086c6f6f55e125498daa45d7f1836f84a77f15`
 
 ## Verification
 
-`api/API37_SET_DIFF.txt` records the string-level API command comparison between the original final DLL and the recovered build. At import time: `missing=0`, `extra=0` under the repository's broader command-string extraction rule (125 strings). The earlier 118 figure is the narrower main-API namespace count; the two numbers use different filters.
+The recovery workflow checks the PE32/i386 format, required exports, KERNEL32 import, and API34-37 command strings on every change. Recovery commit `f5b46d6c32a38154c75bac8ae30f41f96ec22261` passed those checks; the final contract report is in `RECOVERY_REPORT.md`.
 
 Runtime behavior of reconstructed API34→37 modules still requires WoW 1.12.1 / Turtle WoW real-machine validation.

@@ -1,0 +1,10 @@
+AutoRange ARX1 / API33 reference notes
+=====================================
+
+No third-party source file is copied into this project for ARX1.
+
+Behavioral/ABI references consulted during implementation:
+- UnitXP_SP3 (MarcelineVQ / later forks): WoW 1.12.1 UnitGUID, visible-object resolution, CWorld_Intersect address, Turtle-safe LOS query flag, collision-height-aware LOS behavior, and dead-state observations.
+- vmangos/core 1.12.1 UpdateFields: canonical field indices for UNIT_FIELD_HEALTH, UNIT_FIELD_MAXHEALTH and UNIT_DYNAMIC_FLAGS.
+
+The implementation in src/dllmain.cpp is independently integrated into the existing TYS GroundProbe/unit-token architecture and remains explicit-call-only.

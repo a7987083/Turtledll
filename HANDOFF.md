@@ -18,7 +18,14 @@ The last source-authentic handoff is `TaiYangShenDian_ARX1_API33_DW1_LOS1_HANDOF
 - API33 and earlier source: source-authentic.
 - Foundation F1 public contract: high confidence; original internal counters/storage not source-authentic.
 - Cooldown CD1-R2 public API and engine helper address: high confidence; some internal state/event implementation reconstructed.
-- UnitState US1-R2 public API/status semantics: high confidence; exact original reconciliation/event internals reconstructed.
+- UnitState US1-R2 public API/status semantics: high confidence; reconciliation/event internals are behavior-oriented reconstructions.
 - Spatial S5-R1F1 public API/facing semantics: high confidence from final DLL and diagnostic addon; exact original math/return details require real-machine comparison.
 
 Do not describe the recovered API34→37 C++ files as the original lost source.
+
+## Verified recovery build
+
+- Branch: `recovery/api37-complete`
+- Commit: `f5b46d6c32a38154c75bac8ae30f41f96ec22261`
+- Actions run: `36857295776` (passed)
+- Recovered DLL SHA256: `fa3664ff368ea1b2365eccaa43086c6f6f55e125498daa45d7f1836f84a77f15`
