@@ -66,6 +66,9 @@ static bool resolveSelector(const char*s,unsigned long long*out,unsigned long*ob
         'setBool(L,"zlibDecompression",false);setBool(L,"backgroundThread",false);setBool(L,"timer",false);',
         "UnitState.Status background-thread field",
     )
+    old_track = 'int dispatchTrack(Lua50::State L){initialize();unsigned long long g=0;const char*err="BAD_SELECTOR";if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2)||!resolveSelector(Lua50::ToString(L,2),&g,&err)){Lua50::PushNil(L);Lua50::PushString(L,err);return 2;}++g_trackCalls;bool n=false;Entry*e=track(g,&n);if(!e){++g_capacityFailures;Lua50::PushNil(L);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}'
+    new_track = 'int dispatchTrack(Lua50::State L){++g_trackCalls;if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2)){Lua50::PushBool(L,false);Lua50::PushString(L,"BAD_SELECTOR");return 2;}if(!initialize()){Lua50::PushBool(L,false);Lua50::PushString(L,"LAZY_NOT_SUBSCRIBED");return 2;}unsigned long long g=0;const char*err="BAD_SELECTOR";if(!resolveSelector(Lua50::ToString(L,2),&g,&err)){Lua50::PushBool(L,false);Lua50::PushString(L,err);return 2;}bool n=false;Entry*e=track(g,&n);if(!e){++g_capacityFailures;Lua50::PushBool(L,false);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}'
+    u = replace_once(u, old_track, new_track, "UnitState.Track exact failure and counter semantics")
     unit.write_text(u)
 
     c = cooldown.read_text()
