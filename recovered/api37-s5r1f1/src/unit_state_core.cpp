@@ -1,9 +1,9 @@
 #include <windows.h>
 #include <cstdint>
-#include <cstdio>
 #include "unit_state_core.h"
 #include "native_bus.h"
 #include "wow112_offsets.h"
+#include "custom_event_bridge.h"
 
 namespace TysUnitStateCore {
 namespace {
@@ -103,11 +103,10 @@ static bool resolveGuid(Lua50::State L,int idx,unsigned long long*out){
 
 static void formatGuid(char*b,std::size_t n,unsigned long long guid){
     if(!b||n<2)return;
-#if defined(_MSC_VER)
-    std::sprintf(b,"0x%016I64X",guid);
-#else
-    std::sprintf(b,"0x%016llX",guid);
-#endif
+    static const char h[]="0123456789ABCDEF";
+    if(n<19){b[0]=0;return;}b[0]='0';b[1]='x';
+    for(unsigned i=0;i<16;++i)b[2+i]=h[(unsigned)((guid>>((15-i)*4))&15ULL)];
+    b[18]=0;
 }
 static void pushGuid(Lua50::State L,const char*k,unsigned long long guid){char b[24]={};formatGuid(b,sizeof(b),guid);setStr(L,k,b);}
 
@@ -177,14 +176,14 @@ static bool reconcileEntry(Entry&e){
     e.capturedAtMs=GetTickCount();e.valid=true;e.dirty=false;++g_descriptorReconciles;
 
     unsigned long changedMask=0;
-    if(had&&(oldHealth!=e.health||oldMaxHealth!=e.maxHealth)){++g_healthEvents;changedMask|=0x08u;}
-    if(had&&oldCombat!=e.combatFlag){++g_combatEvents;changedMask|=0x10u;}
+    if(had&&(oldHealth!=e.health||oldMaxHealth!=e.maxHealth)){++g_healthEvents;changedMask|=0x08u;TysCustomEvents::emitUnitHealth(e.guid,oldHealth,e.health,e.maxHealth,e.health==0);}
+    if(had&&oldCombat!=e.combatFlag){++g_combatEvents;changedMask|=0x10u;TysCustomEvents::emitUnitCombat(e.guid,oldCombat!=0,e.combatFlag!=0);}
     if(had&&hadPower){
         unsigned long powerMask=0;
         if(oldPowerType!=e.powerType)powerMask|=0x01u;
         if(oldPower!=e.power)powerMask|=0x02u;
         if(oldMaxPower!=e.maxPower)powerMask|=0x04u;
-        if(powerMask){++g_powerEvents;changedMask|=powerMask;}
+        if(powerMask){++g_powerEvents;changedMask|=powerMask;TysCustomEvents::emitUnitPower(e.guid,e.powerType,oldPower,e.power,e.maxPower,powerMask);}
     }
     if(changedMask){g_lastChangedGuid=e.guid;g_lastChangedMask=changedMask;}
     return true;
@@ -209,15 +208,15 @@ static int pushEntry(Lua50::State L,const Entry&e){
 
 bool initialize(){
     if(InterlockedCompareExchange(&g_init,1,0)!=0)return true;
-    bool a=TysNativeBus::subscribeIncoming(&onIncoming);bool b=TysNativeBus::subscribeWorldTick(&onTick);
+    bool a=TysNativeBus::subscribeIncoming(&onIncoming);bool b=TysNativeBus::subscribeWorldTick(&onTick);bool c=TysCustomEvents::ensureUnitStateEvents();
     InterlockedExchange(&g_inSub,a?1:0);InterlockedExchange(&g_tickSub,b?1:0);
-    const char*s=(a&&b)?"READY_TRACKED_UPDATEOBJECT_GATE_DESCRIPTOR_POWER_READ":"PARTIAL_TRACKED_UPDATEOBJECT_GATE";
+    const char*s=(a&&b&&c)?"READY_UNITSTATE_US1R2":"PARTIAL_TRACKED_UPDATEOBJECT_GATE";
     unsigned i=0;for(;s[i]&&i+1<sizeof(g_status);++i)g_status[i]=s[i];g_status[i]=0;return a&&b;
 }
 const char* status(){return g_status;}
 
 int dispatchStatus(Lua50::State L){
-    initialize();Lua50::NewTable(L);setStr(L,"stage","US1-R2");setStr(L,"status",g_status);setBool(L,"incomingSubscribed",g_inSub!=0);setBool(L,"worldTickSubscribed",g_tickSub!=0);setBool(L,"customEventsReady",false);setNum(L,"capacity",MAX_TRACKED);
+    initialize();Lua50::NewTable(L);setStr(L,"stage","US1-R2");setStr(L,"status",g_status);setBool(L,"incomingSubscribed",g_inSub!=0);setBool(L,"worldTickSubscribed",g_tickSub!=0);setBool(L,"customEventsReady",TysCustomEvents::ensureUnitStateEvents());setNum(L,"capacity",MAX_TRACKED);
     unsigned tracked=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used)++tracked;setNum(L,"tracked",tracked);
     setNum(L,"fastGuidLookupAddress",FAST_GUID_LOOKUP);setNum(L,"updatePackets",g_updatePackets);setNum(L,"compressedUpdatePackets",g_compressedUpdatePackets);setNum(L,"dirtySignals",g_dirtySignals);setNum(L,"coalescedSignals",g_coalescedSignals);setNum(L,"reconcilePasses",g_reconcilePasses);setNum(L,"recordsChecked",g_recordsChecked);setNum(L,"objectUnavailable",g_objectUnavailable);setNum(L,"snapshotCalls",g_snapshotCalls);setNum(L,"untrackCalls",g_untrackCalls);setNum(L,"descriptorReconciles",g_descriptorReconciles);setNum(L,"descriptorFailures",g_descriptorFailures);setNum(L,"descriptorClears",g_descriptorClears);setNum(L,"descriptorEmptyPreserves",g_descriptorEmptyPreserves);setNum(L,"descriptorUnbinds",g_descriptorUnbinds);setNum(L,"healthEvents",g_healthEvents);setNum(L,"powerEvents",g_powerEvents);setNum(L,"combatEvents",g_combatEvents);
     if(g_lastChangedGuid)pushGuid(L,"lastChangedGuid",g_lastChangedGuid);else{Lua50::PushString(L,"lastChangedGuid");Lua50::PushNil(L);Lua50::SetTable(L,-3);}setNum(L,"lastChangedMask",g_lastChangedMask);

@@ -1,0 +1,16 @@
+Nampower Aura compatibility notice
+==================================
+The existing TaiYangShenDian Aura compatibility layer uses event semantics,
+client offsets/data-layout knowledge, and hidden-aura handling derived from the
+BSD-licensed Nampower project. Original Nampower files carry:
+Copyright (c) 2017-2023, namreeb (legal@namreeb.org). All rights reserved.
+Redistribution conditions and disclaimer are retained in source comments and
+should be preserved when redistributing derived source/binaries.
+
+AURA4-D1's duration discovery module was independently implemented against
+observed client behavior and public classic server protocol/source evidence.
+
+AURA4-D2 intentionally matches Nampower's public self-duration event ids and
+payload shape (BUFF_UPDATE_DURATION_SELF=580 / DEBUFF_UPDATE_DURATION_SELF=581)
+for dual-backend Lua compatibility. Preserve the Nampower BSD notice when
+redistributing this derived compatibility layer.

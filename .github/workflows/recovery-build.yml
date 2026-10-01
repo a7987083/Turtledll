@@ -30,29 +30,12 @@ jobs:
           clang-cl --version
           lld-link --version
 
-      - name: Reconstruct recovery source archive
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cat recovery/archive.parts/api37-source.part*.b64 | tr -d '\r\n' | base64 -d > /tmp/api37-source.xz
-          file /tmp/api37-source.xz
-          mkdir -p /tmp/api37-source
-          xz -dc /tmp/api37-source.xz > /tmp/api37-source.payload
-          file /tmp/api37-source.payload
-          if tar -tf /tmp/api37-source.payload >/dev/null 2>&1; then
-            tar -xf /tmp/api37-source.payload -C /tmp/api37-source
-          else
-            echo 'Decoded payload is not a tar archive'
-            exit 1
-          fi
-          find /tmp/api37-source -maxdepth 3 -type f | sort | head -200
-
       - name: Build recovered DLL
         shell: bash
         run: |
           set -euxo pipefail
-          BUILD_SH="$(find /tmp/api37-source -type f -path '*/build/build.sh' | head -n1)"
-          test -n "$BUILD_SH"
+          BUILD_SH="$GITHUB_WORKSPACE/recovered/api37-s5r1f1/build/build.sh"
+          test -f "$BUILD_SH"
           chmod +x "$BUILD_SH"
           bash "$BUILD_SH"
           ROOT="$(cd "$(dirname "$BUILD_SH")/.." && pwd)"
@@ -60,6 +43,18 @@ jobs:
           file "$ROOT/taiyangshendian.dll"
           sha256sum "$ROOT/taiyangshendian.dll" | tee /tmp/SHA256.txt
           cp "$ROOT/taiyangshendian.dll" /tmp/taiyangshendian-api37-recovered.dll
+
+      - name: Verify PE contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DLL=/tmp/taiyangshendian-api37-recovered.dll
+          file "$DLL" | grep -E 'PE32.*Intel 80386'
+          llvm-readobj --file-headers --coff-exports --coff-imports "$DLL" | tee /tmp/PE_CONTRACT.txt
+          grep -F 'Load' /tmp/PE_CONTRACT.txt
+          grep -F 'FirstEnterWorld' /tmp/PE_CONTRACT.txt
+          grep -F 'TaiYangShenDianNativeStatus' /tmp/PE_CONTRACT.txt
+          grep -F 'KERNEL32.dll' /tmp/PE_CONTRACT.txt
 
       - name: Verify API contract strings
         shell: bash
@@ -81,3 +76,4 @@ jobs:
           path: |
             /tmp/taiyangshendian-api37-recovered.dll
             /tmp/SHA256.txt
+            /tmp/PE_CONTRACT.txt
