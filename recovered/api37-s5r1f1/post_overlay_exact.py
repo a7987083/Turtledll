@@ -67,8 +67,29 @@ static bool resolveSelector(const char*s,unsigned long long*out,unsigned long*ob
         "UnitState.Status background-thread field",
     )
     old_track = 'int dispatchTrack(Lua50::State L){initialize();unsigned long long g=0;const char*err="BAD_SELECTOR";if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2)||!resolveSelector(Lua50::ToString(L,2),&g,&err)){Lua50::PushNil(L);Lua50::PushString(L,err);return 2;}++g_trackCalls;bool n=false;Entry*e=track(g,&n);if(!e){++g_capacityFailures;Lua50::PushNil(L);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}'
-    new_track = 'int dispatchTrack(Lua50::State L){++g_trackCalls;if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2)){Lua50::PushBool(L,false);Lua50::PushString(L,"BAD_SELECTOR");return 2;}if(!initialize()){Lua50::PushBool(L,false);Lua50::PushString(L,"LAZY_NOT_SUBSCRIBED");return 2;}unsigned long long g=0;const char*err="BAD_SELECTOR";if(!resolveSelector(Lua50::ToString(L,2),&g,&err)){Lua50::PushBool(L,false);Lua50::PushString(L,err);return 2;}bool n=false;Entry*e=track(g,&n);if(!e){++g_capacityFailures;Lua50::PushBool(L,false);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}'
+    new_track = 'int dispatchTrack(Lua50::State L){++g_trackCalls;if(!L||Lua50::GetTop(L)<2||!Lua50::IsString(L,2)){Lua50::PushBool(L,false);Lua50::PushString(L,"BAD_SELECTOR");return 2;}if(!initialize()){Lua50::PushBool(L,false);Lua50::PushString(L,"LAZY_NOT_SUBSCRIBED");return 2;}unsigned long long g=0;const char*err="BAD_SELECTOR";if(!resolveSelector(Lua50::ToString(L,2),&g,&err)){Lua50::PushBool(L,false);Lua50::PushString(L,err);return 2;}bool n=false;Entry*e=track(g,&n);if(!e){++g_capacityFailures;Lua50::PushBool(L,false);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}'
     u = replace_once(u, old_track, new_track, "UnitState.Track exact failure and counter semantics")
+    old_untrack = 'int dispatchUntrack(Lua50::State L){initialize();unsigned long long g=0;const char*err="BAD_SELECTOR";if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2)||!resolveSelector(Lua50::ToString(L,2),&g,&err)){Lua50::PushBool(L,false);Lua50::PushString(L,err);return 2;}++g_untrackCalls;'
+    new_untrack = 'int dispatchUntrack(Lua50::State L){++g_untrackCalls;unsigned long long g=0;const char*err="BAD_SELECTOR";if(!L||Lua50::GetTop(L)<2||!Lua50::IsString(L,2)||!resolveSelector(Lua50::ToString(L,2),&g,&err)){Lua50::PushBool(L,false);Lua50::PushString(L,err);return 2;}'
+    u = replace_once(u, old_untrack, new_untrack, "UnitState.Untrack passive counter semantics")
+    u = replace_once(
+        u,
+        'int dispatchGet(Lua50::State L){initialize();unsigned long long g=0;const char*err="BAD_SELECTOR";',
+        'int dispatchGet(Lua50::State L){unsigned long long g=0;const char*err="BAD_SELECTOR";',
+        "UnitState.Get passive query semantics",
+    )
+    u = replace_once(
+        u,
+        'int dispatchList(Lua50::State L){initialize();Lua50::NewTable(L);',
+        'int dispatchList(Lua50::State L){if(!L)return 0;Lua50::NewTable(L);',
+        "UnitState.List passive query semantics",
+    )
+    u = replace_once(
+        u,
+        'int dispatchClear(Lua50::State L){initialize();for(unsigned i=0;i<MAX_TRACKED;++i)g_entries[i]=Entry{};',
+        'int dispatchClear(Lua50::State L){if(!L)return 0;for(unsigned i=0;i<MAX_TRACKED;++i)g_entries[i]=Entry{};',
+        "UnitState.Clear passive command semantics",
+    )
     unit.write_text(u)
 
     c = cooldown.read_text()
