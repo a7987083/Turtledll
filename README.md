@@ -23,10 +23,10 @@ bash build.sh
 
 Latest reproducible GitHub Actions recovery build SHA256:
 
-`b41154d733b9202bcd3e983185902be226070124cc6118a4424002b06bbf593c`
+`fa3664ff368ea1b2365eccaa43086c6f6f55e125498daa45d7f1836f84a77f15`
 
 ## Verification
 
-The recovery workflow checks the PE32/i386 format, required exports, KERNEL32 import, and API34-37 command strings on every change. Recovery commit `ff44fe9cc41905e061023f1e0a899262a297f007` passed those checks; the final contract report is in `RECOVERY_REPORT.md`.
+The recovery workflow checks the PE32/i386 format, required exports, KERNEL32 import, and API34-37 command strings on every change. Recovery commit `f5b46d6c32a38154c75bac8ae30f41f96ec22261` passed those checks; the final contract report is in `RECOVERY_REPORT.md`.
 
 Runtime behavior of reconstructed API34→37 modules still requires WoW 1.12.1 / Turtle WoW real-machine validation.

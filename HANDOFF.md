@@ -26,6 +26,6 @@ Do not describe the recovered API34→37 C++ files as the original lost source.
 ## Verified recovery build
 
 - Branch: `recovery/api37-complete`
-- Commit: `ff44fe9cc41905e061023f1e0a899262a297f007`
-- Actions run: `36857079571` (passed)
-- Recovered DLL SHA256: `b41154d733b9202bcd3e983185902be226070124cc6118a4424002b06bbf593c`
+- Commit: `f5b46d6c32a38154c75bac8ae30f41f96ec22261`
+- Actions run: `36857295776` (passed)
+- Recovered DLL SHA256: `fa3664ff368ea1b2365eccaa43086c6f6f55e125498daa45d7f1836f84a77f15`

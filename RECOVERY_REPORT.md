@@ -3,14 +3,14 @@
 ## Result
 
 The `recovery/api37-complete` branch contains a complete buildable tree under
-`recovered/api37-s5r1f1/`. GitHub Actions run `36857079571` builds it with
+`recovered/api37-s5r1f1/`. GitHub Actions run `36857295776` builds it with
 clang-cl/lld-link and passes the repository's PE and API contract checks.
 
 ## Binary comparison
 
 | Property | Original final DLL | Recovered build |
 |---|---:|---:|
-| SHA256 | `1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae` | `b41154d733b9202bcd3e983185902be226070124cc6118a4424002b06bbf593c` |
+| SHA256 | `1d17050789310d077dbfaf1d6f00a67f822b6166828d44b7fe08a69977706eae` | `fa3664ff368ea1b2365eccaa43086c6f6f55e125498daa45d7f1836f84a77f15` |
 | Size | 380,928 bytes | 355,840 bytes |
 | Format | PE32 i386 DLL | PE32 i386 DLL |
 | Imports | KERNEL32 | KERNEL32 |
