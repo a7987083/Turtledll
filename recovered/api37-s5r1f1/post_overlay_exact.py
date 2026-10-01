@@ -54,6 +54,18 @@ static bool resolveSelector(const char*s,unsigned long long*out,unsigned long*ob
         'setStr(L,"status",(g_inSub&&g_tickSub)?"READY_UNITSTATE_US1R2":g_status);',
         "UnitState.Status ready surface",
     )
+    u = replace_once(
+        u,
+        'setNum(L,"tracked",trackedCount());setBool(L,"customEventsReady",TysCustomEvents::ensureUnitStateEvents());',
+        'setNum(L,"tracked",trackedCount());setBool(L,"incomingSubscribed",g_inSub!=0);setBool(L,"worldTickSubscribed",g_tickSub!=0);setBool(L,"customEventsReady",TysCustomEvents::ensureUnitStateEvents());',
+        "UnitState.Status subscription fields",
+    )
+    u = replace_once(
+        u,
+        'setBool(L,"zlibDecompression",false);setBool(L,"timer",false);',
+        'setBool(L,"zlibDecompression",false);setBool(L,"backgroundThread",false);setBool(L,"timer",false);',
+        "UnitState.Status background-thread field",
+    )
     unit.write_text(u)
 
     c = cooldown.read_text()
