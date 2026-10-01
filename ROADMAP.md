@@ -7,8 +7,8 @@
 - [x] Reconstruct API35 Cooldown CD1-R2 command surface and engine-query path.
 - [x] Reconstruct API36 UnitState US1-R2 tracked-state surface.
 - [x] Reconstruct API37 Spatial S5-R1F1 command surface and facing-axis semantics.
-- [x] Build recovered x86 DLL locally.
-- [x] Match final DLL command-string set with zero missing/extra entries under the verification rule.
+- [x] Build recovered x86 DLL reproducibly in GitHub Actions.
+- [x] Verify PE32/i386, exports, KERNEL32 import, API37 catalog and custom-event strings.
 
 ## Next validation
 
