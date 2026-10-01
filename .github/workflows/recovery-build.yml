@@ -23,12 +23,16 @@ jobs:
           sudo apt-get install -y clang lld xz-utils
           CLANG_CL="$(command -v clang-cl || command -v clang-cl-18 || find /usr/lib/llvm-* -type f -name clang-cl | sort -V | tail -n1)"
           LLD_LINK="$(command -v lld-link || command -v lld-link-18 || find /usr/lib/llvm-* -type f -name lld-link | sort -V | tail -n1)"
+          LLVM_READOBJ="$(command -v llvm-readobj || command -v llvm-readobj-18 || find /usr/lib/llvm-* -type f -name llvm-readobj | sort -V | tail -n1)"
           test -x "$CLANG_CL"
           test -x "$LLD_LINK"
+          test -x "$LLVM_READOBJ"
           sudo ln -sf "$CLANG_CL" /usr/local/bin/clang-cl
           sudo ln -sf "$LLD_LINK" /usr/local/bin/lld-link
+          sudo ln -sf "$LLVM_READOBJ" /usr/local/bin/llvm-readobj
           clang-cl --version
           lld-link --version
+          llvm-readobj --version
 
       - name: Build recovered DLL
         shell: bash
