@@ -40,3 +40,14 @@ Do not describe the recovered API34→37 C++ files as the original lost source.
 - Source ZIP SHA256: `3170c90607d98f198492a3621e3d99c2c59091dd2763c685db410ecc034585f4`
 - Restored from API35 R2 disassembly: 0x24-byte entry layout, 128x8 dirty queue, duplicate-source priority, active-player GUID path, Spell DB cooldown classification, packet dirtying, reset counters, and deadline revalidation.
 - Build verified; runtime / real-machine equivalence is not yet claimed.
+
+
+## API37 Spatial recovery stage (2026-10-03)
+
+- Branch: `recovery/api37-spatial-layout-parity`
+- Sealed artifact commit: `85e0b23530a27e534aadcd24310c90ba8e52a619`
+- Actions run: `37039732206` / Recovery Build #83 (passed)
+- DLL SHA256: `2e69b2c0de64039c4b324402dbafe0d3f307b00fb314f52a53498053d849fcb0`
+- Source ZIP SHA256: `c2e901cc80e9578cfc4d5771ae059e2491c3b2e7b9ad1e8eea2ca8d96208ed86`
+- Restored from API37 S5-R1/R1F1 binary and diagnostic evidence: Unit token resolver path, object+0x08 descriptor base, Spatial.Status field contract, Unit.Distance mode/return-code contract, Unit.Behind failure code, and S5-R1F1 rear-axis semantics.
+- Build verified; runtime / real-machine equivalence is not yet claimed.
