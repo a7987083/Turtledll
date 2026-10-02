@@ -51,7 +51,7 @@ static unsigned g_activeCount=0;
 static std::uint32_t g_nextDeadline=0;
 static bool g_deadlineValid=false;
 static std::uint32_t g_generation=0;
-static std::uint32_t g_engineEpoch=1;
+static std::uint32_t g_engineEpoch=0;
 static volatile LONG g_init=0,g_inSub=0,g_tickSub=0;
 static volatile LONG g_engineQueries=0,g_queryFailures=0,g_parseFailures=0,g_spellGoPackets=0,g_spellCooldownPackets=0,g_clearCooldownPackets=0,g_cooldownCheatPackets=0,g_cooldownEventPackets=0,g_ignoredRemotePackets=0,g_deadlineWakes=0;
 static volatile LONG g_dirtyEntries=0,g_deadlineRequeries=0,g_dirtyOverflow=0;
