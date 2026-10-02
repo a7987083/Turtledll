@@ -73,11 +73,24 @@ jobs:
             strings "$DLL" | grep -Fx "$s"
           done
 
-      - name: Upload recovered DLL
+      - name: Package recovered source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$GITHUB_WORKSPACE"
+          printf '%s\n' "$GITHUB_SHA" > /tmp/SOURCE_COMMIT.txt
+          zip -qr /tmp/taiyangshendian-api37-recovered-source.zip recovered/api37-s5r1f1
+          test -s /tmp/taiyangshendian-api37-recovered-source.zip
+          sha256sum /tmp/taiyangshendian-api37-recovered-source.zip | tee /tmp/SOURCE_SHA256.txt
+
+      - name: Upload recovered DLL and source
         uses: actions/upload-artifact@v4
         with:
           name: taiyangshendian-api37-recovered
           path: |
             /tmp/taiyangshendian-api37-recovered.dll
+            /tmp/taiyangshendian-api37-recovered-source.zip
             /tmp/SHA256.txt
+            /tmp/SOURCE_SHA256.txt
+            /tmp/SOURCE_COMMIT.txt
             /tmp/PE_CONTRACT.txt
