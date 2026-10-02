@@ -111,10 +111,14 @@ static bool resolveGuid(Lua50::State L,int idx,unsigned long long*out){
     if(Lua50::IsNumber(L,idx)){const double n=Lua50::ToNumber(L,idx);if(n<=0)return false;*out=(unsigned long long)n;return *out!=0;}
     if(!Lua50::IsString(L,idx))return false;
     const char*s=Lua50::ToString(L,idx);if(!s||!*s)return false;
-    if(executable(UNIT_GUID_FN)){
-        using UnitGuidFn=unsigned long long(__fastcall*)(const char*);
-        const unsigned long long g=((UnitGuidFn)UNIT_GUID_FN)(s);
-        if(g){*out=g;return true;}
+
+    if(executable(UNIT_TOKEN_RESOLVER)){
+        using ResolveUnitFn=std::uint32_t(__fastcall*)(const char*);
+        const std::uint32_t object=((ResolveUnitFn)UNIT_TOKEN_RESOLVER)(s);
+        if(object&&!(object&1u)&&canRead((std::uintptr_t)object+OFF_OBJECT_GUID,sizeof(unsigned long long))){
+            const unsigned long long g=*(const unsigned long long*)((std::uintptr_t)object+OFF_OBJECT_GUID);
+            if(g){*out=g;return true;}
+        }
     }
     return parseGuidText(s,out);
 }
@@ -128,101 +132,161 @@ static void formatGuid(char*b,std::size_t n,unsigned long long guid){
 }
 static void pushGuid(Lua50::State L,const char*k,unsigned long long guid){char b[24]={};formatGuid(b,sizeof(b),guid);setStr(L,k,b);}
 
-static Entry* find(unsigned long long guid){for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&g_entries[i].guid==guid)return &g_entries[i];return 0;}
+static Entry* find(unsigned long long guid){
+    for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&g_entries[i].guid==guid)return &g_entries[i];
+    return 0;
+}
 static Entry* track(unsigned long long guid,bool*isNew){
     if(isNew)*isNew=false;Entry*e=find(guid);if(e)return e;
-    for(unsigned i=0;i<MAX_TRACKED;++i)if(!g_entries[i].used){g_entries[i]=Entry{};g_entries[i].used=true;g_entries[i].dirty=true;g_entries[i].guid=guid;if(isNew)*isNew=true;return &g_entries[i];}
+    for(unsigned i=0;i<MAX_TRACKED;++i){
+        if(g_entries[i].used)continue;
+        g_entries[i]=Entry{};g_entries[i].used=1;g_entries[i].guid=guid;
+        if(isNew)*isNew=true;return &g_entries[i];
+    }
     return 0;
 }
 
-static void markDirtyAll(){
-    for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used){if(g_entries[i].dirty)++g_coalescedSignals;else{g_entries[i].dirty=true;++g_dirtySignals;}}
-}
 static void onIncoming(unsigned long op,TysNativeBus::CDataStoreView*){
-    if(op==WoW112::SMSG_UPDATE_OBJECT_OPCODE){++g_updatePackets;markDirtyAll();}
-    else if(op==WoW112::SMSG_COMPRESSED_UPDATE_OBJECT_OPCODE){++g_compressedUpdatePackets;markDirtyAll();}
+    if(op!=WoW112::SMSG_UPDATE_OBJECT_OPCODE&&op!=WoW112::SMSG_COMPRESSED_UPDATE_OBJECT_OPCODE)return;
+    if(op==WoW112::SMSG_UPDATE_OBJECT_OPCODE)++g_updatePackets;
+    else ++g_compressedUpdatePackets;
+    ++g_dirtySignals;
+    if(InterlockedExchange(&g_dirtyPending,1)!=0)++g_coalescedSignals;
 }
 
-static bool resolveObject(unsigned long long guid,std::uint32_t*out){
-    if(!guid||!out||!executable(FAST_GUID_LOOKUP))return false;
+static bool resolveSnapshot(unsigned long long guid,Snapshot*out){
+    if(!guid||!out)return false;*out=Snapshot{};
+    if(!executable(FAST_GUID_LOOKUP))return false;
     using GetObjectFn=std::uint32_t(__fastcall*)(unsigned long long);
     const std::uint32_t object=((GetObjectFn)FAST_GUID_LOOKUP)(guid);
-    // One object-range validation per snapshot. All object reads below are then
-    // inside this already-validated range, matching the US1-R2 contract.
-    if(!object||(object&1u)||!canRead(object,OFF_OBJECT_FIELDS+sizeof(std::uint32_t)))return false;
-    const std::uint32_t type=*(const std::uint32_t*)((std::uintptr_t)object+0x14u);
-    if(type!=OBJECT_TYPE_UNIT&&type!=OBJECT_TYPE_PLAYER)return false;
-    const unsigned long long liveGuid=*(const unsigned long long*)((std::uintptr_t)object+0x30u);
-    if(liveGuid!=guid)return false;
-    *out=object;return true;
+
+    // Object lookup failure is an observable state, not a descriptor failure.
+    if(!object||(object&1u)||!canRead(object,0x38u)){out->objectKnown=0;return true;}
+    const unsigned long long liveGuid=*(const unsigned long long*)((std::uintptr_t)object+OFF_OBJECT_GUID);
+    const std::uint32_t type=*(const std::uint32_t*)((std::uintptr_t)object+OFF_OBJECT_TYPE);
+    if(liveGuid!=guid||(type!=OBJECT_TYPE_UNIT&&type!=OBJECT_TYPE_PLAYER)){out->objectKnown=0;return true;}
+
+    out->objectKnown=1;
+    const std::uint32_t descriptor=*(const std::uint32_t*)((std::uintptr_t)object+OFF_OBJECT_DESCRIPTOR);
+    if(!descriptor)return false;
+    // Original R2 validates one contiguous descriptor range: [descriptor+0x58, descriptor+0x240).
+    if(!canRead((std::uintptr_t)descriptor+OFF_HEALTH,0x1E8u))return false;
+
+    out->descriptorKnown=1;
+    out->health=*(const std::uint32_t*)((std::uintptr_t)descriptor+OFF_HEALTH);
+    out->maxHealth=*(const std::uint32_t*)((std::uintptr_t)descriptor+OFF_MAXHEALTH);
+    for(unsigned i=0;i<5;++i){
+        out->power[i]=*(const std::uint32_t*)((std::uintptr_t)descriptor+OFF_POWER1+i*4u);
+        out->maxPower[i]=*(const std::uint32_t*)((std::uintptr_t)descriptor+OFF_MAXPOWER1+i*4u);
+    }
+    out->powerType=*(const std::uint8_t*)((std::uintptr_t)descriptor+OFF_POWER_TYPE_BYTE);
+    out->unitFlags=*(const std::uint32_t*)((std::uintptr_t)descriptor+OFF_UNIT_FLAGS);
+    out->dynamicFlags=*(const std::uint32_t*)((std::uintptr_t)descriptor+OFF_DYNAMIC_FLAGS);
+    out->dead=out->health==0?1u:((out->dynamicFlags&UNIT_DYNFLAG_DEAD)?1u:0u);
+    out->combat=(out->unitFlags&UNIT_FLAG_IN_COMBAT)?1u:0u;
+    return true;
+}
+
+static std::uint32_t activePower(const Snapshot&s){
+    return s.powerType<=MAX_POWER_TYPE?s.power[s.powerType]:0u;
+}
+static std::uint32_t activeMaxPower(const Snapshot&s){
+    return s.powerType<=MAX_POWER_TYPE?s.maxPower[s.powerType]:0u;
 }
 
 static bool reconcileEntry(Entry&e){
     ++g_recordsChecked;
-    std::uint32_t object=0;
-    if(!resolveObject(e.guid,&object)){
+    Snapshot next={};
+    if(!resolveSnapshot(e.guid,&next)){
+        ++g_descriptorFailures;
+        if(e.snapshotKnown)++g_descriptorEmptyPreserves;
+        return false;
+    }
+    if(!next.objectKnown){
         ++g_objectUnavailable;
-        if(e.valid)++g_descriptorUnbinds;
-        e.valid=false;e.powerValid=false;e.dirty=false;
+        if(e.snapshotKnown&&e.snapshot.objectKnown)++g_descriptorUnbinds;
+        e.snapshot.objectKnown=0;
         return false;
     }
 
-    const std::uint32_t attr=*(const std::uint32_t*)((std::uintptr_t)object+OFF_OBJECT_FIELDS);
-    if(!attr){
-        // Explicit US1-R2 rule: a transient empty UnitFields pointer is not
-        // authoritative enough to erase the previous snapshot.
-        ++g_descriptorEmptyPreserves;e.dirty=false;return true;
+    const bool had=e.snapshotKnown!=0;
+    const Snapshot old=e.snapshot;
+    e.snapshot=next;
+    e.snapshotKnown=1;
+    ++g_descriptorReconciles;
+
+    if(!had){
+        e.capturedAtMs=GetTickCount();
+        ++g_snapshotKnown;
+        return true;
     }
-    // One descriptor-range validation per snapshot, then direct reads inside it.
-    if((attr&3u)!=0u||!canRead(attr,OFF_UNIT_FLAGS+sizeof(std::uint32_t))){++g_descriptorFailures;e.dirty=false;return false;}
-
-    const std::uint32_t health=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_HEALTH);
-    const std::uint32_t maxHealth=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_MAXHEALTH);
-    const std::uint32_t flags=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_UNIT_FLAGS);
-    const std::uint8_t powerType=*(const std::uint8_t*)((std::uintptr_t)attr+OFF_POWER_TYPE_BYTE);
-    if(powerType>MAX_POWER_TYPE){++g_descriptorFailures;e.dirty=false;return false;}
-    const std::uint32_t power=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_POWER1+(std::uint32_t)powerType*4u);
-    const std::uint32_t maxPower=*(const std::uint32_t*)((std::uintptr_t)attr+OFF_MAXPOWER1+(std::uint32_t)powerType*4u);
-
-    const bool had=e.valid;
-    const bool hadPower=e.powerValid;
-    const unsigned long oldHealth=e.health,oldMaxHealth=e.maxHealth,oldCombat=e.combatFlag;
-    const unsigned long oldPowerType=e.powerType,oldPower=e.power,oldMaxPower=e.maxPower;
-
-    e.health=health;e.maxHealth=maxHealth;e.combatFlag=(flags&UNIT_FLAG_IN_COMBAT)?1u:0u;
-    e.powerType=powerType;e.power=power;e.maxPower=maxPower;e.powerValid=true;
-    e.capturedAtMs=GetTickCount();e.valid=true;e.dirty=false;++g_descriptorReconciles;
 
     unsigned long changedMask=0;
-    if(had&&(oldHealth!=e.health||oldMaxHealth!=e.maxHealth)){++g_healthEvents;changedMask|=0x08u;TysCustomEvents::emitUnitHealth(e.guid,oldHealth,e.health,e.maxHealth,e.health==0);}
-    if(had&&oldCombat!=e.combatFlag){++g_combatEvents;changedMask|=0x10u;TysCustomEvents::emitUnitCombat(e.guid,oldCombat!=0,e.combatFlag!=0);}
-    if(had&&hadPower){
-        unsigned long powerMask=0;
-        if(oldPowerType!=e.powerType)powerMask|=0x01u;
-        if(oldPower!=e.power)powerMask|=0x02u;
-        if(oldMaxPower!=e.maxPower)powerMask|=0x04u;
-        if(powerMask){++g_powerEvents;changedMask|=powerMask;TysCustomEvents::emitUnitPower(e.guid,e.powerType,oldPower,e.power,e.maxPower,powerMask);}
+    const bool healthChanged=old.health!=next.health||old.maxHealth!=next.maxHealth||old.dead!=next.dead;
+    if(healthChanged){
+        ++g_healthEvents;changedMask|=0x08u;
+        TysCustomEvents::emitUnitHealth(e.guid,old.health,next.health,next.maxHealth,next.dead!=0);
     }
-    if(changedMask){g_lastChangedGuid=e.guid;g_lastChangedMask=changedMask;}
+
+    unsigned long powerMask=0;
+    const std::uint32_t oldPower=activePower(old),newPower=activePower(next);
+    const std::uint32_t oldMax=activeMaxPower(old),newMax=activeMaxPower(next);
+    if(old.powerType!=next.powerType)powerMask|=0x01u;
+    if(oldPower!=newPower)powerMask|=0x02u;
+    if(oldMax!=newMax)powerMask|=0x04u;
+    if(powerMask){
+        ++g_powerEvents;changedMask|=powerMask;
+        TysCustomEvents::emitUnitPower(e.guid,next.powerType,oldPower,newPower,newMax,powerMask);
+    }
+
+    if(old.combat!=next.combat){
+        ++g_combatEvents;changedMask|=0x10u;
+        TysCustomEvents::emitUnitCombat(e.guid,old.combat!=0,next.combat!=0);
+    }
+
+    if(changedMask){
+        e.snapshotGeneration=++g_snapshotGeneration;
+        e.capturedAtMs=GetTickCount();
+        g_lastChangedGuid=e.guid;g_lastChangedMask=changedMask;
+    }
     return true;
 }
 
 static void onTick(){
-    bool any=false;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&g_entries[i].dirty){any=true;break;}
-    if(!any)return;++g_reconcilePasses;
-    for(unsigned i=0;i<MAX_TRACKED;++i){Entry&e=g_entries[i];if(e.used&&e.dirty)reconcileEntry(e);}
+    if(InterlockedExchange(&g_dirtyPending,0)==0)return;
+    ++g_reconcilePasses;
+    for(unsigned i=0;i<MAX_TRACKED;++i){
+        Entry&e=g_entries[i];if(e.used)reconcileEntry(e);
+    }
 }
 
 static int pushEntry(Lua50::State L,const Entry&e){
-    Lua50::NewTable(L);pushGuid(L,"guid",e.guid);setNum(L,"guidLow",(unsigned long)e.guid);setNum(L,"guidHigh",(unsigned long)(e.guid>>32));
-    setBool(L,"tracked",e.used);setBool(L,"visible",e.valid);setBool(L,"valid",e.valid);setBool(L,"dirty",e.dirty);
-    setNum(L,"health",e.health);setNum(L,"maxHealth",e.maxHealth);setBool(L,"dead",e.valid&&e.health==0);setBool(L,"combat",e.combatFlag!=0);setNum(L,"combatFlag",e.combatFlag);
-    if(e.powerValid){setNum(L,"powerType",e.powerType);setNum(L,"power",e.power);setNum(L,"maxPower",e.maxPower);}
-    else{Lua50::PushString(L,"powerType");Lua50::PushNil(L);Lua50::SetTable(L,-3);Lua50::PushString(L,"power");Lua50::PushNil(L);Lua50::SetTable(L,-3);Lua50::PushString(L,"maxPower");Lua50::PushNil(L);Lua50::SetTable(L,-3);}
-    setNum(L,"capturedAtMs",e.capturedAtMs);return 1;
+    Lua50::NewTable(L);pushGuid(L,"guid",e.guid);
+    setBool(L,"visible",e.snapshotKnown&&e.snapshot.objectKnown&&e.snapshot.descriptorKnown);
+    setBool(L,"dirty",g_dirtyPending!=0);
+    if(e.snapshotKnown){
+        const Snapshot&s=e.snapshot;
+        setNum(L,"health",s.health);setNum(L,"maxHealth",s.maxHealth);setBool(L,"dead",s.dead!=0);
+        setBool(L,"combat",s.combat!=0);setNum(L,"combatFlag",s.combat?1u:0u);
+        if(s.powerType<=MAX_POWER_TYPE){
+            setNum(L,"powerType",s.powerType);setNum(L,"power",activePower(s));setNum(L,"maxPower",activeMaxPower(s));
+        }else{
+            Lua50::PushString(L,"powerType");Lua50::PushNil(L);Lua50::SetTable(L,-3);
+            Lua50::PushString(L,"power");Lua50::PushNil(L);Lua50::SetTable(L,-3);
+            Lua50::PushString(L,"maxPower");Lua50::PushNil(L);Lua50::SetTable(L,-3);
+        }
+    }else{
+        for(const char*k:{"health","maxHealth","powerType","power","maxPower"}){
+            Lua50::PushString(L,k);Lua50::PushNil(L);Lua50::SetTable(L,-3);
+        }
+        setBool(L,"dead",false);setBool(L,"combat",false);setNum(L,"combatFlag",0);
+    }
+    setNum(L,"snapshotGeneration",e.snapshotGeneration);
+    setNum(L,"capturedAtMs",e.capturedAtMs);
+    return 1;
 }
 
-} // namespace
+} // namespace} // namespace
 
 bool initialize(){
     if(InterlockedCompareExchange(&g_init,1,0)!=0)return true;
