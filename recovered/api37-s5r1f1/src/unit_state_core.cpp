@@ -417,13 +417,13 @@ int dispatchTrack(Lua50::State L){
 }
 int dispatchUntrack(Lua50::State L){
     initialize();unsigned long long g=0;const char*err="BAD_SELECTOR";if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g,&err)){Lua50::PushBool(L,false);Lua50::PushString(L,err);return 2;}
-    ++g_untrackCalls;Entry*e=find(g);if(!e){Lua50::PushBool(L,false);Lua50::PushString(L,"NOT_TRACKED");return 2;}*e=Entry{};Lua50::PushBool(L,true);Lua50::PushString(L,"UNTRACKED");char b[24]={};formatGuid(b,sizeof(b),g);Lua50::PushString(L,b);return 3;
+    ++g_untrackCalls;Entry*e=find(g);if(!e){Lua50::PushBool(L,false);Lua50::PushString(L,"NOT_TRACKED");return 2;}*e=Entry{};Lua50::PushBool(L,true);Lua50::PushString(L,"UNTRACKED");return 2;
 }
 int dispatchGet(Lua50::State L){
     initialize();unsigned long long g=0;const char*err="BAD_SELECTOR";if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g,&err)){Lua50::PushNil(L);Lua50::PushString(L,err);return 2;}++g_snapshotCalls;
     Entry*e=find(g);if(!e){++g_snapshotUnknown;Lua50::PushNil(L);Lua50::PushString(L,"NOT_TRACKED");return 2;}const bool ok=reconcileEntry(*e);if(ok)++g_snapshotSuccess;else ++g_snapshotUnavailable;if(e->snapshotKnown)++g_snapshotKnown;return pushEntry(L,*e);
 }
 int dispatchList(Lua50::State L){initialize();Lua50::NewTable(L);int idx=1;for(unsigned i=0;i<MAX_TRACKED;++i){if(!g_entries[i].used)continue;Lua50::PushNumber(L,idx++);pushEntry(L,g_entries[i]);Lua50::SetTable(L,-3);}return 1;}
-int dispatchClear(Lua50::State L){initialize();unsigned n=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used){g_entries[i]=Entry{};++n;}Lua50::PushNumber(L,n);return 1;}
+int dispatchClear(Lua50::State L){initialize();for(unsigned i=0;i<MAX_TRACKED;++i)g_entries[i]=Entry{};InterlockedExchange(&g_dirtyPending,0);Lua50::PushBool(L,true);Lua50::PushString(L,"CLEARED");return 2;}
 
 } // namespace TysUnitStateCore
