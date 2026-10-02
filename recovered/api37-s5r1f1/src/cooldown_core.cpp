@@ -284,8 +284,29 @@ static void onTick(){
 }
 
 static int pushEntry(Lua50::State L,const Entry&e){
-    Lua50::NewTable(L);const std::uint32_t now=tickNow();const std::uint32_t remain=remaining32(e,now);
-    setNum(L,"spellId",e.spellId);setBool(L,"valid",e.generation!=0);setBool(L,"active",e.active);setNum(L,"startMs",e.startMs);setNum(L,"durationMs",e.durationMs);setNum(L,"recoveryTimeMs",e.durationMs);setNum(L,"startRecoveryTimeMs",e.startMs);setNum(L,"enable",e.enable);setNum(L,"remainingMs",remain);setBool(L,"ready",e.generation!=0&&!e.active);setNum(L,"kind",e.kind);setStr(L,"kindName",TysCooldownClassifier::kindName(e.kind));setNum(L,"source",e.source);setStr(L,"sourceName",TysCooldownClassifier::sourceName(e.source));setStr(L,"querySource","CLIENT_ENGINE_COOLDOWN_MANAGER");return 1;
+    Lua50::NewTable(L);
+    const std::uint32_t now=tickNow();
+    const std::uint32_t remain=remaining32(e,now);
+    const TysCooldownClassifier::SpellRecoveryFields fields=recoveryFields(e.spellId);
+    setNum(L,"spellId",e.spellId);
+    setBool(L,"active",e.active);
+    setNum(L,"startMs",e.startMs);
+    setNum(L,"durationMs",e.durationMs);
+    setNum(L,"endMs",e.endMs);
+    setNum(L,"remainingMs",remain);
+    setNum(L,"enable",e.enable);
+    setNum(L,"kind",e.kind);
+    setStr(L,"kindName",TysCooldownClassifier::kindName(e.kind));
+    setNum(L,"source",e.source);
+    setStr(L,"sourceName",TysCooldownClassifier::sourceName(e.source));
+    setStr(L,"querySource","ENGINE_0x006E2EA0");
+    setStr(L,"clock","TysClock32");
+    setBool(L,"dbcTimingValid",fields.available);
+    setNum(L,"recoveryTimeMs",fields.recoveryTime);
+    setNum(L,"categoryRecoveryTimeMs",fields.categoryRecoveryTime);
+    setNum(L,"startRecoveryCategory",fields.startRecoveryCategory);
+    setNum(L,"startRecoveryTimeMs",fields.startRecoveryTime);
+    return 1;
 }
 
 } // namespace
@@ -361,7 +382,7 @@ int dispatchStatus(Lua50::State L){
 int dispatchGet(Lua50::State L){
     initialize();if(Lua50::GetTop(L)<2||!Lua50::IsNumber(L,2)){Lua50::PushNil(L);Lua50::PushString(L,"BAD_SPELL_ID");return 2;}
     unsigned long s=(unsigned long)Lua50::ToNumber(L,2);Entry*e=slot(s,true);if(!e){Lua50::PushNil(L);Lua50::PushString(L,"CAPACITY");return 2;}Entry n=*e;
-    if(!query(s,TysCooldownClassifier::SOURCE_EXPLICIT_ENGINE_QUERY,&n)){++g_queryFailures;Lua50::PushNil(L);Lua50::PushString(L,"QUERY_HELPER_UNAVAILABLE");return 2;}emitTransition(*e,n,n.lastQueryMs);*e=n;return pushEntry(L,*e);
+    if(!query(s,TysCooldownClassifier::SOURCE_EXPLICIT_ENGINE_QUERY,&n)){++g_queryFailures;Lua50::PushNil(L);Lua50::PushString(L,"QUERY_FAILED");return 2;}emitTransition(*e,n,n.lastQueryMs);*e=n;return pushEntry(L,*e);
 }
 int dispatchList(Lua50::State L){initialize();Lua50::NewTable(L);int idx=1;for(unsigned i=0;i<MAX_TRACKED;++i){if(!g_entries[i].used)continue;Lua50::PushNumber(L,idx++);pushEntry(L,g_entries[i]);Lua50::SetTable(L,-3);}return 1;}
 
