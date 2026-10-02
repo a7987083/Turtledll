@@ -51,3 +51,15 @@ Do not describe the recovered API34→37 C++ files as the original lost source.
 - Source ZIP SHA256: `c2e901cc80e9578cfc4d5771ae059e2491c3b2e7b9ad1e8eea2ca8d96208ed86`
 - Restored from API37 S5-R1/R1F1 binary and diagnostic evidence: Unit token resolver path, object+0x08 descriptor base, Spatial.Status field contract, Unit.Distance mode/return-code contract, Unit.Behind failure code, and S5-R1F1 rear-axis semantics.
 - Build verified; runtime / real-machine equivalence is not yet claimed.
+
+
+## API34 Foundation F1 recovery stage (2026-10-03)
+
+- Branch: `recovery/api34-foundation-f1-parity`
+- Sealed artifact commit: `3f71b7e7e0bd1781346c96739594d377c16c9e38`
+- Actions run: `37043137581` / Recovery Build #84 (passed)
+- DLL SHA256: `b55c81c285c7f1ec6b1a3371c5f51a1d284e881e94a73ca2930c363d8162ab5e`
+- Source ZIP SHA256: `7133509ed18e583eb689ebfb7168f0f4142157de60b37f2c3665b74a14897edf`
+- GUID counters were verified against API34 F1 disassembly at the fast/fallback resolver update sites. Fast candidate classification was corrected: odd/unreadable candidates count as misses; readable candidates with unreadable/mismatched GUID count as rejected.
+- LOS pair-cache stats order and increment conditions were verified against API34 F1 disassembly and the source-authentic API33 cache core; no additional cache algorithm changes were required.
+- Build verified; runtime / real-machine equivalence is not yet claimed.
