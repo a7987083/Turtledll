@@ -414,7 +414,15 @@ int dispatchTrack(Lua50::State L){
     ++g_trackCalls;
     if(!initialize()){Lua50::PushNil(L);Lua50::PushString(L,g_status);return 2;}
     unsigned long long g=0;const char*err="BAD_SELECTOR";if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g,&err)){Lua50::PushNil(L);Lua50::PushString(L,err);return 2;}
-    bool n=false;Entry*e=track(g,&n);if(!e){++g_capacityFailures;Lua50::PushNil(L);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}reconcileEntry(*e);
+    bool n=false;Entry*e=track(g,&n);if(!e){++g_capacityFailures;Lua50::PushNil(L);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}
+    Snapshot snap={};
+    if(resolveSnapshot(g,&snap)){
+        e->snapshot=snap;
+        e->snapshotKnown=(snap.objectKnown!=0&&snap.descriptorKnown!=0)?1u:0u;
+        e->capturedAtMs=GetTickCount();
+    }else{
+        ++g_descriptorFailures;
+    }
     Lua50::PushBool(L,true);Lua50::PushString(L,n?"TRACKED_NEW":"TRACKED_EXISTING");char b[24]={};formatGuid(b,sizeof(b),g);Lua50::PushString(L,b);return 3;
 }
 int dispatchUntrack(Lua50::State L){
