@@ -9,43 +9,61 @@ namespace TysUnitStateCore {
 namespace {
 
 constexpr unsigned MAX_TRACKED=128;
-constexpr std::uintptr_t FAST_GUID_LOOKUP=0x00464870u;
-constexpr std::uintptr_t UNIT_GUID_FN=0x00515970u;
+constexpr std::uintptr_t FAST_GUID_LOOKUP=WoW112::FAST_GUID_LOOKUP;
+constexpr std::uintptr_t UNIT_TOKEN_RESOLVER=WoW112::RESOLVE_UNIT_TOKEN;
 constexpr std::uint32_t OBJECT_TYPE_UNIT=3u;
 constexpr std::uint32_t OBJECT_TYPE_PLAYER=4u;
-constexpr std::uint32_t UNIT_FLAG_IN_COMBAT=0x00080000u;
-
-// WoW 1.12.1 UnitFields layout, independently present in the historical
-// UnitXP_SP3 / ClassicAPI lineage and verified against vanilla script handlers.
-constexpr std::uint32_t OFF_OBJECT_FIELDS=0x110u;
-constexpr std::uint32_t OFF_HEALTH=0x40u;
-constexpr std::uint32_t OFF_POWER1=0x44u;
-constexpr std::uint32_t OFF_MAXHEALTH=0x58u;
-constexpr std::uint32_t OFF_MAXPOWER1=0x5Cu;
-constexpr std::uint32_t OFF_POWER_TYPE_BYTE=0x7Bu;
-constexpr std::uint32_t OFF_UNIT_FLAGS=0xA0u;
 constexpr std::uint32_t MAX_POWER_TYPE=4u;
 
-struct Entry {
-    unsigned long long guid;
-    unsigned long health;
-    unsigned long maxHealth;
-    unsigned long power;
-    unsigned long maxPower;
-    unsigned long powerType;
-    unsigned long combatFlag;
-    unsigned long capturedAtMs;
-    bool used;
-    bool valid;
-    bool dirty;
-    bool powerValid;
+// API36 US1-R2 snapshot layout recovered from 0x100450D6.
+constexpr std::uint32_t OFF_OBJECT_DESCRIPTOR=0x08u;
+constexpr std::uint32_t OFF_OBJECT_TYPE=0x14u;
+constexpr std::uint32_t OFF_OBJECT_GUID=0x30u;
+constexpr std::uint32_t OFF_HEALTH=0x58u;
+constexpr std::uint32_t OFF_POWER1=0x5Cu;
+constexpr std::uint32_t OFF_MAXHEALTH=0x70u;
+constexpr std::uint32_t OFF_MAXPOWER1=0x74u;
+constexpr std::uint32_t OFF_POWER_TYPE_BYTE=0x93u;
+constexpr std::uint32_t OFF_UNIT_FLAGS=0xB8u;
+constexpr std::uint32_t OFF_DYNAMIC_FLAGS=0x23Cu;
+constexpr std::uint32_t UNIT_FLAG_IN_COMBAT=0x00080000u;
+constexpr std::uint32_t UNIT_DYNFLAG_DEAD=0x20u;
+
+struct Snapshot {
+    std::uint8_t objectKnown;
+    std::uint8_t descriptorKnown;
+    std::uint8_t dead;
+    std::uint8_t combat;
+    std::uint8_t powerType;
+    std::uint8_t reserved[3];
+    std::uint32_t health;
+    std::uint32_t maxHealth;
+    std::uint32_t power[5];
+    std::uint32_t maxPower[5];
+    std::uint32_t unitFlags;
+    std::uint32_t dynamicFlags;
 };
+static_assert(sizeof(Snapshot)==0x40,"API36 snapshot layout must remain 0x40 bytes");
+
+struct Entry {
+    std::uint8_t used;
+    std::uint8_t snapshotKnown;
+    std::uint8_t reserved[6];
+    unsigned long long guid;
+    Snapshot snapshot;
+    std::uint32_t snapshotGeneration;
+    std::uint32_t capturedAtMs;
+};
+static_assert(sizeof(Entry)==0x58,"API36 tracked entry layout must remain 0x58 bytes");
 
 static Entry g_entries[MAX_TRACKED]={};
 static volatile LONG g_init=0,g_inSub=0,g_tickSub=0;
 static volatile LONG g_updatePackets=0,g_compressedUpdatePackets=0,g_dirtySignals=0,g_coalescedSignals=0;
+static volatile LONG g_dirtyPending=0;
 static volatile LONG g_snapshotCalls=0,g_untrackCalls=0,g_descriptorReconciles=0,g_descriptorFailures=0,g_descriptorClears=0,g_descriptorEmptyPreserves=0,g_descriptorUnbinds=0;
 static volatile LONG g_healthEvents=0,g_powerEvents=0,g_combatEvents=0,g_objectUnavailable=0,g_recordsChecked=0,g_reconcilePasses=0;
+static volatile LONG g_snapshotSuccess=0,g_snapshotKnown=0,g_snapshotUnknown=0,g_snapshotUnavailable=0,g_snapshotInstanceClears=0;
+static std::uint32_t g_snapshotGeneration=0;
 static unsigned long long g_lastChangedGuid=0;
 static unsigned long g_lastChangedMask=0;
 static char g_status[96]="NOT_INITIALIZED";
