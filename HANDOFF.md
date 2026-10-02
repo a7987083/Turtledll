@@ -63,3 +63,16 @@ Do not describe the recovered API34→37 C++ files as the original lost source.
 - GUID counters were verified against API34 F1 disassembly at the fast/fallback resolver update sites. Fast candidate classification was corrected: odd/unreadable candidates count as misses; readable candidates with unreadable/mismatched GUID count as rejected.
 - LOS pair-cache stats order and increment conditions were verified against API34 F1 disassembly and the source-authentic API33 cache core; no additional cache algorithm changes were required.
 - Build verified; runtime / real-machine equivalence is not yet claimed.
+
+
+## Final API37 public-contract parity stage (2026-10-03)
+
+- Branch: `recovery/final-api37-parity`
+- Sealed artifact commit: `49b3b3e6e3e12a6a7baf076782d9bc468928e64f`
+- Actions run: `37045364959` / Recovery Build #92 (passed)
+- DLL SHA256: `a137a50cffa95846d7378e84b256f71b31e4be6fee23b4f2e341b4148b083576`
+- Source ZIP SHA256: `c1099d3ce08f57c4d5cb52886335cc1771823fc9df21b5c003cd0afa8870b4ae`
+- Public-contract parity work includes API35 Cooldown.Status/Get, API36 UnitState.Status/Get/Track/Untrack/Clear, shared selector parsing, lazy subscription status, and previously sealed Foundation/Spatial corrections.
+- Current recovered .text virtual size: `0x43FD1`; original target .text: `0x489C0`; remaining .text delta: 18,927 bytes.
+- Current recovered .rdata virtual size: `0xA16B`; original target .rdata: `0xA4FB`; remaining .rdata delta: 912 bytes.
+- Static/CI contract parity is substantially improved. Byte-identical or runtime-equivalent recovery is NOT yet claimed. Next stage is function-level internal implementation diff.
