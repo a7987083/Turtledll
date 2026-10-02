@@ -263,30 +263,47 @@ static void onTick(){
 }
 
 static int pushEntry(Lua50::State L,const Entry&e){
-    Lua50::NewTable(L);pushGuid(L,"guid",e.guid);
-    setBool(L,"visible",e.snapshotKnown&&e.snapshot.objectKnown&&e.snapshot.descriptorKnown);
-    setBool(L,"dirty",g_dirtyPending!=0);
-    if(e.snapshotKnown){
-        const Snapshot&s=e.snapshot;
-        setNum(L,"health",s.health);setNum(L,"maxHealth",s.maxHealth);setBool(L,"dead",s.dead!=0);
-        setBool(L,"combat",s.combat!=0);setNum(L,"combatFlag",s.combat?1u:0u);
-        if(s.powerType<=MAX_POWER_TYPE){
-            setNum(L,"powerType",s.powerType);setNum(L,"power",activePower(s));setNum(L,"maxPower",activeMaxPower(s));
-        }else{
-            Lua50::PushString(L,"powerType");Lua50::PushNil(L);Lua50::SetTable(L,-3);
-            Lua50::PushString(L,"power");Lua50::PushNil(L);Lua50::SetTable(L,-3);
-            Lua50::PushString(L,"maxPower");Lua50::PushNil(L);Lua50::SetTable(L,-3);
+    Lua50::NewTable(L);
+    pushGuid(L,"guid",e.guid);
+    const bool visible=e.snapshotKnown&&e.snapshot.objectKnown;
+    const bool fieldsValid=visible&&e.snapshot.descriptorKnown;
+    setBool(L,"visible",visible);
+    setBool(L,"fieldsValid",fieldsValid);
+    setBool(L,"tracked",e.used!=0);
+    setBool(L,"initialized",e.snapshotKnown!=0);
+
+    const char* state="GUID_NOT_VISIBLE";
+    if(visible){
+        state="UNIT_FIELDS_UNAVAILABLE";
+        if(fieldsValid){
+            const Snapshot&s=e.snapshot;
+            setNum(L,"health",s.health);
+            setNum(L,"maxHealth",s.maxHealth);
+            setBool(L,"dead",s.dead!=0);
+            setBool(L,"combat",s.combat!=0);
+            setNum(L,"unitFlags",s.unitFlags);
+            setNum(L,"dynamicFlags",s.dynamicFlags);
+            setNum(L,"powerType",s.powerType);
+            if(s.powerType<=MAX_POWER_TYPE){
+                setNum(L,"power",activePower(s));
+                setNum(L,"maxPower",activeMaxPower(s));
+            }else{
+                Lua50::PushString(L,"power");Lua50::PushNil(L);Lua50::SetTable(L,-3);
+                Lua50::PushString(L,"maxPower");Lua50::PushNil(L);Lua50::SetTable(L,-3);
+            }
+
+            char keyPower[7]={'p','o','w','e','r','1',0};
+            char keyMax[10]={'m','a','x','P','o','w','e','r','1',0};
+            for(unsigned i=0;i<5;++i){
+                keyPower[5]=(char)('1'+i);
+                keyMax[8]=(char)('1'+i);
+                setNum(L,keyPower,s.power[i]);
+                setNum(L,keyMax,s.maxPower[i]);
+            }
+            state="OK";
         }
-    }else{
-        Lua50::PushString(L,"health");Lua50::PushNil(L);Lua50::SetTable(L,-3);
-        Lua50::PushString(L,"maxHealth");Lua50::PushNil(L);Lua50::SetTable(L,-3);
-        Lua50::PushString(L,"powerType");Lua50::PushNil(L);Lua50::SetTable(L,-3);
-        Lua50::PushString(L,"power");Lua50::PushNil(L);Lua50::SetTable(L,-3);
-        Lua50::PushString(L,"maxPower");Lua50::PushNil(L);Lua50::SetTable(L,-3);
-        setBool(L,"dead",false);setBool(L,"combat",false);setNum(L,"combatFlag",0);
     }
-    setNum(L,"snapshotGeneration",e.snapshotGeneration);
-    setNum(L,"capturedAtMs",e.capturedAtMs);
+    setStr(L,"status",state);
     return 1;
 }
 
