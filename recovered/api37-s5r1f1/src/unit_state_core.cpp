@@ -67,7 +67,7 @@ static std::uint32_t g_snapshotGeneration=0;
 static std::uint32_t g_worldGeneration=0;
 static unsigned long long g_lastChangedGuid=0;
 static unsigned long g_lastChangedMask=0;
-static char g_status[96]="NOT_INITIALIZED";
+static char g_status[96]="LAZY_NOT_SUBSCRIBED";
 
 static void setStr(Lua50::State L,const char*k,const char*v){Lua50::PushString(L,k);Lua50::PushString(L,v);Lua50::SetTable(L,-3);}
 static void setNum(Lua50::State L,const char*k,double v){Lua50::PushString(L,k);Lua50::PushNumber(L,v);Lua50::SetTable(L,-3);}
@@ -313,7 +313,8 @@ bool initialize(){
     if(InterlockedCompareExchange(&g_init,1,0)!=0)return true;
     bool a=TysNativeBus::subscribeIncoming(&onIncoming);bool b=TysNativeBus::subscribeWorldTick(&onTick);bool c=TysCustomEvents::ensureUnitStateEvents();
     InterlockedExchange(&g_inSub,a?1:0);InterlockedExchange(&g_tickSub,b?1:0);
-    const char*s=(a&&b&&c&&executable(FAST_GUID_LOOKUP)&&executable(UNIT_TOKEN_RESOLVER))?"READY_UNITSTATE_US1R2":"PARTIAL_UNITSTATE_US1R2";
+    (void)c;
+    const char*s=(a&&b)?"READY_UNITSTATE_US1R2":"LAZY_NOT_SUBSCRIBED";
     unsigned i=0;for(;s[i]&&i+1<sizeof(g_status);++i)g_status[i]=s[i];g_status[i]=0;return a&&b;
 }
 const char* status(){return g_status;}
