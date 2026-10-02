@@ -24,11 +24,13 @@ constexpr float EPSILON_XY = 0.00001f;
 struct Vec3 { float x, y, z; };
 
 enum DistanceMeter {
+    METER_CENTER3D,
+    METER_CENTER2D,
     METER_RANGED,
-    METER_MELEE_AUTOATTACK,
-    METER_AOE,
     METER_CHAINS,
-    METER_GAUSSIAN
+    METER_MELEE,
+    METER_GAUSSIAN,
+    METER_BAD
 };
 
 struct SpatialSample {
@@ -264,32 +266,22 @@ static bool samplePair(Lua50::State L,SpatialSample*out){
 }
 
 static DistanceMeter parseMeter(Lua50::State L){
-    if(Lua50::GetTop(L)<4||!Lua50::IsString(L,4))return METER_RANGED;
+    if(Lua50::GetTop(L)<4||!Lua50::IsString(L,4))return METER_CENTER3D;
     const char*m=Lua50::ToString(L,4);
-    if(!m)return METER_RANGED;
-    if(sameText(m,"meleeAutoAttack"))return METER_MELEE_AUTOATTACK;
-    if(sameText(m,"AoE"))return METER_AOE;
-    if(sameText(m,"chains"))return METER_CHAINS;
-    if(sameText(m,"Gaussian"))return METER_GAUSSIAN;
-    return METER_RANGED;
+    if(!m)return METER_CENTER3D;
+    if(sameText(m,"CENTER3D")||sameText(m,"GAUSSIAN"))return METER_CENTER3D;
+    if(sameText(m,"CENTER2D"))return METER_CENTER2D;
+    if(sameText(m,"RANGED")||sameText(m,"RANGED_EDGE"))return METER_RANGED;
+    if(sameText(m,"CHAINS")||sameText(m,"CHAINS_EDGE"))return METER_CHAINS;
+    if(sameText(m,"MELEE")||sameText(m,"MELEE_BASE_GAP"))return METER_MELEE;
+    return METER_BAD;
 }
 
 static float distanceForMeter(const SpatialSample&s,DistanceMeter meter){
-    if(meter==METER_MELEE_AUTOATTACK){
-        if(!s.meleeZEligible)return s.distance3d;
-        return s.meleeBaseGap2d;
-    }
-    if(meter==METER_CHAINS)return s.chainsEdgeGap;
+    if(meter==METER_CENTER2D)return s.distance2d;
     if(meter==METER_RANGED)return s.rangedEdgeGap;
-    if(meter==METER_AOE){
-        float total=0.0f;
-        std::uint32_t actorType=0,targetType=0;
-        safeRead((std::uintptr_t)s.actorObject+0x14u,&actorType);
-        safeRead((std::uintptr_t)s.targetObject+0x14u,&targetType);
-        if(actorType==OBJECT_TYPE_UNIT)total=s.actorCombatReach;
-        if(targetType==OBJECT_TYPE_UNIT)total=s.targetCombatReach;
-        return clampGap(s.distance3d-total);
-    }
+    if(meter==METER_CHAINS)return s.chainsEdgeGap;
+    if(meter==METER_MELEE)return s.meleeBaseGap2d;
     return s.distance3d;
 }
 
@@ -354,9 +346,13 @@ int dispatchGet(Lua50::State L){
 int dispatchDistance(Lua50::State L){
     ++g_distanceCount;
     SpatialSample s={};
-    if(!samplePair(L,&s)){Lua50::PushNil(L);return 1;}
-    Lua50::PushNumber(L,distanceForMeter(s,parseMeter(L)));
-    return 1;
+    if(!samplePair(L,&s)){Lua50::PushNil(L);Lua50::PushString(L,"UNIT_NOT_VISIBLE");return 2;}
+    const DistanceMeter meter=parseMeter(L);
+    if(meter==METER_BAD){Lua50::PushNil(L);Lua50::PushString(L,"BAD_MODE");return 2;}
+    if(meter==METER_MELEE&&!s.meleeZEligible){Lua50::PushNil(L);Lua50::PushString(L,"MELEE_Z_SEPARATION");return 2;}
+    Lua50::PushNumber(L,distanceForMeter(s,meter));
+    Lua50::PushString(L,meter==METER_MELEE?"SERVER_INSPIRED_BASE_NO_LEEWAY":"OK");
+    return 2;
 }
 
 int dispatchBehind(Lua50::State L){
