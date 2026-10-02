@@ -276,9 +276,11 @@ static int pushEntry(Lua50::State L,const Entry&e){
             Lua50::PushString(L,"maxPower");Lua50::PushNil(L);Lua50::SetTable(L,-3);
         }
     }else{
-        for(const char*k:{"health","maxHealth","powerType","power","maxPower"}){
-            Lua50::PushString(L,k);Lua50::PushNil(L);Lua50::SetTable(L,-3);
-        }
+        Lua50::PushString(L,"health");Lua50::PushNil(L);Lua50::SetTable(L,-3);
+        Lua50::PushString(L,"maxHealth");Lua50::PushNil(L);Lua50::SetTable(L,-3);
+        Lua50::PushString(L,"powerType");Lua50::PushNil(L);Lua50::SetTable(L,-3);
+        Lua50::PushString(L,"power");Lua50::PushNil(L);Lua50::SetTable(L,-3);
+        Lua50::PushString(L,"maxPower");Lua50::PushNil(L);Lua50::SetTable(L,-3);
         setBool(L,"dead",false);setBool(L,"combat",false);setNum(L,"combatFlag",0);
     }
     setNum(L,"snapshotGeneration",e.snapshotGeneration);
