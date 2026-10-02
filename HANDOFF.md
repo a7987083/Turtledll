@@ -29,3 +29,14 @@ Do not describe the recovered API34→37 C++ files as the original lost source.
 - Commit: `f5b46d6c32a38154c75bac8ae30f41f96ec22261`
 - Actions run: `36857295776` (passed)
 - Recovered DLL SHA256: `fa3664ff368ea1b2365eccaa43086c6f6f55e125498daa45d7f1836f84a77f15`
+
+
+## API35 Cooldown recovery stage (2026-10-03)
+
+- Branch: `recovery/api35-cooldown-contract-parity`
+- Sealed artifact commit: `e26f08a2338f0dff447e0e36efda899dfb165fd3`
+- Actions run: `37036791370` / Recovery Build #75 (passed)
+- DLL SHA256: `c19e094cc2af0e9f781d972dbfcfe4db03b91e3eafb69d348036015f77c8d678`
+- Source ZIP SHA256: `3170c90607d98f198492a3621e3d99c2c59091dd2763c685db410ecc034585f4`
+- Restored from API35 R2 disassembly: 0x24-byte entry layout, 128x8 dirty queue, duplicate-source priority, active-player GUID path, Spell DB cooldown classification, packet dirtying, reset counters, and deadline revalidation.
+- Build verified; runtime / real-machine equivalence is not yet claimed.
