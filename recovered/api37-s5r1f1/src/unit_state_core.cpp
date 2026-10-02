@@ -98,30 +98,71 @@ static bool executable(std::uintptr_t a){
 
 static bool hexNibble(char c,unsigned*o){if(c>='0'&&c<='9'){*o=(unsigned)(c-'0');return true;}if(c>='a'&&c<='f'){*o=(unsigned)(c-'a'+10);return true;}if(c>='A'&&c<='F'){*o=(unsigned)(c-'A'+10);return true;}return false;}
 
-static bool parseGuidText(const char*s,unsigned long long*out){
-    if(!s||!out)return false;*out=0;
-    while(*s==' '||*s=='\t'||*s=='\r'||*s=='\n')++s;
-    if(s[0]=='0'&&(s[1]=='x'||s[1]=='X'))s+=2;
-    unsigned long long v=0;unsigned digits=0;
-    for(;*s&&digits<16;++s,++digits){unsigned n=0;if(!hexNibble(*s,&n))return false;v=(v<<4)|n;}
-    if(*s||digits==0||v==0)return false;*out=v;return true;
+static char lowerAscii(char c){return c>='A'&&c<='Z'?(char)(c+('a'-'A')):c;}
+static bool equalCi(const char*a,const char*b){
+    if(!a||!b)return false;
+    while(*a&&*b){if(lowerAscii(*a++)!=lowerAscii(*b++))return false;}
+    return *a==0&&*b==0;
 }
-
-static bool resolveGuid(Lua50::State L,int idx,unsigned long long*out){
-    if(!out)return false;*out=0;
-    if(Lua50::IsNumber(L,idx)){const double n=Lua50::ToNumber(L,idx);if(n<=0)return false;*out=(unsigned long long)n;return *out!=0;}
-    if(!Lua50::IsString(L,idx))return false;
-    const char*s=Lua50::ToString(L,idx);if(!s||!*s)return false;
-
-    if(executable(UNIT_TOKEN_RESOLVER)){
+static bool prefixCi(const char*s,const char*p){
+    if(!s||!p)return false;
+    while(*p){if(!*s||lowerAscii(*s++)!=lowerAscii(*p++))return false;}
+    return true;
+}
+static bool isUnitSelector(const char*s){
+    if(!s)return false;
+    if(equalCi(s,"player")||equalCi(s,"target")||equalCi(s,"mouseover")||equalCi(s,"pet"))return true;
+    if(prefixCi(s,"party")){
+        const char*d=s+5;
+        return d[0]>='1'&&d[0]<='4'&&d[1]==0;
+    }
+    if(prefixCi(s,"raid")){
+        const char*d=s+4;if(*d<'0'||*d>'9')return false;
+        unsigned n=0;while(*d>='0'&&*d<='9'){n=n*10u+(unsigned)(*d-'0');++d;}
+        return *d==0&&n>=1u&&n<=40u;
+    }
+    return false;
+}
+static bool parseGuidTextExact(const char*s,unsigned long long*out){
+    if(!s||!out)return false;*out=0;
+    while(*s==' '||*s=='\t')++s;
+    if(s[0]=='0'&&lowerAscii(s[1])=='x')s+=2;
+    unsigned long long v=0;unsigned digits=0;
+    while(*s&&*s!=' '&&*s!='\t'){
+        unsigned n=0;
+        if(*s>='0'&&*s<='9')n=(unsigned)(*s-'0');
+        else if(*s>='a'&&*s<='f')n=(unsigned)(*s-'a'+10);
+        else if(*s>='A'&&*s<='F')n=(unsigned)(*s-'A'+10);
+        else return false;
+        if(digits>=16)return false;
+        v=(v<<4)|n;++digits;++s;
+    }
+    while(*s==' '||*s=='\t')++s;
+    if(*s||digits==0||v==0)return false;
+    *out=v;return true;
+}
+static bool resolveSelector(const char*s,unsigned long long*out,const char**error){
+    if(out)*out=0;if(error)*error="BAD_SELECTOR";
+    if(!s||!out)return false;
+    if(isUnitSelector(s)){
+        if(!executable(UNIT_TOKEN_RESOLVER)){if(error)*error="RESOLVE_UNIT_UNAVAILABLE";return false;}
         using ResolveUnitFn=std::uint32_t(__fastcall*)(const char*);
         const std::uint32_t object=((ResolveUnitFn)UNIT_TOKEN_RESOLVER)(s);
-        if(object&&!(object&1u)&&canRead((std::uintptr_t)object+OFF_OBJECT_GUID,sizeof(unsigned long long))){
-            const unsigned long long g=*(const unsigned long long*)((std::uintptr_t)object+OFF_OBJECT_GUID);
-            if(g){*out=g;return true;}
+        if(!object||(object&1u)||!canRead((std::uintptr_t)object+OFF_OBJECT_GUID,sizeof(unsigned long long))){
+            if(error)*error="UNIT_NOT_FOUND";return false;
         }
+        const unsigned long long g=*(const unsigned long long*)((std::uintptr_t)object+OFF_OBJECT_GUID);
+        if(!g){if(error)*error="UNIT_NOT_FOUND";return false;}
+        *out=g;if(error)*error="OK";return true;
     }
-    return parseGuidText(s,out);
+    if(!parseGuidTextExact(s,out)){if(error)*error="GUID_INVALID";return false;}
+    if(error)*error="OK";return true;
+}
+static bool resolveGuid(Lua50::State L,int idx,unsigned long long*out,const char**error){
+    if(!out)return false;*out=0;
+    if(!Lua50::IsString(L,idx)){if(error)*error="BAD_SELECTOR";return false;}
+    const char*s=Lua50::ToString(L,idx);
+    return resolveSelector(s,out,error);
 }
 
 static void formatGuid(char*b,std::size_t n,unsigned long long guid){
@@ -370,16 +411,16 @@ int dispatchStatus(Lua50::State L){
 }
 
 int dispatchTrack(Lua50::State L){
-    ++g_trackCalls;initialize();unsigned long long g=0;if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2)||!resolveGuid(L,2,&g)){Lua50::PushNil(L);Lua50::PushString(L,"BAD_SELECTOR");return 2;}
+    ++g_trackCalls;initialize();unsigned long long g=0;const char*err="BAD_SELECTOR";if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g,&err)){Lua50::PushNil(L);Lua50::PushString(L,err);return 2;}
     bool n=false;Entry*e=track(g,&n);if(!e){++g_capacityFailures;Lua50::PushNil(L);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}reconcileEntry(*e);
     Lua50::PushBool(L,true);Lua50::PushString(L,n?"TRACKED_NEW":"TRACKED_EXISTING");char b[24]={};formatGuid(b,sizeof(b),g);Lua50::PushString(L,b);return 3;
 }
 int dispatchUntrack(Lua50::State L){
-    initialize();unsigned long long g=0;if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2)||!resolveGuid(L,2,&g)){Lua50::PushBool(L,false);Lua50::PushString(L,"BAD_SELECTOR");return 2;}
+    initialize();unsigned long long g=0;const char*err="BAD_SELECTOR";if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g,&err)){Lua50::PushBool(L,false);Lua50::PushString(L,err);return 2;}
     ++g_untrackCalls;Entry*e=find(g);if(!e){Lua50::PushBool(L,false);Lua50::PushString(L,"NOT_TRACKED");return 2;}*e=Entry{};Lua50::PushBool(L,true);Lua50::PushString(L,"UNTRACKED");char b[24]={};formatGuid(b,sizeof(b),g);Lua50::PushString(L,b);return 3;
 }
 int dispatchGet(Lua50::State L){
-    initialize();unsigned long long g=0;if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2)||!resolveGuid(L,2,&g)){Lua50::PushNil(L);Lua50::PushString(L,"BAD_SELECTOR");return 2;}++g_snapshotCalls;
+    initialize();unsigned long long g=0;const char*err="BAD_SELECTOR";if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g,&err)){Lua50::PushNil(L);Lua50::PushString(L,err);return 2;}++g_snapshotCalls;
     Entry*e=find(g);if(!e){++g_snapshotUnknown;Lua50::PushNil(L);Lua50::PushString(L,"NOT_TRACKED");return 2;}const bool ok=reconcileEntry(*e);if(ok)++g_snapshotSuccess;else ++g_snapshotUnavailable;if(e->snapshotKnown)++g_snapshotKnown;return pushEntry(L,*e);
 }
 int dispatchList(Lua50::State L){initialize();Lua50::NewTable(L);int idx=1;for(unsigned i=0;i<MAX_TRACKED;++i){if(!g_entries[i].used)continue;Lua50::PushNumber(L,idx++);pushEntry(L,g_entries[i]);Lua50::SetTable(L,-3);}return 1;}
