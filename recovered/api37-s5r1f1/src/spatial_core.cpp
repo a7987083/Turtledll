@@ -299,35 +299,33 @@ static void pushGuidString(Lua50::State L,const char*k,std::uint64_t guid){
     setStr(L,k,b);
 }
 
-static int unavailable(Lua50::State L){++g_unavailableCount;Lua50::PushNil(L);Lua50::PushString(L,"SPATIAL_DATA_UNAVAILABLE");return 2;}
+static int unavailableSpatial(Lua50::State L){++g_unavailableCount;Lua50::PushNil(L);Lua50::PushString(L,"SPATIAL_DATA_UNAVAILABLE");return 2;}
+static int unavailableBehind(Lua50::State L){++g_unavailableCount;Lua50::PushNil(L);Lua50::PushString(L,"BEHIND_UNAVAILABLE");return 2;}
 
 } // namespace
 
 int dispatchStatus(Lua50::State L){
     Lua50::NewTable(L);
     setStr(L,"stage","S5-R1F1");
-    setStr(L,"status","READY_EXPLICIT_QUERY_NO_BACKGROUND_WORK");
-    setStr(L,"rangePolicy","CLIENT_GEOMETRY");
-    setStr(L,"losPolicy","REUSE_UNIT_INSIGHT_LOS1_EXPLICIT");
+    setStr(L,"rangePolicy","EXPLICIT_QUERY_NO_BACKGROUND_WORK");
     setStr(L,"behindPolicy","CLIENT_GEOMETRY_REAR_AXIS_CALIBRATED_PI");
     setStr(L,"behindDotSemantics","POSITIVE_REAR_NEGATIVE_FRONT");
-    setStr(L,"behindSemantics","RAW_MOVEMENT_AXIS_TREATED_AS_REAR_FROM_S5R2_LIVE_SAMPLES");
+    setStr(L,"facingCalibration","RAW_MOVEMENT_AXIS_TREATED_AS_REAR_FROM_S5R2_LIVE_SAMPLES");
+    setStr(L,"losPolicy","REUSE_UNIT_INSIGHT_LOS1_EXPLICIT");
     setStr(L,"serverBackstabPolicy","S5R2_OBSERVER_CALIBRATES_CAST_RESULTS");
-    setNum(L,"fastGuidLookupAddress",FAST_GUID_LOOKUP);
-    setNum(L,"queryCount",g_queryCount);
-    setNum(L,"distanceCount",g_distanceCount);
-    setNum(L,"behindCount",g_behindCount);
-    setNum(L,"unavailableCount",g_unavailableCount);
-    setBool(L,"backgroundThread",false);
-    setBool(L,"objectManagerPolling",false);
-    setBool(L,"directHook",false);
+    setBool(L,"newHook",false);
+    setBool(L,"thread",false);
+    setBool(L,"timer",false);
+    setBool(L,"objectManagerScan",false);
+    setNum(L,"boundingRadiusIndex",129);
+    setNum(L,"combatReachIndex",130);
     return 1;
 }
 
 int dispatchGet(Lua50::State L){
     ++g_queryCount;
     SpatialSample s={};
-    if(!samplePair(L,&s))return unavailable(L);
+    if(!samplePair(L,&s))return unavailableSpatial(L);
     Lua50::NewTable(L);
     pushGuidString(L,"actorGuid",s.actorGuid);
     pushGuidString(L,"targetGuid",s.targetGuid);
@@ -364,7 +362,7 @@ int dispatchDistance(Lua50::State L){
 int dispatchBehind(Lua50::State L){
     ++g_behindCount;
     SpatialSample s={};
-    if(!samplePair(L,&s)||!s.behindKnown)return unavailable(L);
+    if(!samplePair(L,&s)||!s.behindKnown)return unavailableBehind(L);
     Lua50::PushBool(L,s.behind);
     Lua50::PushString(L,"CLIENT_GEOMETRY_REAR_AXIS_CALIBRATED_PI");
     Lua50::PushNumber(L,s.behindDot);
