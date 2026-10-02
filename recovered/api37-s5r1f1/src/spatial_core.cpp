@@ -337,7 +337,7 @@ int dispatchGet(Lua50::State L){
     setBool(L,"behind",s.behind);
     setNum(L,"behindDot",s.behindDot);
     setNum(L,"targetFacing",s.targetFacing);
-    setStr(L,"behindSemantics","POSITIVE_REAR_NEGATIVE_FRONT");
+    setStr(L,"behindSemantics","CLIENT_GEOMETRY_REAR_AXIS_CALIBRATED_PI");
     // S5-R1F1 deliberately does not claim server Backstab truth.
     setNil(L,"serverBehind");
     return 1;
