@@ -174,11 +174,11 @@ static void formatGuid(char*b,std::size_t n,unsigned long long guid){
 }
 static void pushGuid(Lua50::State L,const char*k,unsigned long long guid){char b[24]={};formatGuid(b,sizeof(b),guid);setStr(L,k,b);}
 
-static Entry* find(unsigned long long guid){
+static __forceinline Entry* find(unsigned long long guid){
     for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&g_entries[i].guid==guid)return &g_entries[i];
     return 0;
 }
-static Entry* track(unsigned long long guid,bool*isNew){
+static __forceinline Entry* track(unsigned long long guid,bool*isNew){
     if(isNew)*isNew=false;Entry*e=find(guid);if(e)return e;
     for(unsigned i=0;i<MAX_TRACKED;++i){
         if(g_entries[i].used)continue;
