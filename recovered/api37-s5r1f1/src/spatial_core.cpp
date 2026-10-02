@@ -11,8 +11,8 @@ namespace {
 // - S5-R1F1 binary policy strings: Range unchanged; rear-axis dot > 0 = behind.
 // This is behavior reconstruction, not a claim that this is the lost original source.
 
-constexpr std::uintptr_t FAST_GUID_LOOKUP = 0x00464870u;
-constexpr std::uintptr_t UNIT_GUID_FN      = 0x00515970u;
+constexpr std::uintptr_t FAST_GUID_LOOKUP = WoW112::FAST_GUID_LOOKUP;
+constexpr std::uintptr_t UNIT_TOKEN_RESOLVER = WoW112::RESOLVE_UNIT_TOKEN;
 constexpr std::uint32_t OBJECT_TYPE_UNIT   = 3u;
 constexpr std::uint32_t OBJECT_TYPE_PLAYER = 4u;
 constexpr float MELEE_Z_LIMIT = 6.0f;
@@ -159,10 +159,15 @@ static bool resolveGuid(Lua50::State L,int idx,std::uint64_t*out){
     if(!s||!*s)return false;
 
     // Preserve the old UnitXP behavior: unit tokens are resolved through the client.
-    if(executable(UNIT_GUID_FN)){
-        using UnitGuidFn=std::uint64_t(__fastcall*)(const char*);
-        const std::uint64_t tokenGuid=((UnitGuidFn)UNIT_GUID_FN)(s);
-        if(tokenGuid){*out=tokenGuid;return true;}
+    if(executable(UNIT_TOKEN_RESOLVER)){
+        using ResolveUnitFn=std::uint32_t(__fastcall*)(const char*);
+        const std::uint32_t object=((ResolveUnitFn)UNIT_TOKEN_RESOLVER)(s);
+        if(object&&!(object&1u)){
+            std::uint64_t tokenGuid=0;
+            if(safeRead((std::uintptr_t)object+WoW112::OFF_CGOBJECT_GUID,&tokenGuid)&&tokenGuid){
+                *out=tokenGuid;return true;
+            }
+        }
     }
     return parseGuidText(s,out);
 }
@@ -204,7 +209,7 @@ static bool unitFacing(std::uint32_t object,float*out){
 static bool unitReach(std::uint32_t object,float*radius,float*reach){
     if(!object||!radius||!reach)return false;
     std::uint32_t attr=0;
-    if(!safeRead((std::uintptr_t)object+0x110u,&attr)||!attr||(attr&1u))return false;
+    if(!safeRead((std::uintptr_t)object+WoW112::OFF_CGOBJECT_DESCRIPTOR,&attr)||!attr||(attr&1u))return false;
     float r=0.0f,c=0.0f;
     if(!safeRead((std::uintptr_t)attr+0x1ecu,&r)||!safeRead((std::uintptr_t)attr+0x1f0u,&c))return false;
     if(!finitef(r)||!finitef(c))return false;
