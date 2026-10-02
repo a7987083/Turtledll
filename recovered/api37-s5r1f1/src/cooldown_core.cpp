@@ -11,7 +11,15 @@ namespace TysCooldownCore {
 namespace {
 
 constexpr unsigned MAX_TRACKED=128;
-constexpr std::uintptr_t UNIT_GUID_FN=0x00515970u;
+constexpr std::uintptr_t ACTIVE_PLAYER_GUID_FN=WoW112::GET_ACTIVE_PLAYER_GUID;
+constexpr std::uintptr_t SPELL_DB=WoW112::SPELL_DB;
+constexpr std::uintptr_t SPELL_DB_RECORDS=SPELL_DB+0x08u;
+constexpr std::uintptr_t SPELL_DB_MAX_ID=SPELL_DB+0x0Cu;
+constexpr std::uintptr_t SPELL_RECOVERY_TIME=0x4Cu;
+constexpr std::uintptr_t SPELL_CATEGORY_RECOVERY_TIME=0x50u;
+constexpr std::uintptr_t SPELL_START_RECOVERY_CATEGORY=0x274u;
+constexpr std::uintptr_t SPELL_START_RECOVERY_TIME=0x278u;
+constexpr std::size_t SPELL_RECORD_MIN_SIZE=0x27Cu;
 
 struct Entry {
     unsigned long spellId;
@@ -46,13 +54,23 @@ using QueryFn = void (__fastcall *)(unsigned long spellId,
                                     std::uint32_t* durationMs,
                                     std::uint32_t* startMs,
                                     std::uint32_t* enable);
-using UnitGuidFn = unsigned long long(__fastcall*)(const char*);
+using ActivePlayerGuidFn = unsigned long long (__cdecl*)();
 
 static bool executable(std::uintptr_t a){
     MEMORY_BASIC_INFORMATION m={};
     if(!a||VirtualQuery((void*)a,&m,sizeof(m))!=sizeof(m)||m.State!=MEM_COMMIT||(m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;
     DWORD p=m.Protect&0xff;
     return p==PAGE_EXECUTE||p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY;
+}
+
+static bool readable(std::uintptr_t a,std::size_t n){
+    if(!a||!n)return false;
+    MEMORY_BASIC_INFORMATION m={};
+    if(VirtualQuery((const void*)a,&m,sizeof(m))!=sizeof(m)||m.State!=MEM_COMMIT||(m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;
+    const DWORD p=m.Protect&0xff;
+    if(!(p==PAGE_READONLY||p==PAGE_READWRITE||p==PAGE_WRITECOPY||p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY))return false;
+    const std::uintptr_t end=a+n;
+    return end>=a&&end<=(std::uintptr_t)m.BaseAddress+m.RegionSize;
 }
 
 static void setStr(Lua50::State L,const char*k,const char*v){Lua50::PushString(L,k);Lua50::PushString(L,v);Lua50::SetTable(L,-3);}
@@ -67,8 +85,26 @@ static unsigned activeCount(std::uint32_t now){unsigned n=0;for(unsigned i=0;i<M
 static unsigned dirtyCount(){unsigned n=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&!g_entries[i].valid)++n;return n;}
 
 static unsigned long long playerGuid(){
-    if(!executable(UNIT_GUID_FN))return 0;
-    return ((UnitGuidFn)UNIT_GUID_FN)("player");
+    if(!executable(ACTIVE_PLAYER_GUID_FN))return 0;
+    return ((ActivePlayerGuidFn)ACTIVE_PLAYER_GUID_FN)();
+}
+
+static TysCooldownClassifier::SpellRecoveryFields recoveryFields(unsigned long spell){
+    TysCooldownClassifier::SpellRecoveryFields f={};
+    if(!spell||!readable(SPELL_DB,0x14u)||!readable(SPELL_DB_RECORDS,sizeof(std::uintptr_t))||!readable(SPELL_DB_MAX_ID,sizeof(std::uint32_t)))return f;
+    const std::uintptr_t records=*(const std::uintptr_t*)SPELL_DB_RECORDS;
+    const std::uint32_t maxId=*(const std::uint32_t*)SPELL_DB_MAX_ID;
+    if(!records||spell>maxId)return f;
+    const std::uintptr_t slotAddr=records+(std::uintptr_t)spell*sizeof(std::uintptr_t);
+    if(!readable(slotAddr,sizeof(std::uintptr_t)))return f;
+    const std::uintptr_t rec=*(const std::uintptr_t*)slotAddr;
+    if(!rec||!readable(rec,SPELL_RECORD_MIN_SIZE))return f;
+    f.available=true;
+    f.recoveryTime=*(const std::uint32_t*)(rec+SPELL_RECOVERY_TIME);
+    f.categoryRecoveryTime=*(const std::uint32_t*)(rec+SPELL_CATEGORY_RECOVERY_TIME);
+    f.startRecoveryCategory=*(const std::uint32_t*)(rec+SPELL_START_RECOVERY_CATEGORY);
+    f.startRecoveryTime=*(const std::uint32_t*)(rec+SPELL_START_RECOVERY_TIME);
+    return f;
 }
 
 static Entry* slot(unsigned long spell,bool create){
@@ -83,7 +119,7 @@ static bool query(unsigned long spell,TysCooldownClassifier::Source source,Entry
     ((QueryFn)WoW112::COOLDOWN_QUERY_HELPER)(spell,0,&duration,&start,&enable);
     out->spellId=spell;out->startMs=start;out->durationMs=duration;out->enable=enable;out->lastQueryMs=tickNow();out->valid=true;out->observed=true;out->source=source;out->pendingSource=source;
     out->active=out->enable!=0&&out->durationMs!=0&&remaining32(*out,out->lastQueryMs)!=0;
-    const TysCooldownClassifier::SpellRecoveryFields fields={true,duration,0,start,start};
+    const TysCooldownClassifier::SpellRecoveryFields fields=recoveryFields(spell);
     out->kind=TysCooldownClassifier::classify(out->active,source,fields);return true;
 }
 
