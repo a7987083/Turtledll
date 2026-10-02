@@ -283,7 +283,7 @@ static void onTick(){
     recomputeDeadline(now);
 }
 
-static int pushEntry(Lua50::State L,const Entry&e){
+static __forceinline int pushEntry(Lua50::State L,const Entry&e){
     Lua50::NewTable(L);
     const std::uint32_t now=tickNow();
     const std::uint32_t remain=remaining32(e,now);
