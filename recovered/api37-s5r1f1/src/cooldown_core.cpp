@@ -22,21 +22,35 @@ constexpr std::uintptr_t SPELL_START_RECOVERY_TIME=0x278u;
 constexpr std::size_t SPELL_RECORD_MIN_SIZE=0x27Cu;
 
 struct Entry {
-    unsigned long spellId;
-    std::uint32_t startMs;
-    std::uint32_t durationMs;
-    std::uint32_t enable;
-    std::uint32_t lastQueryMs;
-    TysCooldownClassifier::Kind kind;
-    TysCooldownClassifier::Source source;
-    TysCooldownClassifier::Source pendingSource;
-    bool used;
-    bool valid;
-    bool observed;
-    bool active;
+    bool used;                              // +0x00
+    bool active;                            // +0x01
+    TysCooldownClassifier::Kind kind;       // +0x02
+    TysCooldownClassifier::Source source;   // +0x03
+    std::uint32_t spellId;                  // +0x04
+    std::uint32_t startMs;                  // +0x08
+    std::uint32_t durationMs;               // +0x0c
+    std::uint32_t endMs;                    // +0x10
+    std::uint32_t enable;                   // +0x14
+    std::uint32_t lastQueryMs;              // +0x18
+    std::uint32_t generation;               // +0x1c
+    std::uint32_t engineGeneration;         // +0x20
 };
+static_assert(sizeof(Entry)==0x24,"API35 cooldown entry layout must remain 0x24 bytes");
+
+struct DirtyEntry {
+    std::uint32_t spellId;
+    TysCooldownClassifier::Source source;
+    unsigned char reserved[3];
+};
+static_assert(sizeof(DirtyEntry)==8,"API35 dirty entry layout must remain 8 bytes");
 
 static Entry g_entries[MAX_TRACKED]={};
+static DirtyEntry g_dirtyQueue[MAX_TRACKED]={};
+static unsigned g_dirtyCount=0;
+static unsigned g_activeCount=0;
+static std::uint32_t g_nextDeadline=0;
+static bool g_deadlineValid=false;
+static std::uint32_t g_generation=0;
 static volatile LONG g_init=0,g_inSub=0,g_tickSub=0;
 static volatile LONG g_engineQueries=0,g_queryFailures=0,g_parseFailures=0,g_spellGoPackets=0,g_spellCooldownPackets=0,g_clearCooldownPackets=0,g_cooldownCheatPackets=0,g_cooldownEventPackets=0,g_ignoredRemotePackets=0,g_deadlineWakes=0;
 static volatile LONG g_dirtyEntries=0,g_deadlineRequeries=0,g_dirtyOverflow=0;
@@ -79,10 +93,14 @@ static void setBool(Lua50::State L,const char*k,bool v){Lua50::PushString(L,k);L
 
 static std::uint32_t tickNow(){return static_cast<std::uint32_t>(GetTickCount());}
 static std::uint32_t elapsed32(std::uint32_t now,std::uint32_t then){return now-then;}
-static std::uint32_t remaining32(const Entry&e,std::uint32_t now){if(!e.valid||e.durationMs==0)return 0;const std::uint32_t elapsed=elapsed32(now,e.startMs);return elapsed>=e.durationMs?0u:e.durationMs-elapsed;}
-static bool activeNow(const Entry&e,std::uint32_t now){return e.valid&&e.enable!=0&&e.durationMs!=0&&remaining32(e,now)!=0;}
-static unsigned activeCount(std::uint32_t now){unsigned n=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&activeNow(g_entries[i],now))++n;return n;}
-static unsigned dirtyCount(){unsigned n=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&!g_entries[i].valid)++n;return n;}
+static std::uint32_t remaining32(const Entry&e,std::uint32_t now){
+    if(!e.active)return 0;
+    const std::int32_t left=(std::int32_t)(e.endMs-now);
+    return left>0?(std::uint32_t)left:0u;
+}
+static bool activeNow(const Entry&e,std::uint32_t now){return e.used&&e.active&&e.enable!=0&&remaining32(e,now)!=0;}
+static unsigned activeCount(std::uint32_t now){unsigned n=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(activeNow(g_entries[i],now))++n;return n;}
+static unsigned dirtyCount(){return g_dirtyCount;}
 
 static unsigned long long playerGuid(){
     if(!executable(ACTIVE_PLAYER_GUID_FN))return 0;
@@ -117,23 +135,42 @@ static bool query(unsigned long spell,TysCooldownClassifier::Source source,Entry
     if(!spell||!out||!executable(WoW112::COOLDOWN_QUERY_HELPER))return false;
     ++g_engineQueries;std::uint32_t start=0,duration=0,enable=0;
     ((QueryFn)WoW112::COOLDOWN_QUERY_HELPER)(spell,0,&duration,&start,&enable);
-    out->spellId=spell;out->startMs=start;out->durationMs=duration;out->enable=enable;out->lastQueryMs=tickNow();out->valid=true;out->observed=true;out->source=source;out->pendingSource=source;
-    out->active=out->enable!=0&&out->durationMs!=0&&remaining32(*out,out->lastQueryMs)!=0;
+    const std::uint32_t now=tickNow();
+    out->used=true;out->source=source;out->spellId=spell;out->startMs=start;out->durationMs=duration;out->endMs=start+duration;out->enable=enable;out->lastQueryMs=now;
+    out->active=enable!=0&&duration!=0&&(std::int32_t)(out->endMs-now)>0;
     const TysCooldownClassifier::SpellRecoveryFields fields=recoveryFields(spell);
-    out->kind=TysCooldownClassifier::classify(out->active,source,fields);return true;
+    out->kind=TysCooldownClassifier::classify(out->active,source,fields);
+    out->generation=++g_generation;out->engineGeneration=g_generation;
+    return true;
 }
 
-static bool stateChanged(const Entry&a,const Entry&b){return !a.observed||a.active!=b.active||a.startMs!=b.startMs||a.durationMs!=b.durationMs||a.enable!=b.enable||a.kind!=b.kind;}
-static void markDirty(Entry*e,TysCooldownClassifier::Source source){if(e){e->pendingSource=source;if(e->valid){e->valid=false;++g_dirtyEntries;}}}
-static void markDirtyAllTracked(TysCooldownClassifier::Source source){for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used)markDirty(&g_entries[i],source);}
+static bool stateChanged(const Entry&a,const Entry&b){return a.generation==0||a.active!=b.active||a.startMs!=b.startMs||a.durationMs!=b.durationMs||a.enable!=b.enable||a.kind!=b.kind;}
+static bool sourceShouldReplace(TysCooldownClassifier::Source oldSource,TysCooldownClassifier::Source newSource){
+    const unsigned oldValue=(unsigned)oldSource,newValue=(unsigned)newSource;
+    if(oldValue>=6u)return true;
+    if(newValue>=6u)return false;
+    return newValue>=oldValue;
+}
+static void markDirtySpell(std::uint32_t spell,TysCooldownClassifier::Source source){
+    if(!spell)return;
+    for(unsigned i=0;i<g_dirtyCount;++i){
+        if(g_dirtyQueue[i].spellId!=spell)continue;
+        if(sourceShouldReplace(g_dirtyQueue[i].source,source))g_dirtyQueue[i].source=source;
+        return;
+    }
+    if(g_dirtyCount>=MAX_TRACKED){++g_dirtyOverflow;return;}
+    DirtyEntry&d=g_dirtyQueue[g_dirtyCount++];d.spellId=spell;d.source=source;d.reserved[0]=d.reserved[1]=d.reserved[2]=0;
+    ++g_dirtyEntries;
+}
+static void markDirtyAllActive(TysCooldownClassifier::Source source){for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&g_entries[i].active)markDirtySpell(g_entries[i].spellId,source);}
 static bool isLocalGuid(unsigned long long guid){const unsigned long long me=playerGuid();return guid!=0&&me!=0&&guid==me;}
 
 static TysCooldownTransition::Snapshot snapshot(const Entry&e,std::uint32_t now){
-    TysCooldownTransition::Snapshot s={};s.queryOk=e.valid;s.active=e.active;s.spellId=e.spellId;s.startMs=e.startMs;s.durationMs=e.durationMs;s.endMs=e.startMs+e.durationMs;s.remainingMs=e.active?remaining32(e,now):0;s.enable=e.enable;s.kind=e.kind;s.source=e.source;return s;
+    TysCooldownTransition::Snapshot s={};s.queryOk=e.generation!=0;s.active=e.active;s.spellId=e.spellId;s.startMs=e.startMs;s.durationMs=e.durationMs;s.endMs=e.endMs;s.remainingMs=e.active?remaining32(e,now):0;s.enable=e.enable;s.kind=e.kind;s.source=e.source;return s;
 }
 static void emitTransition(const Entry&oldEntry,const Entry&newEntry,std::uint32_t now){
     const TysCooldownTransition::Snapshot oldState=snapshot(oldEntry,now),newState=snapshot(newEntry,now);
-    const TysCooldownTransition::Event event=TysCooldownTransition::decide(oldEntry.observed,oldState,newState);
+    const TysCooldownTransition::Event event=TysCooldownTransition::decide(oldEntry.generation!=0,oldState,newState);
     bool ok=true;
     if(event==TysCooldownTransition::EVENT_STARTED){ok=TysCustomEvents::emitCooldownStarted(newState.spellId,newState.startMs,newState.durationMs,newState.endMs,newState.remainingMs,newState.enable,newState.kind,newState.source);if(ok)++g_startedEvents;}
     else if(event==TysCooldownTransition::EVENT_CHANGED){ok=TysCustomEvents::emitCooldownChanged(newState.spellId,newState.startMs,newState.durationMs,newState.endMs,newState.remainingMs,newState.enable,newState.kind,newState.source);if(ok)++g_changedEvents;}
@@ -159,14 +196,12 @@ static bool reconcile(Entry&e,TysCooldownClassifier::Source source){
 static void onIncoming(unsigned long op,TysNativeBus::CDataStoreView*p){
     if(!p)return;
 
-    // Vanilla 1.12 packet layouts are confirmed by the classic protocol:
-    // SPELL_COOLDOWN : uint64 casterGuid, repeated {uint32 spellId,uint32 ms}
-    // CLEAR_COOLDOWN : uint32 spellId, uint64 targetGuid
-    // COOLDOWN_CHEAT : uint64 targetGuid (clear all cooldowns for that unit)
-    // COOLDOWN_EVENT : uint32 spellId, uint64 casterGuid
     if(op==WoW112::SMSG_SPELL_GO_OPCODE){
         ++g_spellGoPackets;
-        return;
+        unsigned long long firstGuid=0,localGuid=0;std::uint32_t spell=0;
+        if(!TysNativeBus::readPackedGuid(p,&firstGuid)||!TysNativeBus::readPackedGuid(p,&localGuid)||!TysNativeBus::read(p,&spell)){++g_parseFailures;return;}
+        if(!isLocalGuid(localGuid)){++g_ignoredRemotePackets;return;}
+        g_lastPacketSpellId=spell;markDirtySpell(spell,TysCooldownClassifier::SOURCE_SPELL_GO);return;
     }
 
     if(op==WoW112::SMSG_SPELL_COOLDOWN_OPCODE){
@@ -174,21 +209,29 @@ static void onIncoming(unsigned long op,TysNativeBus::CDataStoreView*p){
         unsigned long long guid=0;
         if(!TysNativeBus::read(p,&guid)){++g_parseFailures;return;}
         if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}
-        // The packet may contain multiple spell/cooldown pairs. Existing tracked
-        // records are invalidated in one pass and reconciled from the engine
-        // after the stock handler consumes the packet; no packet-body cooldown
-        // value is treated as authoritative by this module.
-        markDirtyAllTracked(TysCooldownClassifier::SOURCE_SPELL_COOLDOWN);
+        while(p->read<=p->size&&p->size-p->read>=8u){
+            std::uint32_t spell=0,packetMs=0;
+            if(!TysNativeBus::read(p,&spell)||!TysNativeBus::read(p,&packetMs)){++g_parseFailures;return;}
+            if(spell){g_lastPacketSpellId=spell;markDirtySpell(spell,TysCooldownClassifier::SOURCE_SPELL_COOLDOWN);}
+        }
         return;
+    }
+
+    if(op==WoW112::SMSG_COOLDOWN_EVENT_OPCODE){
+        ++g_cooldownEventPackets;
+        std::uint32_t spell=0;unsigned long long guid=0;
+        if(!TysNativeBus::read(p,&spell)||!TysNativeBus::read(p,&guid)){++g_parseFailures;return;}
+        if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}
+        g_lastPacketSpellId=spell;markDirtySpell(spell,TysCooldownClassifier::SOURCE_COOLDOWN_EVENT);return;
     }
 
     if(op==WoW112::SMSG_CLEAR_COOLDOWN_OPCODE){
         ++g_clearCooldownPackets;
-        unsigned long s=0;unsigned long long guid=0;
-        if(!TysNativeBus::read(p,&s)||!TysNativeBus::read(p,&guid)){++g_parseFailures;return;}
+        std::uint32_t spell=0;unsigned long long guid=0;
+        if(!TysNativeBus::read(p,&spell)||!TysNativeBus::read(p,&guid)){++g_parseFailures;return;}
         if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}
-        g_lastPacketSpellId=s;markDirty(slot(s,false),TysCooldownClassifier::SOURCE_CLEAR_COOLDOWN);
-        return;
+        Entry*e=slot(spell,false);if(e&&e->active)++g_clearMatchedActive;
+        g_lastPacketSpellId=spell;markDirtySpell(spell,TysCooldownClassifier::SOURCE_CLEAR_COOLDOWN);return;
     }
 
     if(op==WoW112::SMSG_COOLDOWN_CHEAT_OPCODE){
@@ -197,37 +240,52 @@ static void onIncoming(unsigned long op,TysNativeBus::CDataStoreView*p){
         if(!TysNativeBus::read(p,&guid)){++g_parseFailures;return;}
         if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}
         g_lastPacketSpellId=0;
-        // Server semantics: RemoveAllSpellCooldown() then SMSG_COOLDOWN_CHEAT
-        // carrying only the target GUID. Every tracked cooldown must requery.
-        markDirtyAllTracked(TysCooldownClassifier::SOURCE_COOLDOWN_CHEAT);
-        return;
+        unsigned affected=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used&&g_entries[i].active)++affected;
+        g_resetAffected+=affected;markDirtyAllActive(TysCooldownClassifier::SOURCE_COOLDOWN_CHEAT);return;
     }
+}
 
-    if(op==WoW112::SMSG_COOLDOWN_EVENT_OPCODE){
-        ++g_cooldownEventPackets;
-        unsigned long s=0;unsigned long long guid=0;
-        if(!TysNativeBus::read(p,&s)||!TysNativeBus::read(p,&guid)){++g_parseFailures;return;}
-        if(!isLocalGuid(guid)){++g_ignoredRemotePackets;return;}
-        g_lastPacketSpellId=s;markDirty(slot(s,false),TysCooldownClassifier::SOURCE_COOLDOWN_EVENT);
+static void recomputeDeadline(std::uint32_t now){
+    g_activeCount=0;g_deadlineValid=false;g_nextDeadline=0;
+    std::uint32_t bestDelta=0xffffffffu;
+    for(unsigned i=0;i<MAX_TRACKED;++i){
+        const Entry&e=g_entries[i];if(!e.used||!e.active)continue;
+        ++g_activeCount;
+        std::int32_t signedDelta=(std::int32_t)(e.endMs-now);
+        std::uint32_t delta=signedDelta>0?(std::uint32_t)signedDelta:0u;
+        if(delta<bestDelta){bestDelta=delta;g_nextDeadline=now+(delta?delta:25u);g_deadlineValid=true;}
     }
 }
 
 static void onTick(){
     const std::uint32_t now=tickNow();
+    if(g_dirtyCount){
+        DirtyEntry local[MAX_TRACKED]={};const unsigned count=g_dirtyCount;
+        for(unsigned i=0;i<count;++i)local[i]=g_dirtyQueue[i];
+        g_dirtyCount=0;
+        for(unsigned i=0;i<count;++i){
+            Entry*e=slot(local[i].spellId,true);if(!e)continue;
+            const Entry old=*e;
+            if(reconcile(*e,local[i].source)){if(stateChanged(old,*e)){g_lastChangedSpellId=e->spellId;g_lastChangeMs=now;g_lastChangedSource=local[i].source;}}
+            else ++g_queryFailures;
+        }
+        recomputeDeadline(now);return;
+    }
+
+    if(!g_activeCount||!g_deadlineValid||(std::int32_t)(now-g_nextDeadline)<0)return;
+    ++g_deadlineWakes;
     for(unsigned i=0;i<MAX_TRACKED;++i){
-        Entry&e=g_entries[i];if(!e.used)continue;
-        bool needQuery=!e.valid;TysCooldownClassifier::Source source=e.pendingSource;
-        if(!needQuery&&e.active&&e.durationMs>0&&remaining32(e,now)==0){++g_deadlineWakes;++g_deadlineRequeries;needQuery=true;source=TysCooldownClassifier::SOURCE_DEADLINE_RECHECK;}
-        if(!needQuery)continue;
-        const Entry old=e;
-        if(reconcile(e,source)){if(stateChanged(old,e)){g_lastChangedSpellId=e.spellId;g_lastChangeMs=now;g_lastChangedSource=source;}}
+        Entry&e=g_entries[i];if(!e.used||!e.active||(std::int32_t)(now-e.endMs)<0)continue;
+        ++g_deadlineRequeries;const Entry old=e;
+        if(reconcile(e,TysCooldownClassifier::SOURCE_DEADLINE_RECHECK)){if(stateChanged(old,e)){g_lastChangedSpellId=e.spellId;g_lastChangeMs=now;g_lastChangedSource=TysCooldownClassifier::SOURCE_DEADLINE_RECHECK;}}
         else ++g_queryFailures;
     }
+    recomputeDeadline(now);
 }
 
 static int pushEntry(Lua50::State L,const Entry&e){
     Lua50::NewTable(L);const std::uint32_t now=tickNow();const std::uint32_t remain=remaining32(e,now);
-    setNum(L,"spellId",e.spellId);setBool(L,"valid",e.valid);setBool(L,"active",e.active);setNum(L,"startMs",e.startMs);setNum(L,"durationMs",e.durationMs);setNum(L,"recoveryTimeMs",e.durationMs);setNum(L,"startRecoveryTimeMs",e.startMs);setNum(L,"enable",e.enable);setNum(L,"remainingMs",remain);setBool(L,"ready",e.valid&&!e.active);setNum(L,"kind",e.kind);setStr(L,"kindName",TysCooldownClassifier::kindName(e.kind));setNum(L,"source",e.source);setStr(L,"sourceName",TysCooldownClassifier::sourceName(e.source));setStr(L,"querySource","CLIENT_ENGINE_COOLDOWN_MANAGER");return 1;
+    setNum(L,"spellId",e.spellId);setBool(L,"valid",e.generation!=0);setBool(L,"active",e.active);setNum(L,"startMs",e.startMs);setNum(L,"durationMs",e.durationMs);setNum(L,"recoveryTimeMs",e.durationMs);setNum(L,"startRecoveryTimeMs",e.startMs);setNum(L,"enable",e.enable);setNum(L,"remainingMs",remain);setBool(L,"ready",e.generation!=0&&!e.active);setNum(L,"kind",e.kind);setStr(L,"kindName",TysCooldownClassifier::kindName(e.kind));setNum(L,"source",e.source);setStr(L,"sourceName",TysCooldownClassifier::sourceName(e.source));setStr(L,"querySource","CLIENT_ENGINE_COOLDOWN_MANAGER");return 1;
 }
 
 } // namespace
