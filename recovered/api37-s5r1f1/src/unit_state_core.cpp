@@ -60,10 +60,11 @@ static Entry g_entries[MAX_TRACKED]={};
 static volatile LONG g_init=0,g_inSub=0,g_tickSub=0;
 static volatile LONG g_updatePackets=0,g_compressedUpdatePackets=0,g_dirtySignals=0,g_coalescedSignals=0;
 static volatile LONG g_dirtyPending=0;
-static volatile LONG g_snapshotCalls=0,g_untrackCalls=0,g_descriptorReconciles=0,g_descriptorFailures=0,g_descriptorClears=0,g_descriptorEmptyPreserves=0,g_descriptorUnbinds=0;
+static volatile LONG g_snapshotCalls=0,g_trackCalls=0,g_untrackCalls=0,g_capacityFailures=0,g_descriptorReconciles=0,g_descriptorFailures=0,g_descriptorClears=0,g_descriptorEmptyPreserves=0,g_descriptorUnbinds=0;
 static volatile LONG g_healthEvents=0,g_powerEvents=0,g_combatEvents=0,g_objectUnavailable=0,g_recordsChecked=0,g_reconcilePasses=0;
 static volatile LONG g_snapshotSuccess=0,g_snapshotKnown=0,g_snapshotUnknown=0,g_snapshotUnavailable=0,g_snapshotInstanceClears=0;
 static std::uint32_t g_snapshotGeneration=0;
+static std::uint32_t g_worldGeneration=0;
 static unsigned long long g_lastChangedGuid=0;
 static unsigned long g_lastChangedMask=0;
 static char g_status[96]="NOT_INITIALIZED";
@@ -258,6 +259,7 @@ static void onTick(){
     for(unsigned i=0;i<MAX_TRACKED;++i){
         Entry&e=g_entries[i];if(e.used)reconcileEntry(e);
     }
+    ++g_worldGeneration;if(g_worldGeneration==0)++g_worldGeneration;
 }
 
 static int pushEntry(Lua50::State L,const Entry&e){
@@ -300,17 +302,58 @@ bool initialize(){
 const char* status(){return g_status;}
 
 int dispatchStatus(Lua50::State L){
-    initialize();Lua50::NewTable(L);setStr(L,"stage","US1-R2");setStr(L,"status",g_status);setBool(L,"incomingSubscribed",g_inSub!=0);setBool(L,"worldTickSubscribed",g_tickSub!=0);setBool(L,"customEventsReady",TysCustomEvents::ensureUnitStateEvents());setNum(L,"capacity",MAX_TRACKED);
+    initialize();Lua50::NewTable(L);
+    setStr(L,"status",g_status);
+    setStr(L,"architecture","LAZY_TRACKED_GUIDS_UPDATEOBJECT_DIRTY_RECONCILE");
+    setStr(L,"authority","CLIENT_UNIT_DESCRIPTOR_AFTER_STOCK_HANDLER");
+    setNum(L,"capacity",MAX_TRACKED);
     unsigned tracked=0;for(unsigned i=0;i<MAX_TRACKED;++i)if(g_entries[i].used)++tracked;setNum(L,"tracked",tracked);
-    setNum(L,"fastGuidLookupAddress",FAST_GUID_LOOKUP);setNum(L,"updatePackets",g_updatePackets);setNum(L,"compressedUpdatePackets",g_compressedUpdatePackets);setNum(L,"dirtySignals",g_dirtySignals);setNum(L,"coalescedSignals",g_coalescedSignals);setNum(L,"reconcilePasses",g_reconcilePasses);setNum(L,"recordsChecked",g_recordsChecked);setNum(L,"objectUnavailable",g_objectUnavailable);setNum(L,"snapshotCalls",g_snapshotCalls);setNum(L,"snapshotSuccess",g_snapshotSuccess);setNum(L,"snapshotKnown",g_snapshotKnown);setNum(L,"snapshotUnknown",g_snapshotUnknown);setNum(L,"snapshotUnavailable",g_snapshotUnavailable);setNum(L,"snapshotInstanceClears",g_snapshotInstanceClears);setNum(L,"snapshotGeneration",g_snapshotGeneration);setNum(L,"snapshotOverheadMs",0);setNum(L,"untrackCalls",g_untrackCalls);setNum(L,"descriptorReconciles",g_descriptorReconciles);setNum(L,"descriptorFailures",g_descriptorFailures);setNum(L,"descriptorClears",g_descriptorClears);setNum(L,"descriptorEmptyPreserves",g_descriptorEmptyPreserves);setNum(L,"descriptorUnbinds",g_descriptorUnbinds);setNum(L,"healthEvents",g_healthEvents);setNum(L,"powerEvents",g_powerEvents);setNum(L,"combatEvents",g_combatEvents);
-    if(g_lastChangedGuid)pushGuid(L,"lastChangedGuid",g_lastChangedGuid);else{Lua50::PushString(L,"lastChangedGuid");Lua50::PushNil(L);Lua50::SetTable(L,-3);}setNum(L,"lastChangedMask",g_lastChangedMask);
-    setStr(L,"powerSemantics","ACTIVE_POWER_ONLY_TYPE_VALUE_MAX");setStr(L,"powerMaskSemantics","BIT0_TYPE_BIT1_VALUE_BIT2_MAX");setStr(L,"descriptorReadPolicy","ONE_OBJECT_RANGE_PLUS_ONE_DESCRIPTOR_RANGE_PER_SNAPSHOT");setStr(L,"descriptorPolicy","UNITFIELDS_PRESENCE_AUTHORITY; EMPTY_DESCRIPTOR_PRESERVES_CACHE");
-    setBool(L,"packetBodyParsing",false);setBool(L,"zlibDecompression",false);setBool(L,"compressedDecompression",false);setBool(L,"objectManagerPolling",false);setBool(L,"directHook",false);setBool(L,"timer",false);setBool(L,"backgroundThread",false);setBool(L,"idleTickPath",true);return 1;
+    setBool(L,"incomingSubscribed",g_inSub!=0);
+    setBool(L,"worldTickSubscribed",g_tickSub!=0);
+    setBool(L,"customEventsReady",TysCustomEvents::ensureUnitStateEvents());
+    setBool(L,"dynamicEventSlots",true);
+    setNum(L,"eventHealthSlot",TysCustomEvents::unitHealthSlot());
+    setNum(L,"eventPowerSlot",TysCustomEvents::unitPowerSlot());
+    setNum(L,"eventCombatSlot",TysCustomEvents::unitCombatSlot());
+    setNum(L,"updateObjectOpcode",WoW112::SMSG_UPDATE_OBJECT_OPCODE);
+    setNum(L,"compressedUpdateObjectOpcode",WoW112::SMSG_COMPRESSED_UPDATE_OBJECT_OPCODE);
+    setNum(L,"fastGuidLookupAddress",FAST_GUID_LOOKUP);
+    setNum(L,"updatePackets",g_updatePackets);
+    setNum(L,"compressedUpdatePackets",g_compressedUpdatePackets);
+    setNum(L,"dirtySignals",g_dirtySignals);
+    setNum(L,"coalescedSignals",g_coalescedSignals);
+    setNum(L,"reconcilePasses",g_reconcilePasses);
+    setNum(L,"recordsChecked",g_recordsChecked);
+    setNum(L,"objectUnavailable",g_objectUnavailable);
+    setNum(L,"descriptorFailures",g_descriptorFailures);
+    setNum(L,"healthEvents",g_healthEvents);
+    setNum(L,"powerEvents",g_powerEvents);
+    setNum(L,"combatEvents",g_combatEvents);
+    setNum(L,"trackCalls",g_trackCalls);
+    setNum(L,"untrackCalls",g_untrackCalls);
+    setNum(L,"capacityFailures",g_capacityFailures);
+    if(g_lastChangedGuid)pushGuid(L,"lastChangedGuid",g_lastChangedGuid);else{Lua50::PushString(L,"lastChangedGuid");Lua50::PushNil(L);Lua50::SetTable(L,-3);}
+    setNum(L,"lastChangedMask",g_lastChangedMask);
+    setNum(L,"worldGeneration",g_worldGeneration);
+    setBool(L,"reconcilePending",g_dirtyPending!=0);
+    setBool(L,"directHook",false);
+    setBool(L,"objectManagerPolling",false);
+    setBool(L,"packetBodyParsing",false);
+    setBool(L,"zlibDecompression",false);
+    setBool(L,"backgroundThread",false);
+    setBool(L,"timer",false);
+    setStr(L,"idleTickPath","TRACKED_ZERO_OR_DIRTY_ZERO_READ_ONLY_RETURN");
+    setStr(L,"powerSemantics","ACTIVE_POWER_ONLY_TYPE_VALUE_MAX");
+    setStr(L,"powerMaskSemantics","BIT0_TYPE_BIT1_VALUE_BIT2_MAX");
+    setStr(L,"descriptorReadPolicy","ONE_OBJECT_RANGE_PLUS_ONE_DESCRIPTOR_RANGE_PER_SNAPSHOT");
+    setNum(L,"combatFlag",UNIT_FLAG_IN_COMBAT);
+    setStr(L,"compressedPolicy","COMPRESSED_UPDATE_IS_DIRTY_SIGNAL_NO_DECOMPRESSION");
+    return 1;
 }
 
 int dispatchTrack(Lua50::State L){
-    initialize();unsigned long long g=0;if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g)){Lua50::PushNil(L);Lua50::PushString(L,"BAD_ARGUMENT");return 2;}
-    bool n=false;Entry*e=track(g,&n);if(!e){Lua50::PushNil(L);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}reconcileEntry(*e);
+    ++g_trackCalls;initialize();unsigned long long g=0;if(Lua50::GetTop(L)<2||!resolveGuid(L,2,&g)){Lua50::PushNil(L);Lua50::PushString(L,"BAD_ARGUMENT");return 2;}
+    bool n=false;Entry*e=track(g,&n);if(!e){++g_capacityFailures;Lua50::PushNil(L);Lua50::PushString(L,"TRACK_CAPACITY");return 2;}reconcileEntry(*e);
     Lua50::PushBool(L,true);Lua50::PushString(L,n?"TRACKED_NEW":"TRACKED_EXISTING");char b[24]={};formatGuid(b,sizeof(b),g);Lua50::PushString(L,b);return 3;
 }
 int dispatchUntrack(Lua50::State L){
