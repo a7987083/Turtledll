@@ -51,6 +51,7 @@ static unsigned g_activeCount=0;
 static std::uint32_t g_nextDeadline=0;
 static bool g_deadlineValid=false;
 static std::uint32_t g_generation=0;
+static std::uint32_t g_engineEpoch=1;
 static volatile LONG g_init=0,g_inSub=0,g_tickSub=0;
 static volatile LONG g_engineQueries=0,g_queryFailures=0,g_parseFailures=0,g_spellGoPackets=0,g_spellCooldownPackets=0,g_clearCooldownPackets=0,g_cooldownCheatPackets=0,g_cooldownEventPackets=0,g_ignoredRemotePackets=0,g_deadlineWakes=0;
 static volatile LONG g_dirtyEntries=0,g_deadlineRequeries=0,g_dirtyOverflow=0;
@@ -140,7 +141,8 @@ static bool query(unsigned long spell,TysCooldownClassifier::Source source,Entry
     out->active=enable!=0&&duration!=0&&(std::int32_t)(out->endMs-now)>0;
     const TysCooldownClassifier::SpellRecoveryFields fields=recoveryFields(spell);
     out->kind=TysCooldownClassifier::classify(out->active,source,fields);
-    out->generation=++g_generation;out->engineGeneration=g_generation;
+    out->generation=++g_generation;
+    out->engineGeneration=g_engineEpoch;
     return true;
 }
 
@@ -182,11 +184,9 @@ static bool reconcile(Entry&e,TysCooldownClassifier::Source source){
     const std::uint32_t now=next.lastQueryMs;
     const TysCooldownTransition::Snapshot oldState=snapshot(old,now),newState=snapshot(next,now);
     if(source==TysCooldownClassifier::SOURCE_CLEAR_COOLDOWN){
-        if(old.active)++g_clearMatchedActive;
         if(old.active&&!newState.active)++g_clearReady;
         if(TysCooldownTransition::isSpellToGcd(oldState,newState))++g_clearToGcd;
     }else if(source==TysCooldownClassifier::SOURCE_COOLDOWN_CHEAT){
-        if(old.active)++g_resetAffected;
         if(old.active&&!newState.active)++g_resetReady;
         if(TysCooldownTransition::isSpellToGcd(oldState,newState))++g_resetToGcd;
     }
@@ -292,6 +292,7 @@ static int pushEntry(Lua50::State L,const Entry&e){
 
 bool initialize(){
     if(InterlockedCompareExchange(&g_init,1,0)!=0)return true;
+    ++g_engineEpoch;if(g_engineEpoch==0)++g_engineEpoch;
     bool a=TysNativeBus::subscribeIncoming(&onIncoming);bool b=TysNativeBus::subscribeWorldTick(&onTick);
     InterlockedExchange(&g_inSub,a?1:0);InterlockedExchange(&g_tickSub,b?1:0);
     const bool c=TysCustomEvents::ensureCooldownEvents();
