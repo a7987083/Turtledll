@@ -223,11 +223,18 @@ static void* findObjectByGuid(unsigned long long guid){
         using FastGuidFn=unsigned long(__fastcall*)(unsigned long long);
         unsigned long candidate=((FastGuidFn)WoW112::FAST_GUID_LOOKUP)(guid);
         if(candidate){
-            unsigned long long live=0;
-            if(!(candidate&1UL)&&readable((void*)candidate,0x38)&&objectGuid((void*)candidate,&live)&&live==guid){
-                TysFoundationStats::noteFastHit();return (void*)candidate;
+            // API34 F1 counter semantics recovered from 0x1000A247:
+            // odd / unreadable object candidates are misses; once the object
+            // range is accepted, an unreadable or mismatched GUID is rejected.
+            if((candidate&1UL)||!readable((void*)candidate,0x38)){
+                TysFoundationStats::noteFastMiss();
+            }else{
+                unsigned long long live=0;
+                if(objectGuid((void*)candidate,&live)&&live==guid){
+                    TysFoundationStats::noteFastHit();return (void*)candidate;
+                }
+                TysFoundationStats::noteFastRejected();
             }
-            TysFoundationStats::noteFastRejected();
         }else TysFoundationStats::noteFastMiss();
     }else TysFoundationStats::noteFastMiss();
     TysFoundationStats::noteFallbackAttempt();
