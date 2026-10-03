@@ -118,6 +118,17 @@ static float wrapPi(float x){const float pi=3.14159265358979323846f,two=6.283185
 static float sinfLocal(float x){x=wrapPi(x);const float x2=x*x;return x*(1.0f-x2*(1.0f/6.0f)+x2*x2*(1.0f/120.0f)-x2*x2*x2*(1.0f/5040.0f));}
 static float cosfLocal(float x){x=wrapPi(x);const float x2=x*x;return 1.0f-x2*0.5f+x2*x2*(1.0f/24.0f)-x2*x2*x2*(1.0f/720.0f);}
 static bool sameText(const char*a,const char*b){if(!a||!b)return false;while(*a&&*b){if(*a++!=*b++)return false;}return *a==*b;}
+static char lowerAscii(char c){return c>='A'&&c<='Z'?(char)(c+('a'-'A')):c;}
+static bool equalCi(const char*a,const char*b){if(!a||!b)return false;while(*a&&*b){if(lowerAscii(*a++)!=lowerAscii(*b++))return false;}return *a==0&&*b==0;}
+static bool prefixCi(const char*s,const char*p){if(!s||!p)return false;while(*p){if(!*s||lowerAscii(*s++)!=lowerAscii(*p++))return false;}return true;}
+static bool isUnitSelector(const char*s){
+    if(!s)return false;
+    if(equalCi(s,"player")||equalCi(s,"target")||equalCi(s,"mouseover")||equalCi(s,"pet"))return true;
+    if(prefixCi(s,"party")){const char*d=s+5;return d[0]>='1'&&d[0]<='4'&&d[1]==0;}
+    if(prefixCi(s,"raid")){const char*d=s+4;if(*d<'0'||*d>'9')return false;unsigned n=0;while(*d>='0'&&*d<='9'){n=n*10u+(unsigned)(*d-'0');++d;}return *d==0&&n>=1u&&n<=40u;}
+    return false;
+}
+static double round4(float v){const double x=(double)v*10000.0;const double y=x+(x>=0.0?0.5:-0.5);const int i=(int)y;return (double)i/10000.0;}
 static bool finiteVec(const Vec3&v){return finitef(v.x)&&finitef(v.y)&&finitef(v.z);}
 static float nonNegative(float v){return finitef(v)&&v>0.0f?v:0.0f;}
 static float maxf(float a,float b){return a>b?a:b;}
@@ -165,7 +176,7 @@ static bool resolveSelector(const char*s,std::uint64_t*outGuid,std::uint32_t*out
     if(outObject)*outObject=0;
     if(!s||!*s)return false;
 
-    if(executable(UNIT_TOKEN_RESOLVER)){
+    if(isUnitSelector(s)&&executable(UNIT_TOKEN_RESOLVER)){
         using ResolveUnitFn=std::uint32_t(__fastcall*)(const char*);
         const std::uint32_t object=((ResolveUnitFn)UNIT_TOKEN_RESOLVER)(s);
         if(object&&!(object&1u)){
@@ -196,7 +207,6 @@ static bool parsePair(Lua50::State L,SpatialSample*out){
     SpatialSample s={};
     if(!resolveSelector(a,&s.actorGuid,&s.actorObject))return false;
     if(!resolveSelector(b,&s.targetGuid,&s.targetObject))return false;
-    if(s.actorObject==s.targetObject||s.actorGuid==s.targetGuid)return false;
     *out=s;
     return true;
 }
@@ -401,7 +411,7 @@ int dispatchDistance(Lua50::State L){
     const DistanceMeter meter=parseMeter(L);
     if(meter==METER_BAD){Lua50::PushNil(L);Lua50::PushString(L,"BAD_MODE");return 2;}
     if(meter==METER_MELEE&&!s.meleeZEligible){Lua50::PushNil(L);Lua50::PushString(L,"MELEE_Z_SEPARATION");return 2;}
-    Lua50::PushNumber(L,distanceForMeter(s,meter));
+    Lua50::PushNumber(L,round4(distanceForMeter(s,meter)));
     Lua50::PushString(L,meter==METER_MELEE?"SERVER_INSPIRED_BASE_NO_LEEWAY":"OK");
     return 2;
 }
@@ -415,8 +425,8 @@ int dispatchBehind(Lua50::State L){
     if(ps!=PAIR_OK||!s.behindKnown)return unavailableBehind(L);
     Lua50::PushBool(L,s.behind);
     Lua50::PushString(L,"CLIENT_GEOMETRY");
-    Lua50::PushNumber(L,s.behindDot);
-    Lua50::PushNumber(L,s.targetFacing);
+    Lua50::PushNumber(L,round4(s.behindDot));
+    Lua50::PushNumber(L,round4(s.targetFacing));
     return 4;
 }
 
