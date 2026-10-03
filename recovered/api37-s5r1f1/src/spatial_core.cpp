@@ -213,7 +213,7 @@ static bool unitReach(std::uint32_t object,float*radius,float*reach){
     std::uint32_t attr=0;
     if(!safeRead((std::uintptr_t)object+WoW112::OFF_CGOBJECT_DESCRIPTOR,&attr)||!attr||(attr&1u))return false;
     float r=0.0f,c=0.0f;
-    if(!safeRead((std::uintptr_t)attr+0x1ecu,&r)||!safeRead((std::uintptr_t)attr+0x1f0u,&c))return false;
+    if(!safeRead((std::uintptr_t)attr+0x204u,&r)||!safeRead((std::uintptr_t)attr+0x208u,&c))return false;
     if(!finitef(r)||!finitef(c))return false;
     *radius=nonNegative(r);
     *reach=nonNegative(c);
@@ -339,7 +339,7 @@ int dispatchGet(Lua50::State L){
     setNum(L,"targetFacing",s.targetFacing);
     setStr(L,"behindSemantics","CLIENT_GEOMETRY_REAR_AXIS_CALIBRATED_PI");
     // S5-R1F1 deliberately does not claim server Backstab truth.
-    setNil(L,"serverBehind");
+    setStr(L,"serverBehind","UNVERIFIED");\n    setStr(L,"los","USE Unit.InSight EXPLICITLY");
     return 1;
 }
 
@@ -360,7 +360,7 @@ int dispatchBehind(Lua50::State L){
     SpatialSample s={};
     if(!samplePair(L,&s)||!s.behindKnown)return unavailableBehind(L);
     Lua50::PushBool(L,s.behind);
-    Lua50::PushString(L,"CLIENT_GEOMETRY_REAR_AXIS_CALIBRATED_PI");
+    Lua50::PushString(L,"CLIENT_GEOMETRY");
     Lua50::PushNumber(L,s.behindDot);
     Lua50::PushNumber(L,s.targetFacing);
     return 4;
