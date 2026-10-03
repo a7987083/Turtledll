@@ -96,6 +96,37 @@ static bool executable(std::uintptr_t a){
     return p==PAGE_EXECUTE||p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY;
 }
 
+constexpr std::uintptr_t SIGNAL_EVENT_PARAM=0x00703F50u;
+using SignalEventParamFn=int (__cdecl *)(int eventCode,char* format,...);
+
+static __forceinline bool emitHealthOriginalShape(unsigned long long guid,std::uint32_t oldHealth,std::uint32_t newHealth,std::uint32_t maxHealth,bool dead){
+    if(!TysCustomEvents::ensureUnitStateEvents()||!executable(SIGNAL_EVENT_PARAM))return false;
+    const int slot=TysCustomEvents::unitHealthSlot();if(slot<0)return false;
+    static const char hex[]="0123456789ABCDEF";char g[19]={};g[0]='0';g[1]='x';
+    for(unsigned i=0;i<16;++i)g[2+i]=hex[(unsigned)((guid>>((15u-i)*4u))&0xFu)];
+    static char fmt[]="%s%d%d%d%d";
+    ((SignalEventParamFn)SIGNAL_EVENT_PARAM)(slot,fmt,g,oldHealth,newHealth,maxHealth,dead?1u:0u);
+    return true;
+}
+static __forceinline bool emitPowerOriginalShape(unsigned long long guid,std::uint32_t powerType,std::uint32_t oldPower,std::uint32_t newPower,std::uint32_t maxPower,std::uint32_t mask){
+    if(!TysCustomEvents::ensureUnitStateEvents()||!executable(SIGNAL_EVENT_PARAM))return false;
+    const int slot=TysCustomEvents::unitPowerSlot();if(slot<0)return false;
+    static const char hex[]="0123456789ABCDEF";char g[19]={};g[0]='0';g[1]='x';
+    for(unsigned i=0;i<16;++i)g[2+i]=hex[(unsigned)((guid>>((15u-i)*4u))&0xFu)];
+    static char fmt[]="%s%d%d%d%d%d";
+    ((SignalEventParamFn)SIGNAL_EVENT_PARAM)(slot,fmt,g,powerType,oldPower,newPower,maxPower,mask);
+    return true;
+}
+static __forceinline bool emitCombatOriginalShape(unsigned long long guid,bool oldCombat,bool newCombat){
+    if(!TysCustomEvents::ensureUnitStateEvents()||!executable(SIGNAL_EVENT_PARAM))return false;
+    const int slot=TysCustomEvents::unitCombatSlot();if(slot<0)return false;
+    static const char hex[]="0123456789ABCDEF";char g[19]={};g[0]='0';g[1]='x';
+    for(unsigned i=0;i<16;++i)g[2+i]=hex[(unsigned)((guid>>((15u-i)*4u))&0xFu)];
+    static char fmt[]="%s%d%d";
+    ((SignalEventParamFn)SIGNAL_EVENT_PARAM)(slot,fmt,g,oldCombat?1u:0u,newCombat?1u:0u);
+    return true;
+}
+
 static bool hexNibble(char c,unsigned*o){if(c>='0'&&c<='9'){*o=(unsigned)(c-'0');return true;}if(c>='a'&&c<='f'){*o=(unsigned)(c-'a'+10);return true;}if(c>='A'&&c<='F'){*o=(unsigned)(c-'A'+10);return true;}return false;}
 
 static char lowerAscii(char c){return c>='A'&&c<='Z'?(char)(c+('a'-'A')):c;}
@@ -266,7 +297,7 @@ static bool reconcileEntry(Entry&e){
     unsigned long changedMask=0;
     const bool healthChanged=old.health!=next.health||old.maxHealth!=next.maxHealth||old.dead!=next.dead;
     if(healthChanged){
-        if(TysCustomEvents::emitUnitHealth(e.guid,old.health,next.health,next.maxHealth,next.dead!=0))++g_healthEvents;
+        if(emitHealthOriginalShape(e.guid,old.health,next.health,next.maxHealth,next.dead!=0))++g_healthEvents;
         changedMask|=0x01u;
     }
 
@@ -277,12 +308,12 @@ static bool reconcileEntry(Entry&e){
     if(oldPower!=newPower)powerMask|=0x02u;
     if(oldMax!=newMax)powerMask|=0x04u;
     if(powerMask){
-        if(TysCustomEvents::emitUnitPower(e.guid,next.powerType,oldPower,newPower,newMax,powerMask))++g_powerEvents;
+        if(emitPowerOriginalShape(e.guid,next.powerType,oldPower,newPower,newMax,powerMask))++g_powerEvents;
         changedMask|=0x02u;
     }
 
     if(old.combat!=next.combat){
-        if(TysCustomEvents::emitUnitCombat(e.guid,old.combat!=0,next.combat!=0))++g_combatEvents;
+        if(emitCombatOriginalShape(e.guid,old.combat!=0,next.combat!=0))++g_combatEvents;
         changedMask|=0x04u;
     }
 
