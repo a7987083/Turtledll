@@ -317,7 +317,8 @@ bool initialize(){
     bool a=TysNativeBus::subscribeIncoming(&onIncoming);bool b=TysNativeBus::subscribeWorldTick(&onTick);
     InterlockedExchange(&g_inSub,a?1:0);InterlockedExchange(&g_tickSub,b?1:0);
     const bool c=TysCustomEvents::ensureCooldownEvents();
-    const char*s=(a&&b&&c&&executable(WoW112::COOLDOWN_QUERY_HELPER))?"READY_COOLDOWN_CORE_C1R2":"PARTIAL_COOLDOWN_CORE_C1R2";
+    const bool queryReady=executable(WoW112::COOLDOWN_QUERY_HELPER);
+    const char*s=!queryReady?"QUERY_HELPER_UNAVAILABLE":((a&&b&&c)?"READY_COOLDOWN_CORE_C1R2":"NATIVE_BUS_NOT_READY");
     unsigned i=0;for(;s[i]&&i+1<sizeof(g_status);++i)g_status[i]=s[i];g_status[i]=0;return a&&b;
 }
 const char* status(){return g_status;}
@@ -365,6 +366,7 @@ int dispatchStatus(Lua50::State L){
     setNum(L,"ignoredRemotePackets",g_ignoredRemotePackets);
     setNum(L,"lastPacketSpellId",g_lastPacketSpellId);
     setNum(L,"lastChangedSpellId",g_lastChangedSpellId);
+    setNum(L,"lastChangeMs",g_lastChangeMs);
     setNum(L,"lastChangedSource",g_lastChangedSource);
     setStr(L,"lastChangedSourceName",TysCooldownClassifier::sourceName(g_lastChangedSource));
     setBool(L,"directHook",false);
