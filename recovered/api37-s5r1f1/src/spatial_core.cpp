@@ -339,7 +339,8 @@ int dispatchGet(Lua50::State L){
     setNum(L,"targetFacing",s.targetFacing);
     setStr(L,"behindSemantics","CLIENT_GEOMETRY_REAR_AXIS_CALIBRATED_PI");
     // S5-R1F1 deliberately does not claim server Backstab truth.
-    setStr(L,"serverBehind","UNVERIFIED");\n    setStr(L,"los","USE Unit.InSight EXPLICITLY");
+    setStr(L,"serverBehind","UNVERIFIED");
+    setStr(L,"los","USE Unit.InSight EXPLICITLY");
     return 1;
 }
 
