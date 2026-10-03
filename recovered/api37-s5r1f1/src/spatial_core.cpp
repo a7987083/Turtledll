@@ -19,7 +19,7 @@ constexpr float MELEE_Z_LIMIT = 6.0f;
 constexpr float MIN_COMBAT_REACH = 1.5f;
 constexpr float MIN_MELEE_REACH = 5.0f;
 constexpr float MELEE_REACH_PAD = 1.333333373069763f;
-constexpr float EPSILON_XY = 0.00001f;
+constexpr float EPSILON_XY = 0.0001f;
 
 struct Vec3 { float x, y, z; };
 
@@ -113,7 +113,7 @@ static bool supportedBuild(){
 
 static bool finitef(float v){return v==v&&v>-3.4e38f&&v<3.4e38f;}
 static float absf(float v){return v<0.0f?-v:v;}
-static float sqrtfLocal(float v){if(v<=0.0f)return 0.0f;float x=v>1.0f?v:1.0f;for(unsigned i=0;i<10;++i)x=0.5f*(x+v/x);return x;}
+static float sqrtfLocal(float v){if(v<=0.0f)return 0.0f;float x=v>1.0f?v:1.0f;for(unsigned i=0;i<8;++i)x=0.5f*(x+v/x);return x;}
 static float wrapPi(float x){const float pi=3.14159265358979323846f,two=6.28318530717958647692f;while(x>pi)x-=two;while(x<-pi)x+=two;return x;}
 static float sinfLocal(float x){x=wrapPi(x);const float x2=x*x;return x*(1.0f-x2*(1.0f/6.0f)+x2*x2*(1.0f/120.0f)-x2*x2*x2*(1.0f/5040.0f));}
 static float cosfLocal(float x){x=wrapPi(x);const float x2=x*x;return 1.0f-x2*0.5f+x2*x2*(1.0f/24.0f)-x2*x2*x2*(1.0f/720.0f);}
@@ -210,7 +210,7 @@ static bool unitFacing(std::uint32_t object,float*out){
     std::uint32_t movement=0;
     if(!safeRead((std::uintptr_t)object+0x118u,&movement)||!movement)return false;
     float f=0.0f;
-    if(!safeRead((std::uintptr_t)movement+0x1cu,&f)||!finitef(f))return false;
+    if(!safeRead((std::uintptr_t)movement+0x1cu,&f)||!finitef(f)||f<-100.0f||f>100.0f)return false;
     *out=f;
     return true;
 }
@@ -221,9 +221,9 @@ static bool unitReach(std::uint32_t object,float*radius,float*reach){
     if(!safeRead((std::uintptr_t)object+WoW112::OFF_CGOBJECT_DESCRIPTOR,&attr)||!attr||(attr&1u))return false;
     float r=0.0f,c=0.0f;
     if(!safeRead((std::uintptr_t)attr+0x204u,&r)||!safeRead((std::uintptr_t)attr+0x208u,&c))return false;
-    if(!finitef(r)||!finitef(c))return false;
-    *radius=nonNegative(r);
-    *reach=nonNegative(c);
+    if(!finitef(r)||!finitef(c)||r<0.0f||c<0.0f||r>100.0f||c>100.0f)return false;
+    *radius=r;
+    *reach=c;
     return true;
 }
 
