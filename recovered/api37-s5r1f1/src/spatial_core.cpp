@@ -275,14 +275,6 @@ static PairStatus sampleRange(SpatialSample*s){
 
     if(!unitReach(s->actorObject,&s->actorBoundingRadius,&s->actorCombatReach)||
        !unitReach(s->targetObject,&s->targetBoundingRadius,&s->targetCombatReach))return PAIR_DATA_UNAVAILABLE;
-    s->rangedEdgeGap=clampGap(s->distance3d-s->actorCombatReach-s->targetCombatReach);
-    s->chainsEdgeGap=clampGap(s->distance3d-s->actorBoundingRadius-s->targetBoundingRadius);
-
-    const float meleeActor=maxf(MIN_COMBAT_REACH,s->actorCombatReach);
-    const float meleeTarget=maxf(MIN_COMBAT_REACH,s->targetCombatReach);
-    s->meleeBaseReach=maxf(MIN_MELEE_REACH,meleeActor+meleeTarget+MELEE_REACH_PAD);
-    s->meleeBaseGap2d=clampGap(s->distance2d-s->meleeBaseReach);
-    s->meleeZEligible=s->zDelta<MELEE_Z_LIMIT;
     return PAIR_OK;
 }
 
@@ -305,18 +297,6 @@ static bool sampleBehind(SpatialSample*s){
         s->behind=s->behindDot>0.0f;
     }
     return true;
-}
-
-static PairStatus samplePair(Lua50::State L,SpatialSample*out){
-    if(!parsePair(L,out))return PAIR_UNIT_NOT_VISIBLE;
-    const PairStatus rs=sampleRange(out);
-    if(rs!=PAIR_OK)return rs;
-    out->behindKnown=false;
-    out->behind=false;
-    out->behindDot=0.0f;
-    out->targetFacing=0.0f;
-    (void)sampleBehind(out);
-    return PAIR_OK;
 }
 
 static DistanceMeter parseMeter(Lua50::State L){
@@ -372,9 +352,18 @@ int dispatchGet(Lua50::State L){
     ++g_queryCount;
     if(!supportedBuild()){Lua50::PushNil(L);Lua50::PushString(L,"UNSUPPORTED_BUILD");return 2;}
     SpatialSample s={};
-    const PairStatus ps=samplePair(L,&s);
-    if(ps==PAIR_UNIT_NOT_VISIBLE){Lua50::PushNil(L);Lua50::PushString(L,"UNIT_NOT_VISIBLE");return 2;}
+    if(!parsePair(L,&s)){Lua50::PushNil(L);Lua50::PushString(L,"UNIT_NOT_VISIBLE");return 2;}
+    const PairStatus ps=sampleRange(&s);
     if(ps!=PAIR_OK)return unavailableSpatial(L);
+    s.rangedEdgeGap=clampGap(s.distance3d-s.actorCombatReach-s.targetCombatReach);
+    s.chainsEdgeGap=clampGap(s.distance3d-s.actorBoundingRadius-s.targetBoundingRadius);
+    s.meleeZEligible=s.zDelta<MELEE_Z_LIMIT;
+    const float meleeActor=maxf(MIN_COMBAT_REACH,s.actorCombatReach);
+    const float meleeTarget=maxf(MIN_COMBAT_REACH,s.targetCombatReach);
+    s.meleeBaseReach=maxf(MIN_MELEE_REACH,meleeActor+meleeTarget+MELEE_REACH_PAD);
+    s.meleeBaseGap2d=clampGap(s.distance2d-s.meleeBaseReach);
+    s.behindKnown=false;s.behind=false;s.behindDot=0.0f;s.targetFacing=0.0f;
+    (void)sampleBehind(&s);
     Lua50::NewTable(L);
     pushGuidString(L,"actorGuid",s.actorGuid);
     pushGuidString(L,"targetGuid",s.targetGuid);
@@ -405,13 +394,23 @@ int dispatchDistance(Lua50::State L){
     ++g_distanceCount;
     if(!supportedBuild()){Lua50::PushNil(L);Lua50::PushString(L,"UNSUPPORTED_BUILD");return 2;}
     SpatialSample s={};
-    const PairStatus ps=samplePair(L,&s);
-    if(ps==PAIR_UNIT_NOT_VISIBLE){Lua50::PushNil(L);Lua50::PushString(L,"UNIT_NOT_VISIBLE");return 2;}
+    if(!parsePair(L,&s)){Lua50::PushNil(L);Lua50::PushString(L,"UNIT_NOT_VISIBLE");return 2;}
+    const PairStatus ps=sampleRange(&s);
     if(ps!=PAIR_OK)return unavailableSpatial(L);
     const DistanceMeter meter=parseMeter(L);
     if(meter==METER_BAD){Lua50::PushNil(L);Lua50::PushString(L,"BAD_MODE");return 2;}
-    if(meter==METER_MELEE&&!s.meleeZEligible){Lua50::PushNil(L);Lua50::PushString(L,"MELEE_Z_SEPARATION");return 2;}
-    Lua50::PushNumber(L,round4(distanceForMeter(s,meter)));
+    float value=0.0f;
+    if(meter==METER_CENTER2D)value=s.distance2d;
+    else if(meter==METER_RANGED)value=clampGap(s.distance3d-s.actorCombatReach-s.targetCombatReach);
+    else if(meter==METER_CHAINS)value=clampGap(s.distance3d-s.actorBoundingRadius-s.targetBoundingRadius);
+    else if(meter==METER_MELEE){
+        if(s.zDelta>=MELEE_Z_LIMIT){Lua50::PushNil(L);Lua50::PushString(L,"MELEE_Z_SEPARATION");return 2;}
+        const float meleeActor=maxf(MIN_COMBAT_REACH,s.actorCombatReach);
+        const float meleeTarget=maxf(MIN_COMBAT_REACH,s.targetCombatReach);
+        const float meleeBaseReach=maxf(MIN_MELEE_REACH,meleeActor+meleeTarget+MELEE_REACH_PAD);
+        value=clampGap(s.distance2d-meleeBaseReach);
+    } else value=s.distance3d;
+    Lua50::PushNumber(L,round4(value));
     Lua50::PushString(L,meter==METER_MELEE?"SERVER_INSPIRED_BASE_NO_LEEWAY":"OK");
     return 2;
 }
@@ -420,9 +419,8 @@ int dispatchBehind(Lua50::State L){
     ++g_behindCount;
     if(!supportedBuild()){Lua50::PushNil(L);Lua50::PushString(L,"UNSUPPORTED_BUILD");return 2;}
     SpatialSample s={};
-    const PairStatus ps=samplePair(L,&s);
-    if(ps==PAIR_UNIT_NOT_VISIBLE){Lua50::PushNil(L);Lua50::PushString(L,"UNIT_NOT_VISIBLE");return 2;}
-    if(ps!=PAIR_OK||!s.behindKnown)return unavailableBehind(L);
+    if(!parsePair(L,&s)){Lua50::PushNil(L);Lua50::PushString(L,"UNIT_NOT_VISIBLE");return 2;}
+    if(!sampleBehind(&s)||!s.behindKnown)return unavailableBehind(L);
     Lua50::PushBool(L,s.behind);
     Lua50::PushString(L,"CLIENT_GEOMETRY");
     Lua50::PushNumber(L,round4(s.behindDot));
