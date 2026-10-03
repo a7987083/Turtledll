@@ -266,8 +266,8 @@ static bool reconcileEntry(Entry&e){
     unsigned long changedMask=0;
     const bool healthChanged=old.health!=next.health||old.maxHealth!=next.maxHealth||old.dead!=next.dead;
     if(healthChanged){
-        ++g_healthEvents;changedMask|=0x08u;
-        TysCustomEvents::emitUnitHealth(e.guid,old.health,next.health,next.maxHealth,next.dead!=0);
+        if(TysCustomEvents::emitUnitHealth(e.guid,old.health,next.health,next.maxHealth,next.dead!=0))++g_healthEvents;
+        changedMask|=0x01u;
     }
 
     unsigned long powerMask=0;
@@ -277,13 +277,13 @@ static bool reconcileEntry(Entry&e){
     if(oldPower!=newPower)powerMask|=0x02u;
     if(oldMax!=newMax)powerMask|=0x04u;
     if(powerMask){
-        ++g_powerEvents;changedMask|=powerMask;
-        TysCustomEvents::emitUnitPower(e.guid,next.powerType,oldPower,newPower,newMax,powerMask);
+        if(TysCustomEvents::emitUnitPower(e.guid,next.powerType,oldPower,newPower,newMax,powerMask))++g_powerEvents;
+        changedMask|=0x02u;
     }
 
     if(old.combat!=next.combat){
-        ++g_combatEvents;changedMask|=0x10u;
-        TysCustomEvents::emitUnitCombat(e.guid,old.combat!=0,next.combat!=0);
+        if(TysCustomEvents::emitUnitCombat(e.guid,old.combat!=0,next.combat!=0))++g_combatEvents;
+        changedMask|=0x04u;
     }
 
     if(changedMask){
