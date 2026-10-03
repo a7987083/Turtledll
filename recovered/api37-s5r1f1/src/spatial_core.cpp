@@ -160,37 +160,52 @@ static bool parseGuidText(const char*s,std::uint64_t*out){
     return true;
 }
 
-static bool resolveGuid(Lua50::State L,int idx,std::uint64_t*out){
-    if(!out)return false;
-    *out=0;
-    if(!Lua50::IsString(L,idx))return false;
-    const char*s=Lua50::ToString(L,idx);
+static bool resolveSelector(const char*s,std::uint64_t*outGuid,std::uint32_t*outObject){
+    if(outGuid)*outGuid=0;
+    if(outObject)*outObject=0;
     if(!s||!*s)return false;
 
-    // Preserve the old UnitXP behavior: unit tokens are resolved through the client.
     if(executable(UNIT_TOKEN_RESOLVER)){
         using ResolveUnitFn=std::uint32_t(__fastcall*)(const char*);
         const std::uint32_t object=((ResolveUnitFn)UNIT_TOKEN_RESOLVER)(s);
         if(object&&!(object&1u)){
-            std::uint64_t tokenGuid=0;
-            if(safeRead((std::uintptr_t)object+WoW112::OFF_CGOBJECT_GUID,&tokenGuid)&&tokenGuid){
-                *out=tokenGuid;return true;
+            std::uint64_t guid=0;
+            if(safeRead((std::uintptr_t)object+WoW112::OFF_CGOBJECT_GUID,&guid)&&guid){
+                if(outGuid)*outGuid=guid;
+                if(outObject)*outObject=object;
+                return true;
             }
         }
     }
-    return parseGuidText(s,out);
-}
 
-static bool resolveObject(std::uint64_t guid,std::uint32_t*out){
-    if(!guid||!out||!executable(FAST_GUID_LOOKUP))return false;
+    std::uint64_t guid=0;
+    if(!parseGuidText(s,&guid)||!executable(FAST_GUID_LOOKUP))return false;
     using GetObjectFn=std::uint32_t(__fastcall*)(std::uint64_t);
     const std::uint32_t object=((GetObjectFn)FAST_GUID_LOOKUP)(guid);
     if(!object||(object&1u))return false;
+    if(outGuid)*outGuid=guid;
+    if(outObject)*outObject=object;
+    return true;
+}
+
+static bool parsePair(Lua50::State L,SpatialSample*out){
+    if(!out||Lua50::GetTop(L)<3||!Lua50::IsString(L,2)||!Lua50::IsString(L,3))return false;
+    const char*a=Lua50::ToString(L,2);
+    const char*b=Lua50::ToString(L,3);
+    if(!a||!b)return false;
+    SpatialSample s={};
+    if(!resolveSelector(a,&s.actorGuid,&s.actorObject))return false;
+    if(!resolveSelector(b,&s.targetGuid,&s.targetObject))return false;
+    if(s.actorObject==s.targetObject||s.actorGuid==s.targetGuid)return false;
+    *out=s;
+    return true;
+}
+
+static bool objectIsUnit(std::uint32_t object){
+    if(!object)return false;
     std::uint32_t type=0;
     if(!safeRead((std::uintptr_t)object+0x14u,&type))return false;
-    if(type!=OBJECT_TYPE_UNIT&&type!=OBJECT_TYPE_PLAYER)return false;
-    *out=object;
-    return true;
+    return type==OBJECT_TYPE_UNIT||type==OBJECT_TYPE_PLAYER;
 }
 
 static bool unitPosition(std::uint32_t object,Vec3*out){
@@ -198,15 +213,18 @@ static bool unitPosition(std::uint32_t object,Vec3*out){
     std::uint32_t vtable=0,fn=0;
     if(!safeRead((std::uintptr_t)object,&vtable)||!vtable||!safeRead((std::uintptr_t)vtable+0x14u,&fn)||!executable(fn))return false;
     using GetPositionFn=Vec3*(__thiscall*)(std::uint32_t,Vec3*);
-    Vec3 p={};
-    ((GetPositionFn)fn)(object,&p);
+    Vec3 tmp={};
+    Vec3*ret=((GetPositionFn)fn)(object,&tmp);
+    const Vec3*src=ret?ret:&tmp;
+    if(!canRead((std::uintptr_t)src,sizeof(Vec3)))return false;
+    Vec3 p=*src;
     if(!finiteVec(p))return false;
     *out=p;
     return true;
 }
 
 static bool unitFacing(std::uint32_t object,float*out){
-    if(!object||!out)return false;
+    if(!object||!out||!objectIsUnit(object))return false;
     std::uint32_t movement=0;
     if(!safeRead((std::uintptr_t)object+0x118u,&movement)||!movement)return false;
     float f=0.0f;
@@ -216,11 +234,13 @@ static bool unitFacing(std::uint32_t object,float*out){
 }
 
 static bool unitReach(std::uint32_t object,float*radius,float*reach){
-    if(!object||!radius||!reach)return false;
+    if(!object||!radius||!reach||!objectIsUnit(object))return false;
     std::uint32_t attr=0;
-    if(!safeRead((std::uintptr_t)object+WoW112::OFF_CGOBJECT_DESCRIPTOR,&attr)||!attr||(attr&1u))return false;
+    if(!safeRead((std::uintptr_t)object+WoW112::OFF_CGOBJECT_DESCRIPTOR,&attr)||!attr)return false;
     float r=0.0f,c=0.0f;
-    if(!safeRead((std::uintptr_t)attr+0x204u,&r)||!safeRead((std::uintptr_t)attr+0x208u,&c))return false;
+    if(!canRead((std::uintptr_t)attr+0x204u,8u))return false;
+    r=*(const float*)((std::uintptr_t)attr+0x204u);
+    c=*(const float*)((std::uintptr_t)attr+0x208u);
     if(!finitef(r)||!finitef(c)||r<0.0f||c<0.0f||r>100.0f||c>100.0f)return false;
     *radius=r;
     *reach=c;
@@ -229,48 +249,63 @@ static bool unitReach(std::uint32_t object,float*radius,float*reach){
 
 enum PairStatus { PAIR_OK=0, PAIR_UNIT_NOT_VISIBLE, PAIR_DATA_UNAVAILABLE };
 
-static PairStatus samplePair(Lua50::State L,SpatialSample*out){
-    if(!out||Lua50::GetTop(L)<3)return PAIR_UNIT_NOT_VISIBLE;
-    SpatialSample s={};
-    if(!resolveGuid(L,2,&s.actorGuid)||!resolveGuid(L,3,&s.targetGuid)||s.actorGuid==s.targetGuid)return PAIR_UNIT_NOT_VISIBLE;
-    if(!resolveObject(s.actorGuid,&s.actorObject)||!resolveObject(s.targetGuid,&s.targetObject))return PAIR_UNIT_NOT_VISIBLE;
-    if(!unitPosition(s.actorObject,&s.actorPos)||!unitPosition(s.targetObject,&s.targetPos))return PAIR_DATA_UNAVAILABLE;
-    if(!unitReach(s.actorObject,&s.actorBoundingRadius,&s.actorCombatReach)||
-       !unitReach(s.targetObject,&s.targetBoundingRadius,&s.targetCombatReach))return PAIR_DATA_UNAVAILABLE;
+static PairStatus sampleRange(SpatialSample*s){
+    if(!s||!s->actorObject||!s->targetObject)return PAIR_UNIT_NOT_VISIBLE;
+    if(!objectIsUnit(s->actorObject)||!objectIsUnit(s->targetObject))return PAIR_UNIT_NOT_VISIBLE;
+    if(!unitPosition(s->actorObject,&s->actorPos)||!unitPosition(s->targetObject,&s->targetPos))return PAIR_DATA_UNAVAILABLE;
 
-    const float dx=s.actorPos.x-s.targetPos.x;
-    const float dy=s.actorPos.y-s.targetPos.y;
-    const float dz=s.actorPos.z-s.targetPos.z;
+    const float dx=s->actorPos.x-s->targetPos.x;
+    const float dy=s->actorPos.y-s->targetPos.y;
+    const float dz=s->actorPos.z-s->targetPos.z;
     const float d2sq=dx*dx+dy*dy;
     const float d3sq=d2sq+dz*dz;
-    if(d2sq<0.0f||d3sq<0.0f)return PAIR_DATA_UNAVAILABLE;
-    s.distance2d=sqrtfLocal(d2sq);
-    s.distance3d=sqrtfLocal(d3sq);
-    s.zDelta=absf(dz);
-    s.rangedEdgeGap=clampGap(s.distance3d-s.actorCombatReach-s.targetCombatReach);
-    s.chainsEdgeGap=clampGap(s.distance3d-s.actorBoundingRadius-s.targetBoundingRadius);
+    s->distance2d=sqrtfLocal(d2sq);
+    s->distance3d=sqrtfLocal(d3sq);
+    s->zDelta=absf(dz);
 
-    const float meleeActor=maxf(MIN_COMBAT_REACH,s.actorCombatReach);
-    const float meleeTarget=maxf(MIN_COMBAT_REACH,s.targetCombatReach);
-    s.meleeBaseReach=maxf(MIN_MELEE_REACH,meleeActor+meleeTarget+MELEE_REACH_PAD);
-    s.meleeBaseGap2d=clampGap(s.distance2d-s.meleeBaseReach);
-    s.meleeZEligible=s.zDelta<MELEE_Z_LIMIT;
+    if(!unitReach(s->actorObject,&s->actorBoundingRadius,&s->actorCombatReach)||
+       !unitReach(s->targetObject,&s->targetBoundingRadius,&s->targetCombatReach))return PAIR_DATA_UNAVAILABLE;
+    s->rangedEdgeGap=clampGap(s->distance3d-s->actorCombatReach-s->targetCombatReach);
+    s->chainsEdgeGap=clampGap(s->distance3d-s->actorBoundingRadius-s->targetBoundingRadius);
 
-    s.behindKnown=false;
-    s.behind=false;
-    s.behindDot=0.0f;
-    s.targetFacing=0.0f;
-    if(unitFacing(s.targetObject,&s.targetFacing)){
-        s.behindKnown=true;
-        if(s.distance2d>EPSILON_XY){
-            // Exact S5-R1F1 binary behavior: the calibrated rear-axis test
-            // uses the normalized world-X delta. targetFacing is validated
-            // and returned for diagnostics but is not consumed by this dot.
-            s.behindDot=dx/s.distance2d;
-            s.behind=finitef(s.behindDot)&&s.behindDot>0.0f;
-        }
+    const float meleeActor=maxf(MIN_COMBAT_REACH,s->actorCombatReach);
+    const float meleeTarget=maxf(MIN_COMBAT_REACH,s->targetCombatReach);
+    s->meleeBaseReach=maxf(MIN_MELEE_REACH,meleeActor+meleeTarget+MELEE_REACH_PAD);
+    s->meleeBaseGap2d=clampGap(s->distance2d-s->meleeBaseReach);
+    s->meleeZEligible=s->zDelta<MELEE_Z_LIMIT;
+    return PAIR_OK;
+}
+
+static bool sampleBehind(SpatialSample*s){
+    if(!s||!s->actorObject||!s->targetObject)return false;
+    if(!unitPosition(s->actorObject,&s->actorPos)||!unitPosition(s->targetObject,&s->targetPos))return false;
+    if(!objectIsUnit(s->targetObject)||!unitFacing(s->targetObject,&s->targetFacing))return false;
+
+    const float dx=s->actorPos.x-s->targetPos.x;
+    const float dy=s->actorPos.y-s->targetPos.y;
+    const float d2sq=dx*dx+dy*dy;
+    s->distance2d=sqrtfLocal(d2sq);
+    s->behindKnown=true;
+    s->behind=false;
+    s->behindDot=0.0f;
+    if(s->distance2d>EPSILON_XY){
+        const float nx=dx/s->distance2d;
+        const float ny=dy/s->distance2d;
+        s->behindDot=nx+(ny*0.0f);
+        s->behind=s->behindDot>0.0f;
     }
-    *out=s;
+    return true;
+}
+
+static PairStatus samplePair(Lua50::State L,SpatialSample*out){
+    if(!parsePair(L,out))return PAIR_UNIT_NOT_VISIBLE;
+    const PairStatus rs=sampleRange(out);
+    if(rs!=PAIR_OK)return rs;
+    out->behindKnown=false;
+    out->behind=false;
+    out->behindDot=0.0f;
+    out->targetFacing=0.0f;
+    (void)sampleBehind(out);
     return PAIR_OK;
 }
 
