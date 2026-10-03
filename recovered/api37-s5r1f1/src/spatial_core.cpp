@@ -118,7 +118,7 @@ static float wrapPi(float x){const float pi=3.14159265358979323846f,two=6.283185
 static float sinfLocal(float x){x=wrapPi(x);const float x2=x*x;return x*(1.0f-x2*(1.0f/6.0f)+x2*x2*(1.0f/120.0f)-x2*x2*x2*(1.0f/5040.0f));}
 static float cosfLocal(float x){x=wrapPi(x);const float x2=x*x;return 1.0f-x2*0.5f+x2*x2*(1.0f/24.0f)-x2*x2*x2*(1.0f/720.0f);}
 static bool sameText(const char*a,const char*b){if(!a||!b)return false;while(*a&&*b){if(*a++!=*b++)return false;}return *a==*b;}
-static bool finiteVec(const Vec3&v){return finitef(v.x)&&finitef(v.y)&&finitef(v.z)&&absf(v.x)<1000000.0f&&absf(v.y)<1000000.0f&&absf(v.z)<1000000.0f;}
+static bool finiteVec(const Vec3&v){return finitef(v.x)&&finitef(v.y)&&finitef(v.z);}
 static float nonNegative(float v){return finitef(v)&&v>0.0f?v:0.0f;}
 static float maxf(float a,float b){return a>b?a:b;}
 static float clampGap(float v){return v>0.0f?v:0.0f;}
@@ -260,15 +260,15 @@ static PairStatus samplePair(Lua50::State L,SpatialSample*out){
     s.behind=false;
     s.behindDot=0.0f;
     s.targetFacing=0.0f;
-    if(s.distance2d>EPSILON_XY&&unitFacing(s.targetObject,&s.targetFacing)){
-        // S5-R1F1 calibration: compare target's REAR axis against target->actor.
-        // This is algebraically the negative of the old UnitXP forward-axis dot.
-        const float nx=dx/s.distance2d;
-        const float ny=dy/s.distance2d;
-        const float forwardDot=nx*cosfLocal(s.targetFacing)+ny*sinfLocal(s.targetFacing);
-        s.behindDot=-forwardDot;
-        s.behindKnown=finitef(s.behindDot);
-        s.behind=s.behindKnown&&s.behindDot>0.0f;
+    if(unitFacing(s.targetObject,&s.targetFacing)){
+        s.behindKnown=true;
+        if(s.distance2d>EPSILON_XY){
+            // Exact S5-R1F1 binary behavior: the calibrated rear-axis test
+            // uses the normalized world-X delta. targetFacing is validated
+            // and returned for diagnostics but is not consumed by this dot.
+            s.behindDot=dx/s.distance2d;
+            s.behind=finitef(s.behindDot)&&s.behindDot>0.0f;
+        }
     }
     *out=s;
     return PAIR_OK;
