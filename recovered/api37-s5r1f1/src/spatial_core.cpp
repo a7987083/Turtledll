@@ -98,6 +98,19 @@ static bool executable(std::uintptr_t a){
     return p==PAGE_EXECUTE||p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY;
 }
 
+static bool supportedBuild(){
+    const unsigned char* base=(const unsigned char*)GetModuleHandleA(0);
+    if(!base||base!=(const unsigned char*)WoW112::IMAGE_BASE)return false;
+    if(*(const std::uint16_t*)base!=0x5A4Du)return false;
+    const std::uint32_t peoff=*(const std::uint32_t*)(base+0x3Cu);
+    const unsigned char* pe=base+peoff;
+    if(*(const std::uint32_t*)pe!=0x00004550u)return false;
+    const std::uint16_t machine=*(const std::uint16_t*)(pe+4u);
+    const std::uint32_t timestamp=*(const std::uint32_t*)(pe+8u);
+    const std::uint16_t magic=*(const std::uint16_t*)(pe+24u);
+    return machine==WoW112::MACHINE_I386&&timestamp==WoW112::PE_TIMESTAMP&&magic==WoW112::PE32_MAGIC;
+}
+
 static bool finitef(float v){return v==v&&v>-3.4e38f&&v<3.4e38f;}
 static float absf(float v){return v<0.0f?-v:v;}
 static float sqrtfLocal(float v){if(v<=0.0f)return 0.0f;float x=v>1.0f?v:1.0f;for(unsigned i=0;i<10;++i)x=0.5f*(x+v/x);return x;}
@@ -150,12 +163,6 @@ static bool parseGuidText(const char*s,std::uint64_t*out){
 static bool resolveGuid(Lua50::State L,int idx,std::uint64_t*out){
     if(!out)return false;
     *out=0;
-    if(Lua50::IsNumber(L,idx)){
-        const double n=Lua50::ToNumber(L,idx);
-        if(n<=0.0)return false;
-        *out=(std::uint64_t)n;
-        return *out!=0;
-    }
     if(!Lua50::IsString(L,idx))return false;
     const char*s=Lua50::ToString(L,idx);
     if(!s||!*s)return false;
@@ -220,21 +227,23 @@ static bool unitReach(std::uint32_t object,float*radius,float*reach){
     return true;
 }
 
-static bool samplePair(Lua50::State L,SpatialSample*out){
-    if(!out||Lua50::GetTop(L)<3)return false;
+enum PairStatus { PAIR_OK=0, PAIR_UNIT_NOT_VISIBLE, PAIR_DATA_UNAVAILABLE };
+
+static PairStatus samplePair(Lua50::State L,SpatialSample*out){
+    if(!out||Lua50::GetTop(L)<3)return PAIR_UNIT_NOT_VISIBLE;
     SpatialSample s={};
-    if(!resolveGuid(L,2,&s.actorGuid)||!resolveGuid(L,3,&s.targetGuid)||s.actorGuid==s.targetGuid)return false;
-    if(!resolveObject(s.actorGuid,&s.actorObject)||!resolveObject(s.targetGuid,&s.targetObject))return false;
-    if(!unitPosition(s.actorObject,&s.actorPos)||!unitPosition(s.targetObject,&s.targetPos))return false;
+    if(!resolveGuid(L,2,&s.actorGuid)||!resolveGuid(L,3,&s.targetGuid)||s.actorGuid==s.targetGuid)return PAIR_UNIT_NOT_VISIBLE;
+    if(!resolveObject(s.actorGuid,&s.actorObject)||!resolveObject(s.targetGuid,&s.targetObject))return PAIR_UNIT_NOT_VISIBLE;
+    if(!unitPosition(s.actorObject,&s.actorPos)||!unitPosition(s.targetObject,&s.targetPos))return PAIR_DATA_UNAVAILABLE;
     if(!unitReach(s.actorObject,&s.actorBoundingRadius,&s.actorCombatReach)||
-       !unitReach(s.targetObject,&s.targetBoundingRadius,&s.targetCombatReach))return false;
+       !unitReach(s.targetObject,&s.targetBoundingRadius,&s.targetCombatReach))return PAIR_DATA_UNAVAILABLE;
 
     const float dx=s.actorPos.x-s.targetPos.x;
     const float dy=s.actorPos.y-s.targetPos.y;
     const float dz=s.actorPos.z-s.targetPos.z;
     const float d2sq=dx*dx+dy*dy;
     const float d3sq=d2sq+dz*dz;
-    if(d2sq<0.0f||d3sq<0.0f)return false;
+    if(d2sq<0.0f||d3sq<0.0f)return PAIR_DATA_UNAVAILABLE;
     s.distance2d=sqrtfLocal(d2sq);
     s.distance3d=sqrtfLocal(d3sq);
     s.zDelta=absf(dz);
@@ -262,7 +271,7 @@ static bool samplePair(Lua50::State L,SpatialSample*out){
         s.behind=s.behindKnown&&s.behindDot>0.0f;
     }
     *out=s;
-    return true;
+    return PAIR_OK;
 }
 
 static DistanceMeter parseMeter(Lua50::State L){
@@ -316,8 +325,11 @@ int dispatchStatus(Lua50::State L){
 
 int dispatchGet(Lua50::State L){
     ++g_queryCount;
+    if(!supportedBuild()){Lua50::PushNil(L);Lua50::PushString(L,"UNSUPPORTED_BUILD");return 2;}
     SpatialSample s={};
-    if(!samplePair(L,&s))return unavailableSpatial(L);
+    const PairStatus ps=samplePair(L,&s);
+    if(ps==PAIR_UNIT_NOT_VISIBLE){Lua50::PushNil(L);Lua50::PushString(L,"UNIT_NOT_VISIBLE");return 2;}
+    if(ps!=PAIR_OK)return unavailableSpatial(L);
     Lua50::NewTable(L);
     pushGuidString(L,"actorGuid",s.actorGuid);
     pushGuidString(L,"targetGuid",s.targetGuid);
@@ -346,8 +358,11 @@ int dispatchGet(Lua50::State L){
 
 int dispatchDistance(Lua50::State L){
     ++g_distanceCount;
+    if(!supportedBuild()){Lua50::PushNil(L);Lua50::PushString(L,"UNSUPPORTED_BUILD");return 2;}
     SpatialSample s={};
-    if(!samplePair(L,&s)){Lua50::PushNil(L);Lua50::PushString(L,"UNIT_NOT_VISIBLE");return 2;}
+    const PairStatus ps=samplePair(L,&s);
+    if(ps==PAIR_UNIT_NOT_VISIBLE){Lua50::PushNil(L);Lua50::PushString(L,"UNIT_NOT_VISIBLE");return 2;}
+    if(ps!=PAIR_OK)return unavailableSpatial(L);
     const DistanceMeter meter=parseMeter(L);
     if(meter==METER_BAD){Lua50::PushNil(L);Lua50::PushString(L,"BAD_MODE");return 2;}
     if(meter==METER_MELEE&&!s.meleeZEligible){Lua50::PushNil(L);Lua50::PushString(L,"MELEE_Z_SEPARATION");return 2;}
@@ -358,8 +373,11 @@ int dispatchDistance(Lua50::State L){
 
 int dispatchBehind(Lua50::State L){
     ++g_behindCount;
+    if(!supportedBuild()){Lua50::PushNil(L);Lua50::PushString(L,"UNSUPPORTED_BUILD");return 2;}
     SpatialSample s={};
-    if(!samplePair(L,&s)||!s.behindKnown)return unavailableBehind(L);
+    const PairStatus ps=samplePair(L,&s);
+    if(ps==PAIR_UNIT_NOT_VISIBLE){Lua50::PushNil(L);Lua50::PushString(L,"UNIT_NOT_VISIBLE");return 2;}
+    if(ps!=PAIR_OK||!s.behindKnown)return unavailableBehind(L);
     Lua50::PushBool(L,s.behind);
     Lua50::PushString(L,"CLIENT_GEOMETRY");
     Lua50::PushNumber(L,s.behindDot);
