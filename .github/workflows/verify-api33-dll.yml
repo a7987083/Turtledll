@@ -23,7 +23,9 @@ jobs:
           clang-cl --version
           lld-link --version
       - name: Build DLL
-        run: bash -x build/build.sh
+        run: |
+          sed -i 's@/Fo:@/Fo@g' build/build.sh
+          bash build/build.sh
       - name: Inspect object outputs on failure
         if: failure()
         run: |
