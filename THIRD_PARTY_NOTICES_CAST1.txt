@@ -1,0 +1,18 @@
+CAST1 design-reference notice
+=============================
+
+CAST1 was independently implemented in TaiYangShenDian. No ClassicAPI or
+SuperWoW source code is incorporated into this branch.
+
+Public implementation/protocol behavior was studied from:
+- ClassicAPI (brues-code/ClassicAPI, GPLv3): architecture, verified 1.12 client
+  offsets, packet-layout observations, and Turtle/SuperWoW ClearCastingSpell
+  behavior were used as research references only.
+- Nampower (namreeb/nampower, BSD-style license): existing 1.12 spell-hook
+  patterns were reviewed to avoid unnecessary leaf-hook collisions.
+- SuperWoW / SuperAPI_Castlib: public API/event behavior was reviewed as an
+  interoperability reference. SuperWoW's DLL itself is closed source.
+- CMaNGOS Classic: public 1.12 server protocol source was used to cross-check
+  opcode and SMSG_CAST_RESULT semantics.
+
+CAST1 uses its own NativeBus, state model, event names, query API and code.
