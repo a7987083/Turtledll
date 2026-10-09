@@ -23,7 +23,12 @@ jobs:
           clang-cl --version
           lld-link --version
       - name: Build DLL
-        run: bash build/build.sh
+        run: bash -x build/build.sh
+      - name: Inspect object outputs on failure
+        if: failure()
+        run: |
+          find build -maxdepth 2 -type f | head -90
+          find . -name '*.obj' -o -name '*dllmain*' | head -50
       - name: Inspect artifact
         run: |
           file taiyangshendian.dll
