@@ -1,0 +1,42 @@
+name: Aura Get R1 build and regression
+on:
+  push:
+    branches: [feature/aura-get-r1-correctness]
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: LLVM tools
+        run: |
+          sudo ln -sf /usr/bin/clang-cl-18 /usr/local/bin/clang-cl
+          sudo ln -sf /usr/bin/lld-link-18 /usr/local/bin/lld-link
+          clang-cl --version
+      - name: Aura Get R1 static contract checks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('src/aura_state.cpp').read_text()
+          checks = {
+            'Turtle marker gate': 'TURTLE_WOW_VERSION' in s,
+            'Turtle harmful nibble': 'nibble == 0x08U' in s,
+            'Turtle helpful nibble': 'nibble == 0x04U' in s and 'nibble == 0x06U' in s,
+            'Spill marker': 'setBool(L, "spilled"' in s,
+            'Fractional slot rejected': '(double)rawSlot != slotNumber' in s,
+            'Both Get and List propagate policy': s.count('pushAuraRow(L, u,') == 2,
+            'Legacy range luaSlot guarded': 'buff != (rawSlot < 32UL)' in s,
+          }
+          for name, ok in checks.items(): print(('PASS' if ok else 'FAIL'), name)
+          assert all(checks.values())
+          PY
+      - name: Build Windows x86 DLL
+        run: |
+          sed -i 's@/Fo:@/Fo@g' build/build.sh
+          bash build/build.sh
+          file taiyangshendian.dll
+          sha256sum taiyangshendian.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taiyangshendian-api33-aura-get-r1
+          path: taiyangshendian.dll
