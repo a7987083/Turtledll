@@ -1,0 +1,5 @@
+/mnt/data/TaiYangShenDian_ARX1_API33_DW1_LOS1_HANDOFF_20260830/Git/TaiYangShenDian_ARX1_API33_DW1_LOS1_Source.bundle is okay
+The bundle contains this ref:
+fdc7be75b8cfcb78c8ae2ee3832f04eeca4dec9e refs/heads/dev/los-paircache50-api33
+The bundle records a complete history.
+The bundle uses this hash algorithm: sha1

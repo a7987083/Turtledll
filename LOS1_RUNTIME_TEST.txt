@@ -1,0 +1,13 @@
+LOS1 final runtime acceptance
+=============================
+1. Install Binary\taiyangshendian.dll.
+2. Install Source\AddOn\TaiYangAutoRangeARXDiag.
+3. Select one player/NPC target.
+4. Without retargeting, move behind a wall/pillar/tree.
+   Expected: LOS automatically changes to BLOCKED.
+5. Move out again.
+   Expected: LOS automatically returns to visible.
+
+The diagnostic queries only Unit.InSight at 50 ms cadence while its window is shown.
+GUID and UnitState are not polled at 20 Hz.
+LOS1 itself has no timer/thread/scan: the DLL cache is only consulted when a caller asks Unit.InSight.
