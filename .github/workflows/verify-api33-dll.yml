@@ -1,0 +1,30 @@
+name: Verify API33 DLL build
+on:
+  push:
+    branches:
+      - verify/build-api33-20261010
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          command -v clang-cl
+          command -v lld-link
+          clang-cl --version
+          lld-link --version
+      - name: Build DLL
+        run: bash build/build.sh
+      - name: Inspect artifact
+        run: |
+          file taiyangshendian.dll
+          sha256sum taiyangshendian.dll
+          ls -lh taiyangshendian.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taiyangshendian-api33-verified
+          path: taiyangshendian.dll
