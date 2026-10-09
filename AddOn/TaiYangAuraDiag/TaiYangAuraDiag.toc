@@ -1,0 +1,6 @@
+## Interface: 11200
+## Title: 太阳神殿 目标 Aura 计时
+## Notes: AURA6-D4-R4 最终生命周期验收：刷新、切目标、World切换。
+## Author: 太阳神殿
+## Version: 4.0.0-AURA6D4-R4-CN
+TaiYangAuraDiag.lua

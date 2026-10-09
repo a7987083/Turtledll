@@ -1,0 +1,9 @@
+## Interface: 11200
+## Title: AutoRange · 自动危险圈
+## Notes: ARX1/API33 independent runtime; TaiYangShenDian-only native dependency
+## Author: a7987083 / OpenAI test build
+## Version: B3.8R7.5.1c-Warning-Stage2.31-ARX1-API33-Independent
+## OptionalDeps: !Libs, FuBar
+## SavedVariables: AutoRangeDB
+AutoRange.lua
+FuBar.lua

@@ -1,0 +1,10 @@
+TYS ARX1 / API33 INDEPENDENT MIGRATION
+- Native dependency: taiyangshendian.dll API33 only.
+- Cast lifecycle: TYS_CAST_* from CAST1-R2; UNIT_CASTEVENT removed.
+- Player GUID: TaiYangShenDian("Unit.Guid", "player"); SuperWoW GUID return removed.
+- LOS: TaiYangShenDian("Unit.InSight", ...); UnitXP inSight removed.
+- Unit/totem lifetime: GroundProbe.UnitStateByGuid; GUID-aware UnitExists/UnitIsDead removed.
+- Player position: GroundProbe.PlayerPosition; UnitPosition fallback removed.
+- Facing: TaiYangShenDian("facing", "player"); GetPlayerFacing/UnitFacing fallbacks removed.
+- !Libs/FuBar are optional UI integration only; AutoRange core loads without them.
+- No new background loop was added. Existing AutoRange runtime scheduling/lifecycle remains Lua-owned.

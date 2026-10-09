@@ -1,0 +1,6 @@
+## Interface: 11200
+## Title: |cff66ccff太阳神殿|r · AutoRange ARX1 API33 动态LOS诊断
+## Notes: API33 动态LOS实机验收：GUID/UnitState事件刷新，仅 Unit.InSight 每50ms实时检测
+## Author: 太阳神殿
+## Version: 1.0.1-ARX1-API33-DYNLOS50
+TaiYangAutoRangeARXDiag.lua
