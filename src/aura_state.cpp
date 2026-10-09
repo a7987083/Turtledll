@@ -295,6 +295,29 @@ static bool visiblePackedFlag(const UnitFieldsAuraView* f, unsigned long slot) {
     return (nibble & 0x0E) != 0;
 }
 
+// Turtle's polarity nibble differs from stock 1.12 effect-index flags.
+// Enable the interpretation only when the in-world client exposes its marker;
+// invalid nibble encodings always fall back to legacy slot polarity.
+static bool turtleAuraPolarity(Lua50::State L) {
+    if (!L) return false;
+    const int top = Lua50::GetTop(L);
+    Lua50::PushString(L, "TURTLE_WOW_VERSION");
+    Lua50::GetTable(L, WoW112::LUA_GLOBALSINDEX);
+    const bool enabled = Lua50::IsString(L, -1);
+    Lua50::SetTop(L, top);
+    return enabled;
+}
+
+static bool auraHarmful(const UnitFieldsAuraView* f, unsigned long slot, bool turtle) {
+    const bool stock = slot >= 32UL;
+    if (!turtle || !f || slot >= MAX_AURA_SLOTS) return stock;
+    const unsigned char packed = ((const unsigned char*)f->auraFlags)[slot / 2UL];
+    const unsigned char nibble = (unsigned char)((packed >> ((slot & 1UL) * 4UL)) & 0xFUL);
+    if (nibble == 0x04U || nibble == 0x06U) return false;
+    if (nibble == 0x08U) return true;
+    return stock; // unknown layout: do not manufacture a polarity
+}
+
 static bool countsEmptyForLua(const UnitFieldsAuraView* f, unsigned long slot) {
     if (!f || slot >= MAX_AURA_SLOTS) return true;
     unsigned long id = f->aura[slot];
@@ -381,12 +404,14 @@ static bool playerExactTimer(unsigned long rawSlot, unsigned long* expirationOut
 
 static RowSummary pushAuraRow(Lua50::State L, const UnitView& u, unsigned long rawSlot,
                                 unsigned long queryTick, unsigned long clockNow,
-                                unsigned long long playerGuid) {
+                                unsigned long long playerGuid, bool turtle) {
     UnitFieldsAuraView* f = u.fields;
     unsigned long spellId = f->aura[rawSlot];
-    bool buff = rawSlot < 32;
+    bool buff = !auraHarmful(f, rawSlot, turtle);
     bool hidden = countsEmptyForLua(f, rawSlot);
-    int luaSlot = hidden ? 0 : luaSlotFromAuraSlot(f, rawSlot);
+    // Stock Lua UnitBuff/UnitDebuff are physically range-based; a Turtle
+    // spilled debuff has no corresponding vanilla Lua slot.
+    int luaSlot = (hidden || buff != (rawSlot < 32UL)) ? 0 : luaSlotFromAuraSlot(f, rawSlot);
     unsigned long stacks = (unsigned long)f->auraApplications[rawSlot] + 1UL;
     unsigned long auraLevel = (unsigned long)f->auraLevels[rawSlot];
 
@@ -406,6 +431,7 @@ static RowSummary pushAuraRow(Lua50::State L, const UnitView& u, unsigned long r
     setNumber(L, "auraLevel", (double)auraLevel);
     setBool(L, "isBuff", buff);
     setBool(L, "isDebuff", !buff);
+    setBool(L, "spilled", buff != (rawSlot < 32UL));
     setString(L, "type", buff ? "BUFF" : "DEBUFF");
     setBool(L, "hidden", hidden);
 
@@ -586,10 +612,13 @@ int dispatchGet(Lua50::State L) {
     ++g_queryCount; ++g_getCount;
     const char* token = Lua50::ToString(L, 2);
     double slotNumber = Lua50::ToNumber(L, 3);
-    if (slotNumber < 0.0 || slotNumber >= 48.0) {
+    if (!(slotNumber >= 0.0 && slotNumber < 48.0)) {
         Lua50::PushNil(L); Lua50::PushString(L, "RAWSLOT_OUT_OF_RANGE"); return 2;
     }
     unsigned long rawSlot = (unsigned long)slotNumber;
+    if ((double)rawSlot != slotNumber) {
+        Lua50::PushNil(L); Lua50::PushString(L, "BAD_ARGUMENT"); return 2;
+    }
     UnitView u = {}; const char* error = 0;
     if (!prepareUnit(token, &u, &error)) {
         ++g_queryUnavailable; Lua50::PushNil(L); Lua50::PushString(L, error ? error : "UNIT_UNAVAILABLE"); return 2;
@@ -598,7 +627,7 @@ int dispatchGet(Lua50::State L) {
     if (!spellId) { Lua50::PushNil(L); Lua50::PushString(L, "AURA_SLOT_EMPTY"); return 2; }
     unsigned long queryTick = GetTickCount();
     unsigned long clockNow = clientNowMs();
-    pushAuraRow(L, u, rawSlot, queryTick, clockNow, activePlayerGuid());
+    pushAuraRow(L, u, rawSlot, queryTick, clockNow, activePlayerGuid(), turtleAuraPolarity(L));
     return 1;
 }
 
@@ -615,6 +644,7 @@ int dispatchList(Lua50::State L) {
     unsigned long queryTick = GetTickCount();
     unsigned long clockNow = clientNowMs();
     unsigned long long playerGuid = activePlayerGuid();
+    const bool turtle = turtleAuraPolarity(L);
     char guidText[20] = {}; guidString(guidText, sizeof(guidText), u.guid);
 
     Lua50::NewTable(L);
@@ -636,11 +666,11 @@ int dispatchList(Lua50::State L) {
         if (!spellId) continue;
         bool hidden = countsEmptyForLua(u.fields, slot);
         if (hidden) ++hiddenCount; else ++visible;
-        if (slot < 32) ++buffs; else ++debuffs;
+        if (!auraHarmful(u.fields, slot, turtle)) ++buffs; else ++debuffs;
 
         ++row;
         Lua50::PushNumber(L, (double)row);
-        RowSummary summary = pushAuraRow(L, u, slot, queryTick, clockNow, playerGuid);
+        RowSummary summary = pushAuraRow(L, u, slot, queryTick, clockNow, playerGuid, turtle);
         Lua50::SetTable(L, -3);
         if (summary.casterKnown) ++casterKnown; else ++casterUnknown;
         if (summary.exactTimer) ++exactTimed;
