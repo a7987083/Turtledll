@@ -1,0 +1,7 @@
+## Interface: 11200
+## Title: |cffffd200太阳神殿|r DrinkWalk 重制版
+## Notes: WoW 1.12.1; manual-use DrinkWalk API33; isolated rebuild v1.0.0
+## Author: TaiYangShenDian
+## Version: 1.0.0
+## SavedVariables: TaiYangDrinkWalkDB
+TaiYangDrinkWalk.lua
