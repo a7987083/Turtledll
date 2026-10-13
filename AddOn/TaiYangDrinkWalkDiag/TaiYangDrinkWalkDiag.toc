@@ -1,0 +1,9 @@
+## Interface: 11200
+## Title: 太阳神殿 DrinkWalk
+## Notes: TS DrinkWalk V0.5.4; 怒气数字高对比增强; Tick末端红线标记; 生效确认高亮; Food/Drink识别与按需选择; Mana/Energy吃喝窗口; 按键替换/解绑; FuBar酒杯恢复; 自适应 Mana/Energy/Rage HUD; /zchihe; no movement control; no unattended auto
+## Author: 太阳神殿
+## Version: 0.5.4
+## OptionalDeps: !Libs, FuBar
+## SavedVariables: TaiYangDrinkWalkDiagDB, TaiYangDrinkWalkFuDB
+TaiYangDrinkWalkDiag.lua
+FuBar.lua
