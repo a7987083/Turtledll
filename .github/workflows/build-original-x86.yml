@@ -1,0 +1,39 @@
+name: Build original DLL x86
+on:
+  push:
+    branches:
+      - '编译dll'
+  workflow_dispatch:
+
+jobs:
+  build-x86:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LLVM x86 cross-build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 llvm-18
+          mkdir -p "$RUNNER_TEMP/llvm-bin"
+          ln -s "$(command -v clang-cl-18)" "$RUNNER_TEMP/llvm-bin/clang-cl"
+          ln -s "$(command -v lld-link-18)" "$RUNNER_TEMP/llvm-bin/lld-link"
+          echo "$RUNNER_TEMP/llvm-bin" >> "$GITHUB_PATH"
+      - name: Compile original Windows x86 DLL
+        run: bash build/build.sh
+      - name: Verify PE32 and exported symbols
+        run: |
+          file taiyangshendian.dll
+          llvm-readobj-18 --file-headers --coff-exports taiyangshendian.dll | tee build/dll-inspection.txt
+          grep -q 'Machine: IMAGE_FILE_MACHINE_I386' build/dll-inspection.txt
+          grep -q 'Name: Load' build/dll-inspection.txt
+          grep -q 'Name: FirstEnterWorld' build/dll-inspection.txt
+          sha256sum taiyangshendian.dll | tee build/dll-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taiyangshendian-original-x86
+          path: |
+            taiyangshendian.dll
+            build/dll-inspection.txt
+            build/dll-sha256.txt
+          if-no-files-found: error
