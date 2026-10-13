@@ -20,7 +20,9 @@ jobs:
           ln -s "$(command -v lld-link-18)" "$RUNNER_TEMP/llvm-bin/lld-link"
           echo "$RUNNER_TEMP/llvm-bin" >> "$GITHUB_PATH"
       - name: Compile original Windows x86 DLL
-        run: bash build/build.sh
+        run: |
+          sed -i 's|/Fo:|/Fo|g' build/build.sh
+          bash build/build.sh
       - name: Verify PE32 and exported symbols
         run: |
           file taiyangshendian.dll
