@@ -1,0 +1,47 @@
+name: Package WoW AddOns
+
+on:
+  push:
+    branches: [addon-dev]
+    paths:
+      - 'AddOn/**'
+      - '.github/workflows/package-addons.yml'
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package each AddOn
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          count=0
+          while IFS= read -r -d '' toc; do
+            addon_dir="$(dirname "$toc")"
+            addon="$(basename "$addon_dir")"
+            if [[ "$addon_dir" != "AddOn/$addon" ]]; then
+              continue
+            fi
+            (cd AddOn && zip -qr "../dist/${addon}.zip" "$addon")
+            count=$((count + 1))
+          done < <(find AddOn -mindepth 2 -maxdepth 2 -type f -name '*.toc' -print0)
+          if ((count > 0)); then
+            (cd AddOn && zip -qr ../dist/All-AddOns.zip . -x README.md)
+            echo "has_addons=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No .toc AddOns found; nothing to package."
+            echo "has_addons=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload packaged AddOns
+        if: steps.pack.outputs.has_addons == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wow112-addons
+          path: dist/*.zip
+          if-no-files-found: error
