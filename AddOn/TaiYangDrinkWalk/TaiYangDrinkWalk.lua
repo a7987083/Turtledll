@@ -12,11 +12,9 @@ local function Num(x, low, high)
     if not n or n ~= math.floor(n) or n < low or n > high then return nil end
     return n
 end
-local function Native(command, ...)
+local function Native(command)
     if type(TaiYangShenDian) ~= "function" then return false, "DLL_MISSING" end
-    local ok, a, b, c = pcall(TaiYangShenDian, command, unpack(arg or {}))
-    -- Lua 5.0 does not guarantee modern vararg conventions. This function
-    -- is only called without additional arguments; use NativeSlot for bag/slot.
+    local ok, a, b, c = pcall(TaiYangShenDian, command)
     if not ok then return false, tostring(a) end
     return true, a, b, c
 end
