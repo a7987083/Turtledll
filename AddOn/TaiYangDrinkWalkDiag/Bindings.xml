@@ -1,0 +1,5 @@
+<Bindings>
+    <Binding name="TAIYANGDRINKWALK_ACTION" header="TAIYANGDRINKWALK">
+        TaiYangDrinkWalk_ActionKey();
+    </Binding>
+</Bindings>
