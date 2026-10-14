@@ -59,7 +59,6 @@ local DEFAULT_SPAM_RETRY_MS = 75
 local DEFAULT_DRINK_OPEN_PCT = 84.0
 local DEFAULT_DRINK_CLOSE_PCT = 91.5
 local DEFAULT_AUTO_LEAD_MS = 320
-local TICK_CALIBRATION_SAMPLES = 15
 local AUTO_LEAD_MIN_MS = 200
 local AUTO_LEAD_MAX_MS = 380
 local AUTO_LEAD_STEP_DOWN_MS = 10
@@ -567,7 +566,6 @@ local function SetClassifier(className, reason, accepted)
     end
 end
 
-local RecordTickCalibration -- forward declaration: Lua 5.0 local scope
 local function AcceptSample(sampleMS, deltaMana, phaseError)
     DW.goodSamples = DW.goodSamples + 1
     DW.badSamples = 0
@@ -581,7 +579,6 @@ local function AcceptSample(sampleMS, deltaMana, phaseError)
     DW.lastSampleMS = sampleMS
     DW.lastAcceptedMS = sampleMS
     DW.lastSampleDelta = deltaMana
-    RecordTickCalibration(phaseError)
     SetClassifier("PERIODIC_ACCEPT", "phase=" .. FormatMS(phaseError or 0), true)
 end
 
@@ -738,39 +735,6 @@ local function AutoLeadEnabled()
     return false
 end
 
-local function TickCalibrationEnabled()
-    return TaiYangDrinkWalkDiagDB.tickCalibrationEnabled == true
-end
-
-local function SetTickCalibrationEnabled(enabled)
-    TaiYangDrinkWalkDiagDB.tickCalibrationEnabled = enabled and true or false
-    DW.tickCalibrationErrors = {}
-    DW.tickCalibrationCount = 0
-    DW.tickCalibrationState = enabled and "采样中" or "关闭"
-    AddLog("Mana Tick 自动校准：" .. DW.tickCalibrationState)
-end
-
-RecordTickCalibration = function(phaseError)
-    if not TickCalibrationEnabled() or DW.state ~= "LOCKED" then return end
-    if (DW.confidence or 0) < 0.80 or (DW.jitterMS or 9999) > 140 then return end
-    DW.tickCalibrationErrors = DW.tickCalibrationErrors or {}
-    table.insert(DW.tickCalibrationErrors, phaseError or 0)
-    DW.tickCalibrationCount = table.getn(DW.tickCalibrationErrors)
-    DW.tickCalibrationState = "采样中"
-    if DW.tickCalibrationCount >= TICK_CALIBRATION_SAMPLES then
-        -- The existing classifier performs small phase corrections on each
-        -- accepted sample. A bounded median trim after 15 stable samples
-        -- corrects residual systematic bias without learning from item use.
-        local correction = Clamp(Median(DW.tickCalibrationErrors), -25, 25)
-        if DW.anchorMS then DW.anchorMS = DW.anchorMS + correction end
-        DW.tickCalibrationErrors = {}
-        DW.tickCalibrationCount = 0
-        DW.tickCalibrationRounds = (DW.tickCalibrationRounds or 0) + 1
-        DW.tickCalibrationState = "已校准"
-        AddLog(string.format("Mana Tick校准：15次稳定周期，微调 %.1fms", correction))
-    end
-end
-
 local function AutoLeadMS()
     local v = tonumber(TaiYangDrinkWalkDiagDB.autoLeadMS) or DEFAULT_AUTO_LEAD_MS
     local floorMS = math.min(AUTO_LEAD_MAX_MS, math.max(AUTO_LEAD_MIN_MS, SpamCloseMS() + 30))
@@ -800,10 +764,6 @@ end
 local function ResetAutoLead()
     TaiYangDrinkWalkDiagDB.autoLeadMS = DEFAULT_AUTO_LEAD_MS
     TaiYangDrinkWalkDiagDB.autoLeadEnabled = true
-    DW.tickCalibrationErrors = {}
-    DW.tickCalibrationCount = 0
-    DW.tickCalibrationRounds = 0
-    DW.tickCalibrationState = "关闭"
     DW.autoLeadSuccessStreak = 0
     DW.autoLeadMissStreak = 0
     DW.autoLeadConfirmedTicks = 0
@@ -835,6 +795,8 @@ local function SetSpamWindow(openMS, closeMS, retryMS)
     TaiYangDrinkWalkDiagDB.spamCloseMS = closeMS
     TaiYangDrinkWalkDiagDB.spamRetryMS = retryMS
     if DW.windowEdit then DW.windowEdit:SetText(string.format("%d,%d,%d", openMS, closeMS, retryMS)) end
+    if DW.openEdit then DW.openEdit:SetText(tostring(openMS)) end
+    if DW.closeEdit then DW.closeEdit:SetText(tostring(closeMS)) end
     AddLog(string.format("SPAM窗口=%d~%dms retry=%dms", openMS, closeMS, retryMS))
 end
 
@@ -1750,8 +1712,6 @@ end
 local function SetManaSparkEnabled(enabled)
     TaiYangDrinkWalkDiagDB.showManaSpark = enabled and true or false
     if DW.manaCheck then DW.manaCheck:SetChecked(ShowManaSparkEnabled()) end
-    if DW.calibrateCheck then DW.calibrateCheck:SetChecked(TickCalibrationEnabled()) end
-    if DW.calibrationLabel then DW.calibrationLabel:SetText((DW.tickCalibrationState or "关闭") .. " " .. tostring(DW.tickCalibrationCount or 0) .. "/15") end
 end
 
 local function SetManaTimerSpark(progress)
@@ -2145,7 +2105,41 @@ local function CreateUI()
     DW.tickCheck = CreateCheck(f, "TaiYangDrinkWalkShowTickCheck", "显示 Tick 计时条（Mana/Energy）", 18, -73, ShowTickTimerEnabled(), SetTickTimerEnabled)
     DW.manaCheck = CreateCheck(f, "TaiYangDrinkWalkShowManaCheck", "显示 自适应资源条 / Spark", 18, -101, ShowManaSparkEnabled(), SetManaSparkEnabled)
 
-    DW.calibrateCheck = CreateCheck(f, "TaiYangDrinkWalkCalibrateCheck", "Mana Tick 自动校准（15次稳定采样）", 18, -129, TickCalibrationEnabled(), SetTickCalibrationEnabled)
+    local windowLabel = CreateLabel(f, 20, -133, 105, "GameFontNormalSmall")
+    windowLabel:SetText("绿色区 (ms)：")
+    local openLabel = CreateLabel(f, 120, -133, 52, "GameFontNormalSmall")
+    openLabel:SetText("开始")
+    local openEdit = CreateFrame("EditBox", "TaiYangDrinkWalkOpenEdit", f, "InputBoxTemplate")
+    openEdit:SetWidth(58); openEdit:SetHeight(20)
+    openEdit:SetPoint("TOPLEFT", f, "TOPLEFT", 158, -128)
+    openEdit:SetAutoFocus(false); openEdit:SetText(tostring(SpamOpenMS()))
+    DW.openEdit = openEdit
+    local closeLabel = CreateLabel(f, 224, -133, 52, "GameFontNormalSmall")
+    closeLabel:SetText("结束")
+    local closeEdit = CreateFrame("EditBox", "TaiYangDrinkWalkCloseEdit", f, "InputBoxTemplate")
+    closeEdit:SetWidth(58); closeEdit:SetHeight(20)
+    closeEdit:SetPoint("TOPLEFT", f, "TOPLEFT", 260, -128)
+    closeEdit:SetAutoFocus(false); closeEdit:SetText(tostring(SpamCloseMS()))
+    DW.closeEdit = closeEdit
+    local function ApplyWindow()
+        local open = tonumber(Trim(openEdit:GetText()))
+        local close = tonumber(Trim(closeEdit:GetText()))
+        if not open or not close or open ~= math.floor(open) or close ~= math.floor(close)
+            or open < 50 or open > 1950 or close < 0 or close > 1900 or close >= open then
+            AddLog("绿色区无效：开始50~1950ms，结束0~1900ms，开始必须大于结束")
+            openEdit:SetText(tostring(SpamOpenMS()))
+            closeEdit:SetText(tostring(SpamCloseMS()))
+            return
+        end
+        TaiYangDrinkWalkDiagDB.spamOpenMS = open
+        TaiYangDrinkWalkDiagDB.spamCloseMS = close
+        AddLog(string.format("绿色区：Tick前 %d~%dms", open, close))
+    end
+    openEdit:SetScript("OnEnterPressed", function() ApplyWindow(); this:ClearFocus() end)
+    closeEdit:SetScript("OnEnterPressed", function() ApplyWindow(); this:ClearFocus() end)
+    openEdit:SetScript("OnEscapePressed", function() this:ClearFocus(); this:SetText(tostring(SpamOpenMS())) end)
+    closeEdit:SetScript("OnEscapePressed", function() this:ClearFocus(); this:SetText(tostring(SpamCloseMS())) end)
+    CreateButton(f, "应用", 334, -128, 65, ApplyWindow)
     local retryLabel = CreateLabel(f, 20, -310, 156, "GameFontNormalSmall")
     retryLabel:SetText("狂按重试间隔(ms)：")
     local retryEdit = CreateFrame("EditBox", "TaiYangDrinkWalkRetryEdit", f, "InputBoxTemplate")
@@ -2168,8 +2162,6 @@ local function CreateUI()
     retryEdit:SetScript("OnEnterPressed", function() ApplyRetry(); this:ClearFocus() end)
     retryEdit:SetScript("OnEscapePressed", function() this:ClearFocus(); this:SetText(tostring(SpamRetryMS())) end)
     CreateButton(f, "应用", 250, -304, 65, ApplyRetry)
-    local calibrationLabel = CreateLabel(f, 320, -134, 109, "GameFontNormalSmall")
-    DW.calibrationLabel = calibrationLabel
 
     local itemLabel = CreateLabel(f, 20, -174, 90, "GameFontNormalSmall")
     itemLabel:SetText("物品名称 / ID：")
@@ -2409,9 +2401,7 @@ local function OnEvent()
         TaiYangDrinkWalkDiagDB.drinkOpenPct = nil
         TaiYangDrinkWalkDiagDB.drinkClosePct = nil
         TaiYangDrinkWalkDiagDB.autoLeadEnabled = false
-        DW.tickCalibrationErrors = {}
-        DW.tickCalibrationCount = 0
-        DW.tickCalibrationState = TickCalibrationEnabled() and "采样中" or "关闭"
+        TaiYangDrinkWalkDiagDB.tickCalibrationEnabled = nil
         RestoreReloadPhase()
         ScanDrinkAura()
         NormalizeStoredBinding()
@@ -2569,17 +2559,7 @@ local function SlashHandler(msg)
     if low == "scan" then SetItemSpec(TaiYangDrinkWalkDiagDB.itemSpec or ""); return end
     if low == "mode watch" or low == "watch" then SetMode("WATCH"); return end
     if low == "mode spam" or low == "spam" then SetMode("SPAM"); return end
-    if low == "calibrate on" then SetTickCalibrationEnabled(true); return end
-    if low == "calibrate off" then SetTickCalibrationEnabled(false); return end
-    if low == "autolead on" then SetTickCalibrationEnabled(true); return end
-    if low == "autolead off" then SetTickCalibrationEnabled(false); return end
-    if low == "autolead reset" then
-        DW.tickCalibrationErrors = {}; DW.tickCalibrationCount = 0
-        DW.tickCalibrationState = TickCalibrationEnabled() and "采样中" or "关闭"
-        AddLog("Tick校准样本已重置")
-        return
-    end
-    if string.find(low, "autolead ") == 1 then AddLog("提前量学习已废弃；改用 /tsdw calibrate on|off"); return end
+    if low == "calibrate on" or low == "calibrate off" or string.find(low, "autolead") == 1 then AddLog("自动校准已移除；请手动设置绿色区开始/结束毫秒"); return end
     if string.find(low, "lead ") == 1 then SetWatchLead(string.sub(msg, 6)); return end
     if string.find(low, "item ") == 1 then SetItemSpec(string.sub(msg, 6)); return end
     if low == "unbind" then UnbindActionKey(false); RefreshSettingsUI(); return end
