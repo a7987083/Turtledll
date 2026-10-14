@@ -1,8 +1,8 @@
 ## Interface: 11200
 ## Title: TaiYangDrinkWalk
-## Notes: Lua 5.0 framework only - no item use
+## Notes: Lua 5.0 inventory rule manager; no item use
 ## Author: TaiYangShenDian
-## Version: 0.1.0-framework
+## Version: 0.2.0-items
 ## SavedVariables: TaiYangDrinkWalkDB
 ## OptionalDeps: FuBar
 
