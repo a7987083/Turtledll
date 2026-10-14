@@ -33,7 +33,14 @@ function DW.Toggle()
     if not DW.settingsFrame then DW.Print("设置界面尚不可用"); return end
     if DW.settingsFrame:IsShown() then DW.settingsFrame:Hide()
     else
-        if DW.RefreshSettings then DW.RefreshSettings() end
+        if DW.RefreshSettings then
+            local ok, err = pcall(DW.RefreshSettings)
+            if not ok then
+                DW.uiError = tostring(err)
+                DW.Print("设置界面刷新失败: "..DW.uiError)
+                return
+            end
+        end
         DW.settingsFrame:Show()
     end
 end
