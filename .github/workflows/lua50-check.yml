@@ -44,3 +44,6 @@ jobs:
       - name: Check addon compatibility contracts
         shell: bash
         run: python3 AddOn/TaiYangDrinkWalk/tests/check_contracts.py
+      - name: Test lifecycle transition model
+        shell: bash
+        run: python3 -m unittest discover -s AddOn/TaiYangDrinkWalk/tests -p "test_*.py" -v
