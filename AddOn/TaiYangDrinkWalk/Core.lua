@@ -1,7 +1,7 @@
 -- WoW 1.12.1 / Lua 5.0. Bootstrap and public API.
 TaiYangDrinkWalk = TaiYangDrinkWalk or {}
 local DW = TaiYangDrinkWalk
-DW.version = "0.2.0-items"
+DW.version = "0.2.1-tooltip"
 DW.modules = {}
 DW.ready = false
 DW.uiError = nil
@@ -22,7 +22,7 @@ function DW.RegisterModule(name)
 end
 function DW.ShowStatus()
     DW.Print("框架: " .. tostring(DW.version) .. " | " .. DW.DLLStatus())
-    DW.Print("模块: Items=只读扫描; Tick/Action/HUD=待开发")
+    DW.Print("模块: Items=Tooltip自动分类+需求评分; Tick/Action/HUD=待开发")
     if DW.uiError then DW.Print("UI error: " .. tostring(DW.uiError)) end
 end
 function DW.Toggle()
@@ -43,15 +43,11 @@ SlashCmdList["TAIYANGDRINKWALK"] = function(msg)
     local cmd = string.lower(msg or "")
     if cmd == "status" then DW.ShowStatus()
     elseif cmd == "scan" then DW.Items.Report()
-    elseif cmd == "list" then DW.Items.List()
-    elseif string.sub(cmd,1,4) == "add " then
-        local kind,query=string.match(string.sub(msg,5),"^(%S+)%s+(.+)$")
-        local ok,result=DW.Items.Add(kind,query)
+    elseif cmd == "list" then DW.Print("配置: "..DW.Items.GetSpec())
+    elseif string.sub(cmd,1,4) == "set " then
+        local ok,result=DW.Items.SetSpec(string.sub(msg,5))
         DW.Print(result)
-    elseif string.sub(cmd,1,7) == "remove " then
-        local ok,result=DW.Items.Remove(string.sub(cmd,8))
-        DW.Print(result)
-    elseif cmd == "help" then DW.Print("/tsdw, status, add food|drink|both ID或名称, list, remove 序号, scan")
+    elseif cmd == "help" then DW.Print("/tsdw /tsdw status /tsdw set 物品ID,名称 /tsdw scan /tsdw list")
     else DW.Toggle() end
 end
 SLASH_TAIYANGDRINKWALKDIAG1 = "/tsdwdiag"
