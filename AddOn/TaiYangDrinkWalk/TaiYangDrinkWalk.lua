@@ -52,7 +52,6 @@ local UI_MANA_BAR_HEIGHT = 12
 local UI_TICK_BAR_WIDTH = 306
 local UI_TICK_BAR_HEIGHT = 26
 
-local DEFAULT_WATCH_LEAD_MS = 220
 local DEFAULT_SPAM_OPEN_MS = 320
 local DEFAULT_SPAM_CLOSE_MS = 170
 local DEFAULT_SPAM_RETRY_MS = 75
@@ -120,11 +119,6 @@ local function StateZh(s)
     if s == "LOCKED" then return "已锁定" end
     if s == "VERIFY" then return "等待验证" end
     return tostring(s or "?")
-end
-
-local function ModeZh()
-    if DW.mode == "SPAM" then return "狂按模式 [SPAM]" end
-    return "观察模式 [WATCH]"
 end
 
 local function FormatMS(ms)
@@ -689,10 +683,6 @@ local function NextTickMS(nowMS)
     return t
 end
 
-local function WatchLeadMS()
-    return Clamp(tonumber(TaiYangDrinkWalkDiagDB.watchLeadMS) or DEFAULT_WATCH_LEAD_MS, 0, 600)
-end
-
 local function SpamOpenMS()
     return Clamp(tonumber(TaiYangDrinkWalkDiagDB.spamOpenMS) or DEFAULT_SPAM_OPEN_MS, 50, 1950)
 end
@@ -779,13 +769,6 @@ local function NormalizeSpamWindow(openMS, closeMS, retryMS)
     retryMS = Clamp(tonumber(retryMS) or DEFAULT_SPAM_RETRY_MS, 0, 250)
     if closeMS >= openMS then closeMS = math.max(0, openMS - 50) end
     return openMS, closeMS, retryMS
-end
-
-local function SetWatchLead(v)
-    v = Clamp(tonumber(v) or DEFAULT_WATCH_LEAD_MS, 0, 600)
-    TaiYangDrinkWalkDiagDB.watchLeadMS = v
-    if DW.watchEdit then DW.watchEdit:SetText(tostring(v)) end
-    AddLog("WATCH提示提前量=" .. tostring(v) .. "ms")
 end
 
 local function SetSpamWindow(openMS, closeMS, retryMS)
@@ -1290,33 +1273,6 @@ local function NormalizeStoredBinding()
     if key == "" then UnbindActionKey(true) else BindActionKey(key, true) end
 end
 
-local function SetMode(mode)
-    if mode ~= "SPAM" then mode = "WATCH" end
-    DW.mode = mode
-    TaiYangDrinkWalkDiagDB.lastSelectedMode = mode
-    if mode == "SPAM" then
-        if not FindConfiguredItem() then
-            DW.mode = "WATCH"
-            DW.lastKeyResult = "没有可用吃喝物品，保持WATCH：" .. tostring(DW.itemStatus)
-            AddLog(DW.lastKeyResult)
-            return false
-        end
-        local ready, why = NativeReady()
-        if not ready then
-            DW.mode = "WATCH"
-            DW.lastKeyResult = "Native未就绪，保持WATCH：" .. tostring(why)
-            AddLog(DW.lastKeyResult)
-            return false
-        end
-        DW.lastKeyResult = "SPAM已开启：自己负责松方向键，只管狂按绑定键"
-        AddLog(DW.lastKeyResult)
-        return true
-    end
-    DW.lastKeyResult = "WATCH：只观察提示，不会使用物品"
-    AddLog(DW.lastKeyResult)
-    return true
-end
-
 local function AutoLeadCanLearnDown()
     return (DW.state == "LOCKED")
         and (DW.confidence or 0) >= 0.80
@@ -1513,11 +1469,6 @@ function DW:HandleActionKey()
     local now = NowMS()
     self.keyPressCount = (self.keyPressCount or 0) + 1
     self.lastKeyPressMS = now
-
-    if self.mode ~= "SPAM" then
-        self.lastKeyResult = "WATCH模式：按键不使用物品"
-        return
-    end
 
     if not self.item and not FindConfiguredItem() then
         self.lastKeyResult = "找不到配置物品"
@@ -1817,7 +1768,6 @@ local function RenderManaTimerUI(nowMS, nextTickMS, tickInMS, tickPeriodMS, tick
         local show = kind == "MANA" and DW.state == "LOCKED"
             and nextTickMS and tickInMS and tickPeriodMS
             and not (DW.uiFSREndMS and nowMS < DW.uiFSREndMS)
-            and DW.mode == "SPAM"
         if show then
             local startPct = 1 - Clamp(EffectiveSpamOpenMS() / tickPeriodMS, 0, 1)
             local endPct = 1 - Clamp(SpamCloseMS() / tickPeriodMS, 0, 1)
@@ -2281,7 +2231,6 @@ local function InitState()
     DW.resumeReason = "NORMAL_START"
     ResetClassifierRuntime()
 
-    DW.mode = "SPAM" -- formal release default; hardware input is still required
     DW.item = nil
     DW.itemStatus = "未扫描"
     DW.drinkState = "UNKNOWN"
@@ -2342,7 +2291,8 @@ local function OnEvent()
         end
         HookReloadUI()
         RefreshResourceContext(true)
-        SetWatchLead(WatchLeadMS())
+        TaiYangDrinkWalkDiagDB.watchLeadMS = nil
+        TaiYangDrinkWalkDiagDB.lastSelectedMode = nil
         SetSpamWindow(SpamOpenMS(), SpamCloseMS(), SpamRetryMS())
         -- The UI is created before SavedVariables loading. Restore field text
         -- here, not every refresh (which would overwrite in-progress editing).
@@ -2358,8 +2308,7 @@ local function OnEvent()
         ScanDrinkAura()
         NormalizeStoredBinding()
         SetItemSpec(TaiYangDrinkWalkDiagDB.itemSpec or "")
-        DW.mode = "SPAM"
-        DW.lastKeyResult = "SPAM默认启动；按键或 /zchihe 触发"
+        DW.lastKeyResult = "按键或 /zchihe 触发"
         SetTickTimerEnabled(ShowTickTimerEnabled())
         SetManaSparkEnabled(ShowManaSparkEnabled())
         LayoutHUD()
@@ -2467,8 +2416,7 @@ local function OnEvent()
     if e == "PLAYER_DEAD" then
         ClearPhase("DEATH")
         ResetEnergyRuntime("DEATH")
-        DW.mode = "SPAM"
-        DW.AddLog("死亡：旧phase作废；SPAM保持默认")
+        DW.AddLog("死亡：旧phase作废")
         return
     end
 
@@ -2507,10 +2455,7 @@ local function SlashHandler(msg)
     if low == "show" then DW.frame:Show(); return end
     if low == "hide" then DW.frame:Hide(); return end
     if low == "scan" then SetItemSpec(TaiYangDrinkWalkDiagDB.itemSpec or ""); return end
-    if low == "mode watch" or low == "watch" then SetMode("WATCH"); return end
-    if low == "mode spam" or low == "spam" then SetMode("SPAM"); return end
     if low == "calibrate on" or low == "calibrate off" or string.find(low, "autolead") == 1 then AddLog("自动校准已移除；请手动设置绿色区开始/结束毫秒"); return end
-    if string.find(low, "lead ") == 1 then SetWatchLead(string.sub(msg, 6)); return end
     if string.find(low, "item ") == 1 then SetItemSpec(string.sub(msg, 6)); return end
     if low == "unbind" then UnbindActionKey(false); RefreshSettingsUI(); return end
     if string.find(low, "bind ") == 1 then BindActionKey(string.sub(msg, 6)); RefreshSettingsUI(); return end
@@ -2528,7 +2473,7 @@ local function SlashHandler(msg)
     end
     if string.find(low, "ratio ") == 1 then AddLog("比例设置已废弃，请使用绿色窗口提示"); return end
     if low == "status" then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff33ff66[DrinkWalk]|r mode=" .. tostring(DW.mode) .. " sync=" .. tostring(DW.state) .. " key=" .. SpamBindingText() .. " item=" .. tostring(DW.itemStatus) .. " | " .. ResourceSummaryText())
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ff66[DrinkWalk]|r sync=" .. tostring(DW.state) .. " key=" .. SpamBindingText() .. " item=" .. tostring(DW.itemStatus) .. " | " .. ResourceSummaryText())
         return
     end
     if DW.frame:IsVisible() then DW.frame:Hide() else DW.frame:Show() end
