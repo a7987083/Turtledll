@@ -29,7 +29,7 @@ extern "C" void* __cdecl memmove(void* d,const void* s,unsigned int n){ unsigned
 namespace TYS {
 constexpr const char* DLL_VERSION = "1.4.0-AURA6D4-R4-CAST1R2-LFX1-ARX1-DW1-LOS1";
 constexpr const char* API_VERSION = "33";
-constexpr const char* BUILD_ID = "20260830-v140-arx1-api33-dw1-los-paircache50";
+constexpr const char* BUILD_ID = "20261014-v140-api33-mov1-native-wasd";
 constexpr DWORD DLL_PROCESS_ATTACH_ = 1;
 constexpr DWORD DLL_PROCESS_DETACH_ = 0;
 
@@ -608,9 +608,105 @@ static bool commandNeedsVisualRuntime(const char* cmd){
     return false;
 }
 
+// MOV1: WoW 1.12.1 build 5875 native WASD pause. No protected Lua movement calls.
+// The detour only rejects forward/backward/left/right movement *starts*.
+// Stop events and all other flags are forwarded to the original engine routine.
+namespace MovementNative {
+constexpr unsigned long HANDLER = 0x00515090UL;
+constexpr unsigned long CONTROLLER_GET = 0x005143E0UL;
+constexpr unsigned long INPUT_TIMESTAMP = 0x00CF0BC8UL;
+constexpr unsigned long MASK = 0x00000330UL; // 0x10|0x20|0x100|0x200
+const unsigned long bits[4]={0x10UL,0x20UL,0x100UL,0x200UL};
+const int keys[4]={'W','S','A','D'};
+using HandlerFn = void (__thiscall *)(void*,unsigned long,int,unsigned long,unsigned long);
+using ControllerFn = void* (__cdecl *)();
+using KeyStateFn = short (WINAPI *)(int);
+static HandlerFn next=0;
+static volatile LONG paused=0;
+static bool hooked=false;
+static bool created=false;
+static KeyStateFn keyState(){
+    HMODULE user32=GetModuleHandleA("user32.dll");
+    return user32?(KeyStateFn)GetProcAddress(user32,"GetAsyncKeyState"):0;
+}
+static unsigned long heldKeys(KeyStateFn read){
+    unsigned long result=0;
+    if(read)for(unsigned i=0;i<4;++i)if((read(keys[i])&0x8000)!=0)result|=bits[i];
+    return result;
+}
+static void __fastcall onMovement(void* self,void*,unsigned long flags,int starting,
+                                  unsigned long timestamp,unsigned long extra){
+    if(!next)return;
+    if(starting && (flags&MASK) && InterlockedCompareExchange(&paused,0,0)!=0){
+        const unsigned long allowed=flags&~MASK;
+        if(allowed)next(self,allowed,starting,timestamp,extra);
+        return;
+    }
+    next(self,flags,starting,timestamp,extra);
+}
+static bool ensureHook(const char** why){
+    if(hooked)return true;
+    if(!detectBuild().ok){*why="UNSUPPORTED_BUILD";return false;}
+    if(!executable(HANDLER)||!executable(CONTROLLER_GET)||
+       !readable((void*)INPUT_TIMESTAMP,4)){*why="MOVE_API_UNAVAILABLE";return false;}
+    MH_STATUS init=MH_Initialize();
+    if(init!=MH_OK&&init!=MH_ERROR_ALREADY_INITIALIZED){*why="MOVE_HOOK_INIT_FAILED";return false;}
+    if(!created){
+        MH_STATUS cr=MH_CreateHook((LPVOID)HANDLER,(LPVOID)&onMovement,(LPVOID*)&next);
+        if(cr!=MH_OK){*why="MOVE_HOOK_CREATE_FAILED";return false;}
+        created=true;
+    }
+    MH_STATUS en=MH_EnableHook((LPVOID)HANDLER);
+    if(en!=MH_OK&&en!=MH_ERROR_ENABLED){*why="MOVE_HOOK_ENABLE_FAILED";return false;}
+    hooked=true;
+    return true;
+}
+static void* controller(){return ((ControllerFn)CONTROLLER_GET)();}
+static void stopAll(void* obj){
+    if(!obj||!next)return;
+    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+    for(unsigned i=0;i<4;++i)next(obj,bits[i],0,stamp,0);
+}
+static void onWorldLeaving(){
+    // No synthetic movement restart while transitioning worlds.
+    InterlockedExchange(&paused,0);
+}
+static int dispatch(Lua50::State L,const char* command){
+    if(eq(command,"Movement.IsPaused")){
+        Lua50::PushBool(L,InterlockedCompareExchange(&paused,0,0)!=0);
+        Lua50::PushString(L,"OK");return 2;
+    }
+    if(eq(command,"Movement.Pause")){
+        if(InterlockedCompareExchange(&paused,0,0)!=0){pushBoolCode(L,true,"ALREADY_PAUSED");return 2;}
+        const char* why="OK";
+        if(!ensureHook(&why)){pushBoolCode(L,false,why);return 2;}
+        void* obj=controller();
+        if(!obj){pushBoolCode(L,false,"MOVE_CONTROLLER_UNAVAILABLE");return 2;}
+        // Engage the gate before stopping movement, so new starts cannot race in.
+        InterlockedExchange(&paused,1);
+        stopAll(obj);
+        pushBoolCode(L,true,"WASD_PAUSED");return 2;
+    }
+    if(eq(command,"Movement.Resume")){
+        if(InterlockedCompareExchange(&paused,0,0)==0){pushBoolCode(L,true,"ALREADY_RESUMED");return 2;}
+        KeyStateFn read=keyState();
+        if(!read){pushBoolCode(L,false,"KEY_STATE_UNAVAILABLE");return 2;}
+        void* obj=controller();
+        if(!obj){pushBoolCode(L,false,"MOVE_CONTROLLER_UNAVAILABLE");return 2;}
+        unsigned long held=heldKeys(read);
+        InterlockedExchange(&paused,0);
+        const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+        for(unsigned i=0;i<4;++i)if(held&bits[i])next(obj,bits[i],1,stamp,0);
+        pushBoolCode(L,true,"OK");return 2;
+    }
+    return -1;
+}
+} // namespace MovementNative
+
 static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
     if(!ev)return;
     if(eq(ev,"PLAYER_LEAVING_WORLD")){
+        MovementNative::onWorldLeaving();
         if(InterlockedCompareExchange(&g_worldPhase,2,2)==2)return;
         InterlockedExchange(&g_worldPhase,2);
         TysProfiler::onWorldLeaving(L);
@@ -861,6 +957,7 @@ static int __fastcall scriptMain(Lua50::State _L){
     if(Lua50::GetTop(L)<1||!Lua50::IsString(L,1))return pushError(L,"BAD_ARGUMENT");
     const char* cmd=Lua50::ToString(L,1); if(!cmd)return pushError(L,"BAD_ARGUMENT");
     if(eq(cmd,"Core.Version")){ Lua50::PushString(L,DLL_VERSION); Lua50::PushString(L,API_VERSION); Lua50::PushString(L,BUILD_ID); return 3; }
+    if(eq(cmd,"Movement.Pause")||eq(cmd,"Movement.Resume")||eq(cmd,"Movement.IsPaused"))return MovementNative::dispatch(callerL?callerL:L,cmd);
     if(eq(cmd,"DrinkWalk.Status"))return TysDrinkWalkNative::dispatchStatus(callerL?callerL:L);
     if(eq(cmd,"DrinkWalk.ResolveItem"))return TysDrinkWalkNative::dispatchResolveItem(callerL?callerL:L);
     if(eq(cmd,"DrinkWalk.UseItem"))return TysDrinkWalkNative::dispatchUseItem(callerL?callerL:L);
