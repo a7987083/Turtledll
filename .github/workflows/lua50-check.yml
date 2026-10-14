@@ -1,0 +1,43 @@
+name: WoW 1.12 Lua 5.0 syntax
+
+on:
+  push:
+    branches: [addon-dev]
+    paths:
+      - 'AddOn/TaiYangDrinkWalk/**'
+      - '.github/workflows/lua50-check.yml'
+  pull_request:
+    paths:
+      - 'AddOn/TaiYangDrinkWalk/**'
+      - '.github/workflows/lua50-check.yml'
+  workflow_dispatch:
+
+jobs:
+  lua50-syntax:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build upstream Lua 5.0.3 compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --output /tmp/lua-5.0.3.tar.gz https://www.lua.org/ftp/lua-5.0.3.tar.gz
+          mkdir -p /tmp/lua50-src
+          tar -xzf /tmp/lua-5.0.3.tar.gz -C /tmp/lua50-src
+          make -C /tmp/lua50-src/lua-5.0.3 -j2
+          /tmp/lua50-src/lua-5.0.3/bin/luac -v
+      - name: Parse all installed DrinkWalk Lua files with Lua 5.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(find AddOn/TaiYangDrinkWalk -type f -name '*.lua' -print0)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No Lua files were found" >&2
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            echo "Checking: $file"
+            /tmp/lua50-src/lua-5.0.3/bin/luac -p "$file"
+          done
+          echo "Lua 5.0.3 syntax passed for ${#files[@]} files."
