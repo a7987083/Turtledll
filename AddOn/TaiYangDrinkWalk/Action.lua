@@ -1,4 +1,4 @@
--- TaiYangDrinkWalk 0.5.1. Explicit /zchihe macro only; native DLL item use.
+-- TaiYangDrinkWalk 0.5.2. Drink-only /zchihe DLL item use and evidence confirmation.
 -- Lua 5.0 / WoW 1.12.1. No autonomous scheduler; no key binding.
 local DW=TaiYangDrinkWalk
 local A={implemented=true,state="IDLE",lastCode="NOT_CALLED",attempts=0,confirmed=0,
@@ -131,6 +131,10 @@ local function Window()
 end
 function A.Activate()
     Confirm()
+    if A.pending then
+        A.lastCode="WAIT_CONFIRM_900MS"
+        return false
+    end
     if not DW.ready then return Block("NOT_READY") end
     local ready,reason=A.Check()
     if not ready then return Block(reason) end
@@ -141,11 +145,6 @@ function A.Activate()
     if A.tickAttempts>=2 then return Block("TICK_MAX_2") end
     local now=Now()
     if now-A.lastTry<75 then return Block("RATE_LIMIT_75MS") end
-    -- Hold briefly after dispatch for server response; after timeout allow one retry.
-    if A.pending then
-        A.lastCode="WAIT_CONFIRM_900MS"
-        return false
-    end
     if not DW.Items or not DW.Items.Find then return Block("ITEM_MODULE_MISSING") end
     local item=DW.Items.Find()
     if not item or not item.id then return Block("NO_CONFIGURED_ITEM") end
@@ -173,8 +172,7 @@ function A.Activate()
     if sent~=true then A.state="NATIVE_FAILED";return false end
     A.attempts=A.attempts+1
     A.state="DISPATCHED_UNCONFIRMED"
-    -- Short confirmation timeout ensures the second attempt can fit the window,
-    -- but do not retry while an unconfirmed dispatch is still pending.
+    -- Keep evidence active for 900ms. Never retry while this dispatch is pending.
     A.pending={id=item.id,kind=item.kind,beforeTotal=beforeTotal,beforeAura=beforeAura,
                sentAt=now,deadline=now+900,tickKey=key,bagEvidence=false,auraEvidence=false,error=nil}
     return true
