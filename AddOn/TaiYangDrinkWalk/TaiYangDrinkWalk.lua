@@ -14,7 +14,7 @@
 TaiYangDrinkWalkDiagDB = TaiYangDrinkWalkDiagDB or {}
 
 local DW = {}
-local VERSION = "0.6.3"
+local VERSION = "0.6.4"
 local PERIOD_MS = 2000
 local SETTINGS_REFRESH_SEC = 0.20
 local PHASE_TOLERANCE_MS = 450
@@ -1142,6 +1142,37 @@ local function RefreshCurrentItemSlot()
     return true, locked, a.count
 end
 
+
+-- Movement ownership is scoped to a short drink attempt. Never release another caller's pause.
+local MOVE_HOLD_MS = 350
+local function AutoMoveEnabled()
+    return TaiYangDrinkWalkDiagDB.autoStopMovement == true
+end
+local function ReleaseOwnedMovement(reason)
+    if not DW.moveOwned then return end
+    DW.moveOwned = false
+    DW.moveUntilMS = nil
+    if type(TaiYangShenDian) == "function" then
+        local ok, resumed, code = pcall(TaiYangShenDian, "Movement.Resume")
+        if not ok or not resumed then AddLog("自动恢复移动失败：" .. tostring(code or resumed)) end
+    end
+end
+local function BeginOwnedMovementPause(now)
+    if not AutoMoveEnabled() or type(TaiYangShenDian) ~= "function" then return false end
+    if DW.moveOwned then return true end
+    local ok, already = pcall(TaiYangShenDian, "Movement.IsPaused")
+    if not ok or type(already) ~= "boolean" or already then return false end
+    local called, paused, why = pcall(TaiYangShenDian, "Movement.Pause")
+    if not called or not paused then
+        TaiYangDrinkWalkDiagDB.autoStopMovement = false
+        AddLog("自动停止移动已关闭：" .. tostring(why or paused))
+        return false
+    end
+    DW.moveOwned = true
+    DW.moveUntilMS = now + MOVE_HOLD_MS
+    return true
+end
+
 local function NativeUseFromHardwareKey(nowMS, tickMS)
     if DW.bagDirty then FindConfiguredItem() end
     if not DW.item and not FindConfiguredItem() then
@@ -1225,7 +1256,12 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
     DW.recentDispatch = request
     DW.lastKeyResult = string.format("真实按键尝试 #%d Lead=%s", DW.spamAttemptsThisTick, FormatMS(lead))
 
+    local ownedNow = false
+    if resourceKind == "MANA" and manaNeed and (itemKind == "DRINK" or itemKind == "BOTH") then
+        ownedNow = BeginOwnedMovementPause(nowMS)
+    end
     local ok, dispatched, code, engineRet = pcall(TaiYangShenDian, "DrinkWalk.UseItem", a.bag, a.slot)
+    if (not ok or not dispatched) and ownedNow then ReleaseOwnedMovement("DISPATCH_FAILED") end
     if not ok then
         DW.lastKeyResult = "Native API_ERROR：" .. tostring(dispatched or "unknown")
         AddLog("SPAM " .. DW.lastKeyResult)
@@ -1389,6 +1425,7 @@ end
 local function SetManaSparkEnabled(enabled)
     TaiYangDrinkWalkDiagDB.showManaSpark = enabled and true or false
     if DW.manaCheck then DW.manaCheck:SetChecked(ShowManaSparkEnabled()) end
+    if DW.moveCheck then DW.moveCheck:SetChecked(AutoMoveEnabled()) end
 end
 
 local function SetManaTimerSpark(progress)
@@ -1766,13 +1803,30 @@ local function CreateCheck(parent, name, text, x, y, checked, fn)
     return cb
 end
 
+
+StaticPopupDialogs["TAIYANG_DW_MOVEMENT_WARNING"] = {
+    text = "风险警告：自动停止移动将通过 DLL 暂停和恢复角色移动，可能违反服务器规则，导致账号处罚或封禁。开发者不保证安全；自行启用所产生的账号风险由使用者承担。确定开启？",
+    button1 = "了解风险，开启",
+    button2 = "取消",
+    OnAccept = function()
+        TaiYangDrinkWalkDiagDB.autoStopMovement = true
+        if DW.moveCheck then DW.moveCheck:SetChecked(true) end
+        AddLog("已确认风险并启用自动停止移动")
+    end,
+    OnCancel = function()
+        TaiYangDrinkWalkDiagDB.autoStopMovement = false
+        if DW.moveCheck then DW.moveCheck:SetChecked(false) end
+    end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1
+}
+
 local function CreateUI()
     CreateTickTimerHUD()
     CreateManaSparkHUD()
 
     local f = CreateFrame("Frame", "TaiYangDrinkWalkDiagFrame", UIParent)
     f:SetWidth(445)
-    f:SetHeight(365)
+    f:SetHeight(398)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     f:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border", tile=true, tileSize=32, edgeSize=32, insets={left=8,right=8,top=8,bottom=8}})
     f:SetMovable(true)
@@ -1794,6 +1848,15 @@ local function CreateUI()
 
     DW.tickCheck = CreateCheck(f, "TaiYangDrinkWalkShowTickCheck", "显示 Tick 计时条（Mana/Energy）", 18, -73, ShowTickTimerEnabled(), SetTickTimerEnabled)
     DW.manaCheck = CreateCheck(f, "TaiYangDrinkWalkShowManaCheck", "显示 自适应资源条 / Spark", 18, -101, ShowManaSparkEnabled(), SetManaSparkEnabled)
+    DW.moveCheck = CreateCheck(f, "TaiYangDrinkWalkAutoStopCheck", "自动停止移动（饮蓝时；需确认风险）", 18, -335, AutoMoveEnabled(), function(enabled)
+        if not enabled then
+            TaiYangDrinkWalkDiagDB.autoStopMovement = false
+            ReleaseOwnedMovement("DISABLED")
+        else
+            if StaticPopup_Show then StaticPopup_Show("TAIYANG_DW_MOVEMENT_WARNING") end
+        end
+        RefreshSettingsUI()
+    end)
 
     local windowLabel = CreateLabel(f, 20, -133, 105, "GameFontNormalSmall")
     windowLabel:SetText("绿色区 (ms)：")
@@ -1912,6 +1975,7 @@ local function CreateUI()
         -- HUD animation runs at the client's render cadence. V0.4.2 throttled
         -- this to 30 Hz, which made the Spark visibly step across the bar.
         DW:RefreshHUD()
+        if DW.moveOwned and DW.moveUntilMS and NowMS() >= DW.moveUntilMS then ReleaseOwnedMovement("TIMEOUT") end
 
         DW.settingsAccum = (DW.settingsAccum or 0) + (arg1 or 0)
         if DW.settingsAccum >= SETTINGS_REFRESH_SEC then
@@ -2012,6 +2076,8 @@ end
 local function InitState()
     DW.logs = {}
     DW.rawManaLogs = {}
+    DW.moveOwned = false
+    DW.moveUntilMS = nil
     DW.rawManaEventCount = 0
     DW.manaGainCount = 0
     DW.lastManaGainMS = nil
@@ -2216,6 +2282,7 @@ local function HandleMiscEvent(e, unit)
     end
 
     if e == "PLAYER_DEAD" then
+        ReleaseOwnedMovement("DEAD")
         DW.playerDead = true
         ClearPhase("DEATH")
         ResetEnergyRuntime("DEATH")
@@ -2234,6 +2301,7 @@ local function HandleMiscEvent(e, unit)
     end
 
     if e == "ZONE_CHANGED_NEW_AREA" then
+        ReleaseOwnedMovement("ZONE_CHANGED")
         if DW.anchorMS and DW.state ~= "UNSYNCED" and not DW.reloadVerifyPending then
             DW.state = "VERIFY"
             DW.resumeReason = "ZONE_VERIFY"
@@ -2242,7 +2310,13 @@ local function HandleMiscEvent(e, unit)
         return
     end
 
+    if e == "PLAYER_LEAVING_WORLD" then
+        ReleaseOwnedMovement("LEAVING_WORLD")
+        return
+    end
+
     if e == "PLAYER_ENTERING_WORLD" then
+        ReleaseOwnedMovement("ENTER_WORLD")
         -- Preserve ONLY the first world-entry immediately following a verified
         -- /reload. Other world entries invalidate stale Mana phase anchors.
         local restorePending = DW.reloadVerifyPending and DW.state == "VERIFY"
@@ -2319,6 +2393,7 @@ eventFrame:RegisterEvent("BAG_UPDATE")
 eventFrame:RegisterEvent("UI_ERROR_MESSAGE")
 eventFrame:RegisterEvent("PLAYER_AURAS_CHANGED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:RegisterEvent("PLAYER_LEAVING_WORLD")
 eventFrame:RegisterEvent("PLAYER_DEAD")
 eventFrame:RegisterEvent("PLAYER_ALIVE")
 eventFrame:RegisterEvent("PLAYER_UNGHOST")
