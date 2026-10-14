@@ -111,6 +111,9 @@ end
 function A.ObserveBag()
     CheckConfirm()
 end
+function A.Update()
+    if A.pending then CheckConfirm() end
+end
 function DW.ActionKey()
     local ok,err=pcall(A.Activate)
     if not ok then
