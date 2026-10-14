@@ -1134,7 +1134,7 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
     -- current need. This allows a configured "water,food" list to switch from
     -- water to food when Mana is full but Health is missing, without scanning
     -- all bags on every spammed hardware press.
-    local healthNeed, manaNeed = PlayerConsumableNeeds()
+    local healthNeed, manaNeed, hp, hpMax, mana, manaMax, resourceKind = PlayerConsumableNeeds()
     if DW.item and ConsumableNeedScore(DW.item, healthNeed, manaNeed) < 50 then
         FindConfiguredItem()
     end
@@ -1154,8 +1154,6 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
     end
 
     local itemKind = DW.item.kind or "UNKNOWN"
-
-    local healthNeed, manaNeed, hp, hpMax, mana, manaMax, resourceKind = PlayerConsumableNeeds()
     if itemKind == "FOOD" and not healthNeed then
         DW.lastKeyResult = "生命已满，不使用食物"
         return false
@@ -1194,7 +1192,7 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
     local lead = tickMS - nowMS
     DW.spamAttemptsThisTick = (DW.spamAttemptsThisTick or 0) + 1
     DW.spamRequestCount = (DW.spamRequestCount or 0) + 1
-    DW.recentDispatch = {
+    local request = {
         requestedMS = nowMS,
         tickMS = tickMS,
         leadMS = lead,
@@ -1205,6 +1203,7 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
         generation = DW.resourceGeneration,
         dispatched = false
     }
+    DW.recentDispatch = request
     DW.lastKeyResult = string.format("真实按键尝试 #%d Lead=%s", DW.spamAttemptsThisTick, FormatMS(lead))
 
     local ok, dispatched, code, engineRet = pcall(TaiYangShenDian, "DrinkWalk.UseItem", a.bag, a.slot)
@@ -1217,7 +1216,7 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
         DW.lastKeyResult = "Native未分派：" .. tostring(code or "?")
         return false
     end
-    DW.recentDispatch.dispatched = true
+    request.dispatched = true
     DW.lastDispatchMS = nowMS
     DW.lastNativeCode = code
     DW.lastNativeReturn = engineRet
