@@ -1,4 +1,4 @@
--- Optional FuBar entry for TaiYang DrinkWalk v0.5.4.
+-- Optional FuBar entry for TaiYang DrinkWalk v0.6.0.
 -- Core addon does not require Ace2/FuBar; this file exits cleanly if !Libs is absent.
 
 if not AceLibrary or not AceLibrary.HasInstance then return end
