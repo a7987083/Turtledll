@@ -98,7 +98,11 @@ function H.Create()
     local elapsed=0
     f:SetScript("OnUpdate",function()
         elapsed=elapsed+arg1
-        if elapsed>=0.08 then elapsed=0;H.Update() end
+        if elapsed>=0.08 then
+            elapsed=0
+            if DW.Action and DW.Action.Update then DW.Action.Update() end
+            H.Update()
+        end
     end)
     H.frame=f
     H.Update()
