@@ -511,7 +511,6 @@ local function ClearPhase(reason)
     DW.badSamples = 0
     DW.resumeReason = reason or "RESET"
     DW.spamTickMS = nil
-    DW.spamConfirmedTickMS = nil
     DW.spamAttemptsThisTick = 0
     DW.uiFSRStartMS = nil
     DW.uiFSREndMS = nil
@@ -1373,7 +1372,6 @@ end
 
 local function ResetSpamTickLearning(nextTick)
     DW.spamTickMS = nextTick
-    DW.spamConfirmedTickMS = nil
     DW.spamAttemptsThisTick = 0
     DW.lastDispatchMS = nil
     DW.spamTickHadRequest = false
@@ -1394,25 +1392,6 @@ local function EnsureSpamTick(nextTick)
         FinalizeSpamTick()
         ResetSpamTickLearning(nextTick)
     end
-end
-
-local function MarkSpamConfirmed(reason, detail, tickMS)
-    tickMS = tickMS or DW.spamTickMS
-    if not tickMS then return end
-    DW.spamConfirmedTickMS = tickMS
-    DW.spamConfirmCount = (DW.spamConfirmCount or 0) + 1
-    -- UI-only feedback: briefly emphasize the fixed Tick-zero marker when
-    -- item consumption/Aura confirmation arrives. This does not change timing.
-    DW.tickMarkerFlashUntilMS = NowMS() + 420
-
-    local r = DW.recentDispatch
-    if r and r.tickMS and math.abs(r.tickMS - tickMS) < 500 then
-        DW.spamTickLearnableSuccess = true
-        DW.spamTickSuccessLeadMS = tonumber(r.leadMS)
-    end
-
-    DW.lastKeyResult = "CONFIRMED [" .. tostring(reason or "?") .. "] " .. tostring(detail or "")
-    AddLog("SPAM " .. DW.lastKeyResult)
 end
 
 local function RefreshCurrentItemSlot()
@@ -1460,10 +1439,6 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
     end
 
     local itemKind = DW.item.kind or "UNKNOWN"
-    if MatchingConsumableAuraActive(itemKind) then
-        MarkSpamConfirmed("CONSUME_AURA", "已经在" .. ((itemKind == "DRINK") and "喝水" or "进食/恢复"), tickMS)
-        return true
-    end
 
     local healthNeed, manaNeed, hp, hpMax, mana, manaMax, resourceKind = PlayerConsumableNeeds()
     if itemKind == "FOOD" and not healthNeed then
@@ -1603,10 +1578,6 @@ function DW:HandleActionKey()
     end
     EnsureSpamTick(nextTick)
 
-    if self.spamConfirmedTickMS and math.abs(self.spamConfirmedTickMS - nextTick) < 500 then
-        self.lastKeyResult = "本Tick已确认吃喝，继续按也不会重复"
-        return
-    end
 
     local tickIn = nextTick - now
     if tickIn > EffectiveSpamOpenMS() then
@@ -1626,28 +1597,6 @@ end
 
 function TaiYangDrinkWalk_ActionKey()
     if DW and DW.HandleActionKey then return DW:HandleActionKey() end
-end
-
-local function ConfirmFromBagUpdate()
-    local r = DW.recentDispatch
-    if not r or not DW.item then return end
-    local now = NowMS()
-    if now - (r.requestedMS or 0) > EXEC_CONFIRM_WINDOW_MS then return end
-    local afterTotal = CountItemIdentity(DW.item)
-    if afterTotal < (tonumber(r.beforeTotal) or afterTotal) then
-        MarkSpamConfirmed("ITEM_COUNT_DECREASE", tostring(r.beforeTotal) .. "->" .. tostring(afterTotal), r.tickMS)
-    end
-end
-
-local function ConfirmFromDrinkAura()
-    local r = DW.recentDispatch
-    if not r then return end
-    local now = NowMS()
-    if now - (r.requestedMS or 0) > EXEC_CONFIRM_WINDOW_MS then return end
-    local kind = r.itemKind or "UNKNOWN"
-    if MatchingConsumableAuraActive(kind) then
-        MarkSpamConfirmed("CONSUME_AURA", ConsumableKindZh(kind) .. " Aura出现", r.tickMS)
-    end
 end
 
 local function ResetDiagnostics()
@@ -2340,10 +2289,8 @@ local function InitState()
     DW.consumeState = "NONE"
     DW.drinkDetection = "未扫描"
     DW.spamTickMS = nil
-    DW.spamConfirmedTickMS = nil
     DW.spamAttemptsThisTick = 0
     DW.spamRequestCount = 0
-    DW.spamConfirmCount = 0
     DW.spamTickHadRequest = false
     DW.spamTickContextRejected = false
     DW.spamTickLearnableSuccess = false
@@ -2397,6 +2344,11 @@ local function OnEvent()
         RefreshResourceContext(true)
         SetWatchLead(WatchLeadMS())
         SetSpamWindow(SpamOpenMS(), SpamCloseMS(), SpamRetryMS())
+        -- The UI is created before SavedVariables loading. Restore field text
+        -- here, not every refresh (which would overwrite in-progress editing).
+        if DW.openEdit then DW.openEdit:SetText(tostring(SpamOpenMS())) end
+        if DW.closeEdit then DW.closeEdit:SetText(tostring(SpamCloseMS())) end
+        if DW.retryEdit then DW.retryEdit:SetText(tostring(SpamRetryMS())) end
         -- Legacy ratio settings must not silently override the new controls.
         TaiYangDrinkWalkDiagDB.drinkOpenPct = nil
         TaiYangDrinkWalkDiagDB.drinkClosePct = nil
@@ -2493,13 +2445,11 @@ local function OnEvent()
 
     if e == "PLAYER_AURAS_CHANGED" then
         ScanDrinkAura()
-        ConfirmFromDrinkAura()
         RefreshResourceContext(false)
         return
     end
 
     if e == "BAG_UPDATE" then
-        ConfirmFromBagUpdate()
         FindConfiguredItem()
         return
     end
