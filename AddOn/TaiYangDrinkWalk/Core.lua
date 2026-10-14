@@ -1,7 +1,7 @@
 -- WoW 1.12.1 / Lua 5.0. Bootstrap and public API.
 TaiYangDrinkWalk = TaiYangDrinkWalk or {}
 local DW = TaiYangDrinkWalk
-DW.version = "0.5.1-macro-native"
+DW.version = "0.5.2-drink-only"
 DW.modules = {}
 DW.ready = false
 DW.uiError = nil
@@ -72,6 +72,7 @@ events:RegisterEvent("VARIABLES_LOADED")
 events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("BAG_UPDATE")
 events:RegisterEvent("PLAYER_AURAS_CHANGED")
+events:RegisterEvent("UI_ERROR_MESSAGE")
 events:RegisterEvent("UNIT_MANA")
 events:RegisterEvent("UNIT_ENERGY")
 events:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -83,6 +84,8 @@ events:SetScript("OnEvent", function()
         DW.lastMana=nil;DW.lastEnergy=nil
         if DW.ManaTick then DW.ManaTick.Reset() end
         if DW.EnergyTick then DW.EnergyTick.Reset() end
+    elseif event == "UI_ERROR_MESSAGE" then
+        if DW.Action and DW.Action.ObserveError then DW.Action.ObserveError(arg1) end
     elseif event == "PLAYER_AURAS_CHANGED" then
         if DW.Action then DW.Action.ObserveAura() end
     elseif event == "BAG_UPDATE" then
@@ -120,3 +123,13 @@ function DW.TickReport()
     if DW.ManaTick then DW.Print(DW.ManaTick.Summary()) end
     if DW.EnergyTick then DW.Print(DW.EnergyTick.Summary()) end
 end
+
+-- Independent confirmation clock: HUD can be hidden without losing timeout handling.
+local actionClock=0
+events:SetScript("OnUpdate",function()
+    actionClock=actionClock+(arg1 or 0)
+    if actionClock>=0.08 then
+        actionClock=0
+        if DW.Action and DW.Action.Update then DW.Action.Update() end
+    end
+end)
