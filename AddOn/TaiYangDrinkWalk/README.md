@@ -1,32 +1,33 @@
-# TaiYangDrinkWalk 0.5.1 — /zchihe 宏入口与 DLL 原生执行
+# TaiYangDrinkWalk 0.5.2 — 饮料专用与执行确认修正
 
-WoW 1.12.1 / Lua 5.0。单入口：游戏宏内容为 `/zchihe`。不注册游戏快捷键，不提供绑定或解绑操作，已删除 WATCH/SPAM 模式切换和执行限制。
+对照原版《走喝的(2)》V0.5.4 的 ConsumableNeedScore、NativeUseFromHardwareKey、ConfirmFromBagUpdate、ConfirmFromDrinkAura、UI_ERROR_MESSAGE 路径开发；基于用户已实测可用的 0.5.1。
 
-## 执行链
-
-1. 玩家主动连续点击动作条宏 `/zchihe`；插件不会自行定时使用物品。
-2. 必须加载支持 `DrinkWalk.Status`、`DrinkWalk.ResolveItem`、`DrinkWalk.UseItem` 的 TaiYangShenDian DLL。
-3. Mana/Energy Tick 状态必须为 LOCKED，宏点击发生于预测 Tick 前 320–170ms。
-4. 从配置的物品 ID/名称查找食物或饮料，通过 Tooltip 分类；重新核对物品 ID、数量和锁定状态。
-5. DLL 先 ResolveItem，再 UseItem；原生派发成功**不是服务器确认成功**。
-6. 75ms 最小 DLL 尝试间隔；每个预计 Tick 最多两次；派发后先等待最多 90ms 的初步确认，期间不再次派发。
-7. 依据 BAG_UPDATE 所见物品总数减少、PLAYER_AURAS_CHANGED 所见新食物/饮料 Aura 两种证据分别判断。本阶段任何一种证据出现即可标记确认，另一种不强制要求出现。
-8. 未在初步窗口看到证据时才可能第二次尝试；最多两次不保证一定喝成功。
+## 核心限制
+- 仅在玩家当前使用 Mana 且不满蓝时选择饮料，不使用食物回血。
+- 允许 Tooltip 识别为 DRINK 的饮料和含回蓝作用的 BOTH 物品；排除 FOOD 和 UNKNOWN。
+- 保留 /zchihe 玩家手动宏触发、DLL Status / ResolveItem / UseItem 原生接口，不走 Lua UseContainerItem。
+- 使用前再次核对物品 ID、数量及锁定状态。
+- 保留 75ms 最小派发间隔及每预测 Tick 最多 2 次的硬上限；**等待确认记录仍存在时不允许再次调用**，因此短窗口内实际可能仅派发 1 次。这是为了避免客户端未确认造成重复消耗。
+- 派发成功仅代表 DLL 已调用。使用后在独立的 900ms 窗口内通过物品总数减少或饮用 Aura 出现进行初步确认。
+- 监听 UI_ERROR_MESSAGE，记录 400ms 内对应的游戏端拒绝提示，避免误当成 Tick 失准。
+- 使用结果确认时钟从 HUD OnUpdate 移到 Core 的独立事件帧：隐藏 HUD 也能完成超时判定。
 
 ## 操作
-
-`/tsdw` 设置、`/tsdw set 8079, 魔法晶水` 配置物品、`/tsdw scan` 扫描、`/tsdw tick` 观测、`/tsdw window` 时间窗口、`/tsdw native` DLL 状态、`/tsdw action` 查看派发与确认状态。
-
-创建游戏宏：
-
+游戏宏：
 ```
 /zchihe
 ```
+设置界面：`/tsdw`。
 
-## 已知风险与验证范围
+## 尚未实现
+- 原版完整 Mana 鲁棒分类、VERIFY/MAD、跨区相位恢复、自适应 Lead。
+- 原版双状态条、Spark、5SR、回蓝渐隐提示。
+- 服务器端确认 API 不存在。背包消耗或 Aura 仍只是客户端观察证据。
+- 暂保留开发诊断子命令，后续集中进 /tsdw 设置窗口。
 
-- 90ms 是客户端观察超时，不代表服务器处理完毕。极端网络延迟可能使第二次派发发生在第一次的结果返回前；本版采用每 Tick 两次上限降低风险，而非消除此风险。
-- Aura 依赖原版的 GameTooltip:SetPlayerBuff 启发式文本识别；特殊食物/饮料或语言包可能导致 Aura 无法识别。
-- 仅比较本次派发前后的物品总量和新 Aura；其他来源的物品变化或相似增益仍可能误判。BAG/Aura 具体证据会在诊断中记录。
-- 当前不实现自适应 Lead / Blade Rush 的完整参考模型。测试前请确认 Tick 锁定、物品配置和 DLL 状态。
-- 本项目 GitHub Actions 只负责打包，不等同于 Lua 5.0 游戏内运行验收。
+## 验收
+1. 旧 0.5.1 先留作回退备份。
+2. 缺蓝 + 有饮料：/tsdw 扫描能显示 DRINK，/zchihe 在 Tick 窗口内使用 DLL。
+3. 满蓝、无 Mana 资源、仅配置食物：均应拒绝使用。
+4. 确认状态应能区分 BAG、AURA 和 GAME_REJECTED；隐藏 HUD 时超时仍能更新。
+5. 不把 CI 打包通过当作乌龟服游戏内验收。
