@@ -834,7 +834,9 @@ local function TooltipTextForBagItem(bag, slot)
     return text
 end
 
-local function ConsumableKindFromBagSlot(bag, slot)
+local function ConsumableKindFromBagSlot(bag, slot, itemId)
+    -- ID 159: 清凉的泉水; item identity is authoritative over localized tooltip text.
+    if tonumber(itemId) == 159 then return "DRINK" end
     local text = TooltipTextForBagItem(bag, slot)
     if text == "" then return "UNKNOWN" end
 
@@ -856,7 +858,7 @@ local function ConsumableKindZh(kind)
     if kind == "FOOD" then return "食物" end
     if kind == "DRINK" then return "饮料" end
     if kind == "BOTH" then return "食物+饮料" end
-    return "未识别"
+    return "" -- Unknown type is internal; do not show an alarming UI label.
 end
 
 local function PlayerConsumableNeeds()
@@ -890,6 +892,7 @@ local function ConsumableNeedScore(item, healthNeed, manaNeed)
 end
 
 local function FindConfiguredItem()
+    DW.bagDirty = false
     DW.item = nil
     local ids, names = ParseItemSpec()
     if table.getn(ids) == 0 and table.getn(names) == 0 then
@@ -912,7 +915,7 @@ local function FindConfiguredItem()
                     total = total + count
                     if not first then
                         first = {bag=bag, slot=slot, id=id, name=name or ("item:" .. tostring(id)), count=count, locked=locked, match="ID"}
-                        first.kind = ConsumableKindFromBagSlot(bag, slot)
+                        first.kind = ConsumableKindFromBagSlot(bag, slot, id)
                     end
                 end
             end
@@ -972,7 +975,7 @@ local function FindConfiguredItem()
 
     if DW.item then
         local a = DW.item
-        DW.itemStatus = string.format("%s [%s] (ID:%s) bag%d/%d x%d", tostring(a.name or "?"), ConsumableKindZh(a.kind), tostring(a.id or "?"), a.bag or -1, a.slot or -1, a.totalCount or a.count or 0)
+        DW.itemStatus = string.format("%s%s (ID:%s) bag%d/%d x%d", tostring(a.name or "?"), (a.kind == "UNKNOWN") and "" or (" [" .. ConsumableKindZh(a.kind) .. "]"), tostring(a.id or "?"), a.bag or -1, a.slot or -1, a.totalCount or a.count or 0)
         return true
     end
     DW.itemStatus = "背包中未找到精确匹配"
@@ -1105,11 +1108,15 @@ local function RefreshCurrentItemSlot()
     local a = DW.item
     if not a then return false, false, 0 end
     local texture, count, locked = GetContainerItemInfo(a.bag, a.slot)
-    if not texture then
+    local link = GetContainerItemLink(a.bag, a.slot)
+    local actualId = ItemIdFromLink(link)
+    if not texture or not link or actualId ~= a.id then
         FindConfiguredItem()
         a = DW.item
         if not a then return false, false, 0 end
         texture, count, locked = GetContainerItemInfo(a.bag, a.slot)
+        link = GetContainerItemLink(a.bag, a.slot)
+        if not texture or not link or ItemIdFromLink(link) ~= a.id then return false, false, 0 end
     end
     a.count = tonumber(count) or a.count or 1
     a.locked = locked
@@ -1117,6 +1124,7 @@ local function RefreshCurrentItemSlot()
 end
 
 local function NativeUseFromHardwareKey(nowMS, tickMS)
+    if DW.bagDirty then FindConfiguredItem() end
     if not DW.item and not FindConfiguredItem() then
         DW.lastKeyResult = "找不到配置物品"
         return false
@@ -1348,7 +1356,7 @@ end
 
 local function CurrentItemText()
     if DW.item then
-        return string.format("当前：%s  [%s]  (ID:%s)  x%d", tostring(DW.item.name or "?"), ConsumableKindZh(DW.item.kind), tostring(DW.item.id or "?"), tonumber(DW.item.totalCount or DW.item.count or 0) or 0)
+        return string.format("当前：%s%s  (ID:%s)  x%d", tostring(DW.item.name or "?"), (DW.item.kind == "UNKNOWN") and "" or ("  [" .. ConsumableKindZh(DW.item.kind) .. "]"), tostring(DW.item.id or "?"), tonumber(DW.item.totalCount or DW.item.count or 0) or 0)
     end
     local spec = Trim(TaiYangDrinkWalkDiagDB.itemSpec or "")
     if spec == "" then return "当前：未设置" end
@@ -1877,6 +1885,7 @@ local function CreateUI()
         if DW.settingsAccum >= SETTINGS_REFRESH_SEC then
             DW.settingsAccum = 0
             RefreshResourceContext(false)
+            if DW.bagDirty then FindConfiguredItem() end
             RefreshSettingsUI()
         end
     end)
@@ -2014,6 +2023,7 @@ local function InitState()
     DW.resourceEventValue = nil
     DW.resourceGeneration = 0
     DW.playerDead = false
+    DW.bagDirty = false
     DW.resourceFlashKind = nil
     DW.resourceFlashDelta = nil
     DW.resourceFlashMS = nil
@@ -2034,8 +2044,9 @@ end
 -- Lua 5.0: keep OnEvent within its 32-upvalue limit.
 DW.AddLog = AddLog
 
-local function OnEvent()
-    local e, unit = event, arg1
+-- Split 1.12 event handling into bounded-upvalue groups.
+-- Legacy event and arg1 are captured synchronously; no delayed callback uses them.
+local function HandleLoadedEvent(e, unit)
     if e == "VARIABLES_LOADED" then
         -- SavedVariables are authoritative only after their load stage.
         if type(TaiYangDrinkWalkDiagDB) ~= "table" then
@@ -2067,6 +2078,9 @@ local function OnEvent()
         return
     end
 
+end
+
+local function HandlePowerEvent(e, unit)
     if e == "UNIT_MANA" then
         if DW.playerDead then return end
         if unit and unit ~= "player" then return end
@@ -2144,13 +2158,17 @@ local function OnEvent()
         return
     end
 
+end
+
+local function HandleMiscEvent(e, unit)
     if e == "PLAYER_AURAS_CHANGED" then
         RefreshResourceContext(false)
         return
     end
 
     if e == "BAG_UPDATE" then
-        FindConfiguredItem()
+        -- Coalesce burst events; action path flushes before using a cached slot.
+        DW.bagDirty = true
         return
     end
 
@@ -2204,9 +2222,18 @@ local function OnEvent()
         end
         FindConfiguredItem()
         return
-    end
-end
+    endend
 
+local function OnEvent()
+    local e, unit = event, arg1
+    if e == "VARIABLES_LOADED" then return HandleLoadedEvent(e, unit) end
+    if e == "UNIT_MANA" or e == "UNIT_MAXMANA" or e == "UNIT_ENERGY"
+        or e == "UNIT_RAGE" or e == "UNIT_DISPLAYPOWER" or e == "UNIT_STATS"
+        or e == "CHARACTER_POINTS_CHANGED" then
+        return HandlePowerEvent(e, unit)
+    end
+    return HandleMiscEvent(e, unit)
+end
 
 local function SlashHandler(msg)
     msg = Trim(msg or "")
