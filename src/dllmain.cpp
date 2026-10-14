@@ -623,7 +623,7 @@ static bool movementCall(Lua50::State L,const char* name){
     Lua50::SetTop(L,top);
     return ok;
 }
-typedef SHORT (WINAPI *MovementKeyStateFn)(int);
+typedef short (WINAPI *MovementKeyStateFn)(int);
 static MovementKeyStateFn movementKeyState(){
     HMODULE user32=GetModuleHandleA("user32.dll");
     return user32?(MovementKeyStateFn)GetProcAddress(user32,"GetAsyncKeyState"):0;
