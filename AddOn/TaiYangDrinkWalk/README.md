@@ -1,19 +1,22 @@
-# TaiYangDrinkWalk 0.2.0 — 物品管理阶段
+# TaiYangDrinkWalk 0.2.1 — 自动物品识别
 
-适配：WoW 1.12.1（Lua 5.0）。保留 0.1.0 已验收框架，不调用 DrinkWalk.UseItem。
+运行环境：WoW 1.12.1 / Lua 5.0。此版本只读扫描，不使用物品。
 
-新增：背包 0–4 只读扫描；手工配置食物 food / 饮料 drink / 双恢复 both 规则（物品 ID 或完整名称）；匹配格子、数量和 ID 的聊天报告；规则存档与删除。
+**按参考走喝 V0.5.4 恢复的机制：**
+1. 单输入框，使用英文/中文逗号或分号分隔物品 ID、完整名称。
+2. 背包 0–4 精确匹配 ID 或名称；汇总同类物品数量。
+3. 通过 GameTooltip:SetBagItem 和前 12 行文字识别 FOOD / DRINK / BOTH / UNKNOWN。
+4. 根据玩家是否缺血、当前资源是否为法力且缺蓝，使用参考插件相同的评分 120/100/90/50/10/5/1 选择最佳物品。评分相同保持候选顺序。
+5. 界面显示选中的物品、类型、ID、包格和数量。
 
-## 游戏命令
-- `/tsdw` 打开/关闭设置窗口
-- `/tsdw status` DLL 与模块状态
-- `/tsdw add drink 8079` 添加饮料物品 ID 示例
-- `/tsdw add food 物品完整名称` 添加食物名称规则
-- `/tsdw add both 物品ID` 添加双恢复规则
-- `/tsdw list` 显示规则及序号
-- `/tsdw remove 1` 删除第一条规则
-- `/tsdw scan` 扫描所有背包并输出匹配结果
+游戏指令：
+- /tsdw —— 设置界面
+- /tsdw set 8079, 魔法晶水 —— 保存候选物品
+- /tsdw list —— 显示配置
+- /tsdw scan —— 扫描背包并报告最佳匹配
+- /tsdw status —— DLL/模块状态
+- /tsdwdiag —— 独立诊断
 
-**物品规则严格按 ID 或完整显示名称匹配**，不使用 Tooltip 猜测类型；未知物品不自动加入。扫描是只读操作；ManaTick/EnergyTick/Action/HUD/FuBar 仍为占位模块。
+本阶段暂不接入 Tick、动作、使用确认和 HUD；即使选择到了目标物品也不会调用 DrinkWalk.UseItem。
 
-测试建议：先确认 /tsdw 与模式切换仍正常，添加背包内真实物品的 ID，执行 /tsdw scan；换包和减少物品后再次扫描，确认位置和数量更新。本版未经实机验证。
+注意：Tooltip 文本是启发式分类。UNKNOWN 表示无法从物品描述中可靠判断，不代表该物品一定不是食物或饮料。未经过乌龟服实机验证。
