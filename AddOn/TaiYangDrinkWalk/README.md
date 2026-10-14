@@ -1,30 +1,32 @@
-# TaiYangDrinkWalk 0.5.0 — DLL 原生走喝按键执行
+# TaiYangDrinkWalk 0.5.1 — /zchihe 宏入口与 DLL 原生执行
 
-WoW 1.12.1 / Lua 5.0。继承 0.4.0 的物品 Tooltip 分类、Mana/Energy Tick 与 HUD。
+WoW 1.12.1 / Lua 5.0。单入口：游戏宏内容为 `/zchihe`。不注册游戏快捷键，不提供绑定或解绑操作，已删除 WATCH/SPAM 模式切换和执行限制。
 
-**DLL 必须提供 API33 的 DrinkWalk.Status / DrinkWalk.ResolveItem / DrinkWalk.UseItem**。无 DLL 不会执行物品操作。不会调用 Lua UseContainerItem，也没有后台自动使用调度。
+## 执行链
 
-## 执行顺序
-1. 玩家按游戏绑定中的 TaiYangDrinkWalk 动作按键（Bindings.xml）。
-2. 仅 SPAM 模式继续；WATCH 只观察。
-3. 防重入、75ms 间隔、同一预测 Tick 最多执行一次；有未确认调用时暂不再次派发。
-4. DLL `DrinkWalk.Status` 检查 `available==true`。
-5. Mana/Energy Tick 必须 LOCKED，且处于距下次 Tick 320–170ms 的窗口。
-6. 按配置扫描物品并通过 Tooltip 判断类型；UNKNOWN 不使用。
-7. 使用前再次读取背包格子物品 ID、数量和锁定状态；`DrinkWalk.ResolveItem` 后再校验一次。
-8. `DrinkWalk.UseItem` 派发原生物品操作。成功返回仅代表**原生派发**，不是服务器接受。
-9. BAG_UPDATE 及周期轮询检查原格子数量减少；900ms 未观察到消耗标记 UNCONFIRMED。
+1. 玩家主动连续点击动作条宏 `/zchihe`；插件不会自行定时使用物品。
+2. 必须加载支持 `DrinkWalk.Status`、`DrinkWalk.ResolveItem`、`DrinkWalk.UseItem` 的 TaiYangShenDian DLL。
+3. Mana/Energy Tick 状态必须为 LOCKED，宏点击发生于预测 Tick 前 320–170ms。
+4. 从配置的物品 ID/名称查找食物或饮料，通过 Tooltip 分类；重新核对物品 ID、数量和锁定状态。
+5. DLL 先 ResolveItem，再 UseItem；原生派发成功**不是服务器确认成功**。
+6. 75ms 最小 DLL 尝试间隔；每个预计 Tick 最多两次；派发后先等待最多 90ms 的初步确认，期间不再次派发。
+7. 依据 BAG_UPDATE 所见物品总数减少、PLAYER_AURAS_CHANGED 所见新食物/饮料 Aura 两种证据分别判断。本阶段任何一种证据出现即可标记确认，另一种不强制要求出现。
+8. 未在初步窗口看到证据时才可能第二次尝试；最多两次不保证一定喝成功。
 
-## 命令
-- `/tsdw` 设置窗口：配置物品、切换 WATCH/SPAM、HUD 控制
-- `/tsdw native` 查看 DLL 原生接口是否可用
-- `/tsdw action` 查看上次执行状态、错误码和派发/确认次数
-- `/tsdw tick`、`/tsdw window`、`/tsdw scan` 保留原功能
+## 操作
 
-## 测试重点
-- 首先 WATCH 模式下按动作键，确认不会使用物品。
-- SPAM 模式检查 DLL 状态、Tick LOCKED、背包物品配置，再进入预览窗口按键。
-- 成功派发要与实际扣除物品分开判断；`/tsdw action` 应显示 DISPATCHED_UNCONFIRMED、CONFIRMED 或 UNCONFIRMED。
-- 没有使用物品时，确认逻辑可能因背包物品移动产生误判；本阶段只实现基本数量确认，Aura 佐证及更严格交易判定留到下一阶段。
+`/tsdw` 设置、`/tsdw set 8079, 魔法晶水` 配置物品、`/tsdw scan` 扫描、`/tsdw tick` 观测、`/tsdw window` 时间窗口、`/tsdw native` DLL 状态、`/tsdw action` 查看派发与确认状态。
 
-**重要：** 这是未经过乌龟服实机验证的原生执行测试版；请先用可消耗的普通食物/饮料测试，保留原来能使用的插件 ZIP 以便回退。
+创建游戏宏：
+
+```
+/zchihe
+```
+
+## 已知风险与验证范围
+
+- 90ms 是客户端观察超时，不代表服务器处理完毕。极端网络延迟可能使第二次派发发生在第一次的结果返回前；本版采用每 Tick 两次上限降低风险，而非消除此风险。
+- Aura 依赖原版的 GameTooltip:SetPlayerBuff 启发式文本识别；特殊食物/饮料或语言包可能导致 Aura 无法识别。
+- 仅比较本次派发前后的物品总量和新 Aura；其他来源的物品变化或相似增益仍可能误判。BAG/Aura 具体证据会在诊断中记录。
+- 当前不实现自适应 Lead / Blade Rush 的完整参考模型。测试前请确认 Tick 锁定、物品配置和 DLL 状态。
+- 本项目 GitHub Actions 只负责打包，不等同于 Lua 5.0 游戏内运行验收。
