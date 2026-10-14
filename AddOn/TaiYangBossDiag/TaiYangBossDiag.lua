@@ -82,7 +82,8 @@ local function refresh(unit)
     showLine(1,"接口 Unit.Identity | "..tostring(id.code).." | 第 "..queryCount.." 次查询")
     if not id.ok then
         showLine(2,"当前单位不可用："..tostring(id.code))
-        showLine(9,"累计查询："..queryCount.."  异常："..queryErrors)\n        updateEvents()
+        showLine(9,"累计查询："..queryCount.."  异常："..queryErrors)
+        updateEvents()
         return
     end
     showLine(2,"单位："..tostring(d.name or "未知").."   Entry："..tostring(d.entry or "?"))
@@ -103,7 +104,8 @@ local function refresh(unit)
         local flag=(boss.data and boss.data.bossCandidate) and "首领候选" or "普通目标 / 未识别"
         showLine(8,"Boss.State："..tostring(stateNames[boss.state] or boss.state).." | "..flag)
     end
-    showLine(9,"查询："..queryCount.."  异常："..queryErrors.."  采样："..tostring(g.timestampMS or "?"))\n    updateEvents()
+    showLine(9,"查询："..queryCount.."  异常："..queryErrors.."  采样："..tostring(g.timestampMS or "?"))
+    updateEvents()
 end
 local function makeButton(label,x,callback)
     local b=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
