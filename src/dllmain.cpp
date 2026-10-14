@@ -945,7 +945,7 @@ static bool m2CombatByToken(Lua50::State L,const char* token,bool* combat){
     if(ok){
         int typ=Lua50::Type(L,-1);
         // WoW 1.12 may return nil for false; a successful nil result is false.
-        if(typ==WoW112::LUA_TBOOLEAN || typ==WoW112::LUA_TNIL)*combat=Lua50::ToBoolean(L,-1)!=0;
+        if(typ==1 || typ==0)*combat=Lua50::ToBoolean(L,-1)!=0;
         else ok=false;
     }
     Lua50::SetTop(L,top);
