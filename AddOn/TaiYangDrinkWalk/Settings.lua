@@ -22,18 +22,19 @@ function DW.RefreshSettings()
     if DW.itemText then DW.itemText:SetText(DW.Items.status or "尚未扫描") end
     if DW.manaText and DW.ManaTick then DW.manaText:SetText(DW.ManaTick.Summary()) end
     if DW.energyText and DW.EnergyTick then DW.energyText:SetText(DW.EnergyTick.Summary()) end
+    if DW.actionText and DW.Action then DW.actionText:SetText(DW.Action.Summary()) end
 end
 function DW.BuildSettings()
     if DW.settingsFrame or not UIParent then return end
     local f=CreateFrame("Frame","TaiYangDrinkWalkSettings",UIParent)
-    f:SetWidth(470);f:SetHeight(350)
+    f:SetWidth(470);f:SetHeight(376)
     f:SetPoint("CENTER",UIParent,"CENTER",0,0)
     f:SetFrameStrata("DIALOG")
     f:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=8,right=8,top=8,bottom=8}})
     f:SetMovable(true);f:EnableMouse(true);f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart",function() f:StartMoving() end)
     f:SetScript("OnDragStop",function() f:StopMovingOrSizing() end)
-    Label(f,"TaiYangDrinkWalk - HUD 预览 0.4.0",20,-20)
+    Label(f,"TaiYangDrinkWalk - Native Action 0.5.0",20,-20)
     local close=CreateFrame("Button",nil,f,"UIPanelCloseButton")
     close:SetPoint("TOPRIGHT",f,"TOPRIGHT",-4,-4)
     DW.statusText=Label(f,"DLL",20,-58)
@@ -80,6 +81,8 @@ function DW.BuildSettings()
     DW.itemText:SetWidth(430);DW.itemText:SetJustifyH("LEFT")
     DW.manaText=Label(f,"Mana: UNSYNCED",20,-288)
     DW.energyText=Label(f,"Energy: UNSYNCED",20,-310)
+    DW.actionText=Label(f,"Native: IDLE",20,-335)
+    DW.actionText:SetWidth(430)
     f:Hide();DW.settingsFrame=f;DW.RefreshSettings()
 end
 DW.RegisterModule("Settings")
