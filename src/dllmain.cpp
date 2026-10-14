@@ -748,7 +748,23 @@ static bool callFrameMethodString(Lua50::State L,int frameIndex,const char* meth
 
 static bool installRuntimeLifecycleFrame(Lua50::State L){
     if(!L)return false;
-    if(g_runtimeLifecycleState==L&&eq(g_runtimeLifecycleStatus,"INSTALLED"))return true;
+    if(g_runtimeLifecycleState==L&&eq(g_runtimeLifecycleStatus,"INSTALLED")){
+        // A cached Lua State does not prove that the named frame survived UI reload.
+        // Validate the registered frame and its OnEvent callback before reusing it.
+        const int saved=Lua50::GetTop(L);
+        Lua50::GetGlobal(L,"TaiYangShenDianRuntimeLifecycleFrame");
+        bool frameReady=Lua50::Type(L,-1)==5; // Lua 5.0 LUA_TTABLE
+        if(frameReady){
+            Lua50::PushString(L,"GetScript");Lua50::GetTable(L,-2);
+            if(Lua50::Type(L,-1)==WoW112::LUA_TFUNCTION){
+                Lua50::PushValue(L,-2);Lua50::PushString(L,"OnEvent");
+                frameReady=Lua50::PCall(L,2,1,0)==0 && Lua50::Type(L,-1)==WoW112::LUA_TFUNCTION;
+            }else frameReady=false;
+        }
+        Lua50::SetTop(L,saved);
+        if(frameReady)return true;
+        cpy(g_runtimeLifecycleStatus,sizeof(g_runtimeLifecycleStatus),"FRAME_STALE_REINSTALL");
+    }
     const int top=Lua50::GetTop(L);
     Lua50::GetGlobal(L,"CreateFrame");
     if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);cpy(g_runtimeLifecycleStatus,sizeof(g_runtimeLifecycleStatus),"CREATEFRAME_MISSING");return false;}
@@ -1087,9 +1103,6 @@ static bool globalFunctionPresent(Lua50::State L){
     if(!L)return false; int top=Lua50::GetTop(L); Lua50::PushString(L,"TaiYangShenDian"); Lua50::GetTable(L,WoW112::LUA_GLOBALSINDEX); bool ok=Lua50::Type(L,-1)==WoW112::LUA_TFUNCTION; Lua50::SetTop(L,top); return ok;
 }
 static void registerAfterLifecycle(const char* why){
-    // Player script reload is an independent recovery boundary even when the
-    // event frame was lost or Lua reuses its previous state.
-    MovementNative::onWorldLeaving();
     Lua50::State L=Lua50::GetState();
     if(!L){ cpy(g_lastRegisterCode,sizeof(g_lastRegisterCode),"LUA_STATE_MISSING"); InterlockedExchange(&g_luaRegistered,0); logText("Lua post-register: state missing\r\n"); return; }
     if(L==g_lastRegisteredState && globalFunctionPresent(L)){
