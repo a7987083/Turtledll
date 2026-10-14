@@ -272,8 +272,8 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function(msg)
     local cmd=trim(msg)
     if cmd=="off" then getDB().enabled=false;say("自动提醒已关闭。");return end
     if cmd=="status" then say("追踪 "..countTracks().."/"..MAX_TRACKS.." 个 Boss，查询间隔 "..getDB().pollInterval.." 秒。");return end
-    local newInterval=string.match(cmd,"^interval%s+(%S+)$")
-    if newInterval then
+    local newInterval=string.gsub(cmd,"^interval%s+(%S+)$","%1")
+    if newInterval~=cmd then
         local n=tonumber(newInterval)
         if n==0.2 or n==0.5 or n==1 or n==2 then
             getDB().pollInterval=n;timer=0;say("查询间隔已设为 "..n.." 秒。")
