@@ -897,7 +897,8 @@ local function ItemNameFromLink(link)
     if type(GetItemInfo) == "function" then
         local name = GetItemInfo(link)
         if name then return name end
-    end    local _, _, name = string.find(link, "%[(.-)%]")
+    end
+    local _, _, name = string.find(link, "%[(.-)%]")
     return name
 end
 
@@ -1796,7 +1797,8 @@ local function RenderTickTimerUI(nowMS, nextTickMS, tickInMS, tickPeriodMS, tick
         return
     end
 
-    local remain = Clamp(tickInMS, 0, tickPeriodMS)    local r, g, b = ResourceColor(tickKind or DW.resourceType or "MANA")
+    local remain = Clamp(tickInMS, 0, tickPeriodMS)
+    local r, g, b = ResourceColor(tickKind or DW.resourceType or "MANA")
     DW.tickTimerBar:SetStatusBarColor(r, g, b)
     DW.tickTimerBar:SetValue(remain / math.max(1, tickPeriodMS))
     DW.tickTimerText:SetText(string.format("%.2fs", remain / 1000))
