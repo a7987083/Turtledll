@@ -1,8 +1,8 @@
 ## Interface: 11200
 ## Title: TaiYangDrinkWalk
-## Notes: Lua 5.0 read-only Tick HUD and window preview; no item use
+## Notes: Lua 5.0 explicit DLL-backed item action on player keypress; no item use
 ## Author: TaiYangShenDian
-## Version: 0.4.0-hud
+## Version: 0.5.0-native-action
 ## SavedVariables: TaiYangDrinkWalkDB
 ## OptionalDeps: FuBar
 
