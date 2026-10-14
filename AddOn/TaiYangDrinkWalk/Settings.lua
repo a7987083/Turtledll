@@ -12,8 +12,12 @@ function DW.RefreshSettings()
         if type(TaiYangDrinkWalkDB)=="table" then mode=TaiYangDrinkWalkDB.mode or "WATCH" end
         DW.modeText:SetText("模式: "..mode.." （仅保存设置）")
     end
-    if DW.specEdit and not DW.specEdit:HasFocus() then
-        DW.specEdit:SetText(DW.Items.GetSpec())
+    if DW.specEdit then
+        local focused = false
+        if type(GetCurrentKeyBoardFocus) == "function" then
+            focused = (GetCurrentKeyBoardFocus() == DW.specEdit)
+        end
+        if not focused then DW.specEdit:SetText(DW.Items.GetSpec()) end
     end
     if DW.itemText then DW.itemText:SetText(DW.Items.status or "尚未扫描") end
 end
