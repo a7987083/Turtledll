@@ -59,6 +59,7 @@ local DEFAULT_SPAM_RETRY_MS = 75
 local DEFAULT_DRINK_OPEN_PCT = 84.0
 local DEFAULT_DRINK_CLOSE_PCT = 91.5
 local DEFAULT_AUTO_LEAD_MS = 320
+local TICK_CALIBRATION_SAMPLES = 15
 local AUTO_LEAD_MIN_MS = 200
 local AUTO_LEAD_MAX_MS = 380
 local AUTO_LEAD_STEP_DOWN_MS = 10
@@ -579,6 +580,7 @@ local function AcceptSample(sampleMS, deltaMana, phaseError)
     DW.lastSampleMS = sampleMS
     DW.lastAcceptedMS = sampleMS
     DW.lastSampleDelta = deltaMana
+    RecordTickCalibration(phaseError)
     SetClassifier("PERIODIC_ACCEPT", "phase=" .. FormatMS(phaseError or 0), true)
 end
 
@@ -731,8 +733,41 @@ local function DrinkClosePct()
 end
 
 local function AutoLeadEnabled()
-    if TaiYangDrinkWalkDiagDB.autoLeadEnabled == nil then return true end
-    return TaiYangDrinkWalkDiagDB.autoLeadEnabled and true or false
+    -- Legacy auto-lead is no longer used to move the dispatch window.
+    return false
+end
+
+local function TickCalibrationEnabled()
+    return TaiYangDrinkWalkDiagDB.tickCalibrationEnabled == true
+end
+
+local function SetTickCalibrationEnabled(enabled)
+    TaiYangDrinkWalkDiagDB.tickCalibrationEnabled = enabled and true or false
+    DW.tickCalibrationErrors = {}
+    DW.tickCalibrationCount = 0
+    DW.tickCalibrationState = enabled and "采样中" or "关闭"
+    AddLog("Mana Tick 自动校准：" .. DW.tickCalibrationState)
+end
+
+local function RecordTickCalibration(phaseError)
+    if not TickCalibrationEnabled() or DW.state ~= "LOCKED" then return end
+    if (DW.confidence or 0) < 0.80 or (DW.jitterMS or 9999) > 140 then return end
+    DW.tickCalibrationErrors = DW.tickCalibrationErrors or {}
+    table.insert(DW.tickCalibrationErrors, phaseError or 0)
+    DW.tickCalibrationCount = table.getn(DW.tickCalibrationErrors)
+    DW.tickCalibrationState = "采样中"
+    if DW.tickCalibrationCount >= TICK_CALIBRATION_SAMPLES then
+        -- The existing classifier performs small phase corrections on each
+        -- accepted sample. A bounded median trim after 15 stable samples
+        -- corrects residual systematic bias without learning from item use.
+        local correction = Clamp(Median(DW.tickCalibrationErrors), -25, 25)
+        if DW.anchorMS then DW.anchorMS = DW.anchorMS + correction end
+        DW.tickCalibrationErrors = {}
+        DW.tickCalibrationCount = 0
+        DW.tickCalibrationRounds = (DW.tickCalibrationRounds or 0) + 1
+        DW.tickCalibrationState = "已校准"
+        AddLog(string.format("Mana Tick校准：15次稳定周期，微调 %.1fms", correction))
+    end
 end
 
 local function AutoLeadMS()
@@ -742,7 +777,7 @@ local function AutoLeadMS()
 end
 
 local function EffectiveSpamOpenMS()
-    if AutoLeadEnabled() then return AutoLeadMS() end
+    -- Stable manual dispatch window; Tick calibration moves the phase, not Lead.
     return SpamOpenMS()
 end
 
@@ -764,6 +799,10 @@ end
 local function ResetAutoLead()
     TaiYangDrinkWalkDiagDB.autoLeadMS = DEFAULT_AUTO_LEAD_MS
     TaiYangDrinkWalkDiagDB.autoLeadEnabled = true
+    DW.tickCalibrationErrors = {}
+    DW.tickCalibrationCount = 0
+    DW.tickCalibrationRounds = 0
+    DW.tickCalibrationState = "关闭"
     DW.autoLeadSuccessStreak = 0
     DW.autoLeadMissStreak = 0
     DW.autoLeadConfirmedTicks = 0
@@ -1324,7 +1363,9 @@ end
 
 local function FinalizeSpamTick()
     if not DW.spamTickMS then return end
-    if not AutoLeadEnabled() then return end
+    -- Keep the old diagnostic tick finalizer inert: calibration uses only
+    -- accepted periodic mana ticks, never item-use outcomes.
+    if true then return end
 
     if DW.spamTickLearnableSuccess then
         DW.autoLeadConfirmedTicks = (DW.autoLeadConfirmedTicks or 0) + 1
@@ -1499,7 +1540,6 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
     local a = DW.item
     local beforeTotal = CountItemIdentity(a)
     local lead = tickMS - nowMS
-    DW.lastDispatchMS = nowMS
     DW.spamAttemptsThisTick = (DW.spamAttemptsThisTick or 0) + 1
     DW.spamRequestCount = (DW.spamRequestCount or 0) + 1
     DW.spamTickHadRequest = true
@@ -1525,6 +1565,7 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
         DW.lastKeyResult = "Native未分派：" .. tostring(code or "?")
         return false
     end
+    DW.lastDispatchMS = nowMS
     DW.lastNativeCode = code
     DW.lastNativeReturn = engineRet
     return true
@@ -1708,6 +1749,8 @@ end
 local function SetManaSparkEnabled(enabled)
     TaiYangDrinkWalkDiagDB.showManaSpark = enabled and true or false
     if DW.manaCheck then DW.manaCheck:SetChecked(ShowManaSparkEnabled()) end
+    if DW.calibrateCheck then DW.calibrateCheck:SetChecked(TickCalibrationEnabled()) end
+    if DW.calibrationLabel then DW.calibrationLabel:SetText((DW.tickCalibrationState or "关闭") .. " " .. tostring(DW.tickCalibrationCount or 0) .. "/15") end
 end
 
 local function SetManaTimerSpark(progress)
@@ -1859,6 +1902,28 @@ local function RenderManaTimerUI(nowMS, nextTickMS, tickInMS, tickPeriodMS, tick
         end
     end
 
+    -- Window overlay follows the exact macro timing gate, not percent UI.
+    if DW.manaDrinkWindow then
+        local show = kind == "MANA" and DW.state == "LOCKED"
+            and nextTickMS and tickInMS and tickPeriodMS
+            and not (DW.uiFSREndMS and nowMS < DW.uiFSREndMS)
+            and DW.mode == "SPAM"
+        if show then
+            local startPct = 1 - Clamp(EffectiveSpamOpenMS() / tickPeriodMS, 0, 1)
+            local endPct = 1 - Clamp(SpamCloseMS() / tickPeriodMS, 0, 1)
+            local widthPct = math.max(0, endPct - startPct)
+            DW.manaDrinkWindow:ClearAllPoints()
+            DW.manaDrinkWindow:SetPoint("LEFT", DW.manaTimerBar, "LEFT", startPct * UI_MANA_BAR_WIDTH, 0)
+            DW.manaDrinkWindow:SetWidth(math.max(1, widthPct * UI_MANA_BAR_WIDTH))
+            DW.manaDrinkWindow:SetHeight(UI_MANA_BAR_HEIGHT)
+            local active = tickInMS <= EffectiveSpamOpenMS() and tickInMS >= SpamCloseMS()
+            DW.manaDrinkWindow:SetVertexColor(active and 0.17 or 0.12, active and 1.00 or 0.70, active and 0.35 or 0.24, active and 0.92 or 0.67)
+            DW.manaDrinkWindow:Show()
+        else
+            DW.manaDrinkWindow:Hide()
+        end
+    end
+
     local mode = "WAIT"
     local remainMS = nil
     if kind == "MANA" and DW.uiFSREndMS and nowMS < DW.uiFSREndMS then
@@ -1975,6 +2040,14 @@ local function CreateManaSparkHUD()
     bg:SetTexture("Interface\\TARGETINGFRAME\\UI-StatusBar")
     bg:SetVertexColor(0.03, 0.03, 0.09, 0.88)
 
+    -- The green zone lives in a child overlay, below the text overlay.
+    local windowOverlay = CreateFrame("Frame", nil, holder)
+    windowOverlay:SetAllPoints(bar)
+    windowOverlay:SetFrameLevel(bar:GetFrameLevel() + 1)
+    local drinkWindow = windowOverlay:CreateTexture(nil, "ARTWORK")
+    drinkWindow:SetTexture(1, 1, 1, 1)
+    drinkWindow:Hide()
+
     -- A dedicated child frame places the label above the StatusBar frame.
     -- Parent OVERLAY alone does not guarantee visibility above child frames.
     local textOverlay = CreateFrame("Frame", nil, holder)
@@ -2012,6 +2085,7 @@ local function CreateManaSparkHUD()
     DW.manaTimerFrame = holder
     DW.manaTimerBar = bar
     DW.manaTimerBG = bg
+    DW.manaDrinkWindow = drinkWindow
     DW.resourceText = resourceText
     DW.manaTimerSpark = spark
     DW.manaTimerSparkLine = sparkLine
@@ -2070,35 +2144,31 @@ local function CreateUI()
     DW.tickCheck = CreateCheck(f, "TaiYangDrinkWalkShowTickCheck", "显示 Tick 计时条（Mana/Energy）", 18, -73, ShowTickTimerEnabled(), SetTickTimerEnabled)
     DW.manaCheck = CreateCheck(f, "TaiYangDrinkWalkShowManaCheck", "显示 自适应资源条 / Spark", 18, -101, ShowManaSparkEnabled(), SetManaSparkEnabled)
 
-    local ratioLabel = CreateLabel(f, 20, -136, 92, "GameFontNormalSmall")
-    ratioLabel:SetText("吃喝窗口比例：")
-    local ratioOpen = CreateFrame("EditBox", "TaiYangDrinkWalkRatioOpenEdit", f, "InputBoxTemplate")
-    ratioOpen:SetWidth(48); ratioOpen:SetHeight(20)
-    ratioOpen:SetPoint("TOPLEFT", f, "TOPLEFT", 112, -131)
-    ratioOpen:SetAutoFocus(false); ratioOpen:SetText(string.format("%.1f", DrinkOpenPct()))
-    DW.ratioOpenEdit = ratioOpen
-    local ratioSep = CreateLabel(f, 166, -136, 18, "GameFontNormalSmall")
-    ratioSep:SetText("% ~")
-    local ratioClose = CreateFrame("EditBox", "TaiYangDrinkWalkRatioCloseEdit", f, "InputBoxTemplate")
-    ratioClose:SetWidth(48); ratioClose:SetHeight(20)
-    ratioClose:SetPoint("TOPLEFT", f, "TOPLEFT", 194, -131)
-    ratioClose:SetAutoFocus(false); ratioClose:SetText(string.format("%.1f", DrinkClosePct()))
-    DW.ratioCloseEdit = ratioClose
-    local ratioPct = CreateLabel(f, 248, -136, 18, "GameFontNormalSmall")
-    ratioPct:SetText("%")
-    CreateButton(f, "应用", 274, -131, 60, function()
-        if SetDrinkWindowRatioSpec(DW.ratioOpenEdit:GetText(), DW.ratioCloseEdit:GetText()) then RefreshSettingsUI() end
-    end)
-    local ratioHint = CreateLabel(f, 340, -136, 86, "GameFontNormalSmall")
-    ratioHint:SetText("Mana/Energy")
-    ratioOpen:SetScript("OnEnterPressed", function()
-        SetDrinkWindowRatioSpec(this:GetText(), DW.ratioCloseEdit:GetText()); this:ClearFocus(); RefreshSettingsUI()
-    end)
-    ratioClose:SetScript("OnEnterPressed", function()
-        SetDrinkWindowRatioSpec(DW.ratioOpenEdit:GetText(), this:GetText()); this:ClearFocus(); RefreshSettingsUI()
-    end)
-    ratioOpen:SetScript("OnEscapePressed", function() this:ClearFocus(); this:SetText(string.format("%.1f", DrinkOpenPct())) end)
-    ratioClose:SetScript("OnEscapePressed", function() this:ClearFocus(); this:SetText(string.format("%.1f", DrinkClosePct())) end)
+    DW.calibrateCheck = CreateCheck(f, "TaiYangDrinkWalkCalibrateCheck", "Mana Tick 自动校准（15次稳定采样）", 18, -129, TickCalibrationEnabled(), SetTickCalibrationEnabled)
+    local retryLabel = CreateLabel(f, 20, -161, 156, "GameFontNormalSmall")
+    retryLabel:SetText("狂按重试间隔(ms)：")
+    local retryEdit = CreateFrame("EditBox", "TaiYangDrinkWalkRetryEdit", f, "InputBoxTemplate")
+    retryEdit:SetWidth(65); retryEdit:SetHeight(20)
+    retryEdit:SetPoint("TOPLEFT", f, "TOPLEFT", 170, -155)
+    retryEdit:SetAutoFocus(false)
+    retryEdit:SetText(tostring(SpamRetryMS()))
+    DW.retryEdit = retryEdit
+    local function ApplyRetry()
+        local value = tonumber(Trim(retryEdit:GetText()))
+        if not value or value < 0 or value > 250 or value ~= math.floor(value) then
+            AddLog("重试间隔请输入0~250的整数毫秒")
+            retryEdit:SetText(tostring(SpamRetryMS()))
+            return
+        end
+        TaiYangDrinkWalkDiagDB.spamRetryMS = value
+        AddLog("狂按重试间隔设为 " .. tostring(value) .. "ms")
+        retryEdit:SetText(tostring(value))
+    end
+    retryEdit:SetScript("OnEnterPressed", function() ApplyRetry(); this:ClearFocus() end)
+    retryEdit:SetScript("OnEscapePressed", function() this:ClearFocus(); this:SetText(tostring(SpamRetryMS())) end)
+    CreateButton(f, "应用", 250, -155, 65, ApplyRetry)
+    local calibrationLabel = CreateLabel(f, 320, -134, 109, "GameFontNormalSmall")
+    DW.calibrationLabel = calibrationLabel
 
     local itemLabel = CreateLabel(f, 20, -174, 90, "GameFontNormalSmall")
     itemLabel:SetText("物品名称 / ID：")
@@ -2334,11 +2404,13 @@ local function OnEvent()
         RefreshResourceContext(true)
         SetWatchLead(WatchLeadMS())
         SetSpamWindow(SpamOpenMS(), SpamCloseMS(), SpamRetryMS())
-        if TaiYangDrinkWalkDiagDB.drinkOpenPct ~= nil and TaiYangDrinkWalkDiagDB.drinkClosePct ~= nil then
-            SetDrinkWindowRatio(TaiYangDrinkWalkDiagDB.drinkOpenPct, TaiYangDrinkWalkDiagDB.drinkClosePct)
-        else
-            SetAutoLeadMS(AutoLeadMS(), "LOAD")
-        end
+        -- Legacy ratio settings must not silently override the new controls.
+        TaiYangDrinkWalkDiagDB.drinkOpenPct = nil
+        TaiYangDrinkWalkDiagDB.drinkClosePct = nil
+        TaiYangDrinkWalkDiagDB.autoLeadEnabled = false
+        DW.tickCalibrationErrors = {}
+        DW.tickCalibrationCount = 0
+        DW.tickCalibrationState = TickCalibrationEnabled() and "采样中" or "关闭"
         RestoreReloadPhase()
         ScanDrinkAura()
         NormalizeStoredBinding()
@@ -2496,8 +2568,10 @@ local function SlashHandler(msg)
     if low == "scan" then SetItemSpec(TaiYangDrinkWalkDiagDB.itemSpec or ""); return end
     if low == "mode watch" or low == "watch" then SetMode("WATCH"); return end
     if low == "mode spam" or low == "spam" then SetMode("SPAM"); return end
-    if low == "autolead on" then SetAutoLeadEnabled(true); return end
-    if low == "autolead off" then SetAutoLeadEnabled(false); return end
+    if low == "calibrate on" then SetTickCalibrationEnabled(true); return end
+    if low == "calibrate off" then SetTickCalibrationEnabled(false); return end
+    if low == "autolead on" then SetTickCalibrationEnabled(true); return end
+    if low == "autolead off" then SetTickCalibrationEnabled(false); return end
     if low == "autolead reset" then ResetAutoLead(); return end
     if string.find(low, "autolead ") == 1 then SetAutoLeadMS(string.sub(msg, 10), "SLASH"); return end
     if string.find(low, "lead ") == 1 then SetWatchLead(string.sub(msg, 6)); return end
@@ -2507,13 +2581,16 @@ local function SlashHandler(msg)
     if low == "icon show" then TaiYangDrinkWalk_ShowFuBar(); return end
     if low == "icon hide" then TaiYangDrinkWalk_HideFuBar(); return end
     if string.find(low, "window ") == 1 then SetSpamWindowSpec(string.sub(msg, 8)); return end
-    if string.find(low, "ratio ") == 1 then
-        local spec = string.sub(msg, 7)
-        spec = string.gsub(spec, "，", ",")
-        local _, _, a, b = string.find(spec, "^%s*([%d%.]+)%s*,%s*([%d%.]+)%s*$")
-        if a and b then SetDrinkWindowRatio(a, b) else AddLog("比例命令：/tsdw ratio 84,91.5") end
+    if string.find(low, "retry ") == 1 then
+        local value = tonumber(string.sub(msg, 7))
+        if value and value >= 0 and value <= 250 and value == math.floor(value) then
+            TaiYangDrinkWalkDiagDB.spamRetryMS = value
+            if DW.retryEdit then DW.retryEdit:SetText(tostring(value)) end
+            AddLog("重试间隔=" .. tostring(value) .. "ms")
+        else AddLog("重试间隔范围 0~250ms") end
         return
     end
+    if string.find(low, "ratio ") == 1 then AddLog("比例设置已废弃，请使用绿色窗口提示"); return end
     if low == "status" then
         DEFAULT_CHAT_FRAME:AddMessage("|cff33ff66[DrinkWalk]|r mode=" .. tostring(DW.mode) .. " sync=" .. tostring(DW.state) .. " key=" .. SpamBindingText() .. " item=" .. tostring(DW.itemStatus) .. " | " .. ResourceSummaryText())
         return
