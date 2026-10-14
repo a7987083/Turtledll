@@ -1,101 +1,165 @@
--- TaiYangDrinkWalk item management - WoW 1.12.1 / Lua 5.0.
--- Read-only: no inventory item use, no auto-selection by tooltip guessing.
+-- TaiYangDrinkWalk phase 2: configured items, tooltip classification, needs scoring.
+-- WoW 1.12.1 / Lua 5.0; read-only, never calls UseItem.
 local DW = TaiYangDrinkWalk
-local I = { implemented = true }
+local I = {implemented=true}
 DW.Items = I
+
 local function DB()
-    if type(TaiYangDrinkWalkDB) ~= "table" then TaiYangDrinkWalkDB = {} end
-    local db = TaiYangDrinkWalkDB
-    if type(db.itemRules) ~= "table" then db.itemRules = {} end
-    return db
+    if type(TaiYangDrinkWalkDB) ~= "table" then TaiYangDrinkWalkDB={} end
+    if type(TaiYangDrinkWalkDB.itemSpec) ~= "string" then TaiYangDrinkWalkDB.itemSpec="" end
+    return TaiYangDrinkWalkDB
 end
 local function Trim(s)
     return string.gsub(string.gsub(s or "", "^%s+", ""), "%s+$", "")
 end
-local function ID(link)
-    if type(link) ~= "string" then return nil end
-    local s = string.match(link, "item:(%d+)")
-    if s then return tonumber(s) end
-    return nil
-end
-function I.Add(kind, query)
-    kind = string.lower(kind or "")
-    if kind ~= "food" and kind ~= "drink" and kind ~= "both" then return false, "分类只能 food/drink/both" end
-    query = Trim(query)
-    if query == "" or string.len(query) > 100 then return false, "物品 ID/名称不合法" end
-    local id = tonumber(query)
-    if id and (id < 1 or id ~= math.floor(id)) then return false, "物品 ID 不合法" end
-    local db = DB()
-    local key = id and tostring(id) or string.lower(query)
-    local i
-    for i = 1, table.getn(db.itemRules) do
-        local v = db.itemRules[i]
-        if type(v) == "table" then
-            local k = v.id and tostring(v.id) or string.lower(v.name or "")
-            if k == key and v.kind == kind then return false, "该规则已存在" end
+local function Parse()
+    local raw=DB().itemSpec
+    raw=string.gsub(raw,"，",",")
+    raw=string.gsub(raw,"；",",")
+    raw=string.gsub(raw,";",",")
+    local ids,names={},{}
+    for token in string.gfind(raw,"[^,]+") do
+        token=Trim(token)
+        if token~="" then
+            local id=tonumber(token)
+            if id and id>0 and id==math.floor(id) then
+                table.insert(ids,id)
+            else
+                table.insert(names,token)
+            end
         end
     end
-    table.insert(db.itemRules, {kind=kind, id=id, name=id and nil or query})
-    return true, "已添加 " .. kind .. ": " .. query
+    return ids,names
 end
-function I.Remove(index)
-    local db = DB()
-    local n = tonumber(index)
-    if not n or n ~= math.floor(n) or n < 1 or n > table.getn(db.itemRules) then return false,"序号无效" end
-    table.remove(db.itemRules,n)
-    return true,"规则已删除"
+function I.SetSpec(raw)
+    if type(raw)~="string" or string.len(raw)>1000 then return false,"物品配置过长或无效" end
+    DB().itemSpec=Trim(raw)
+    I.current=nil
+    return true,"配置已保存（按 ID/名称精确匹配，类型自动识别）"
 end
-function I.List()
-    local db = DB()
-    if table.getn(db.itemRules) == 0 then DW.Print("暂无物品规则。使用 /tsdw add drink 物品ID") end
-    local i
-    for i = 1, table.getn(db.itemRules) do
-        local r=db.itemRules[i]
-        if type(r)=="table" then DW.Print(i .. ". [" .. tostring(r.kind) .. "] " .. tostring(r.id or r.name)) end
+function I.GetSpec() return DB().itemSpec end
+local function ItemId(link)
+    local _,_,s=string.find(link or "","item:(%d+)")
+    return s and tonumber(s) or nil
+end
+local function ItemName(link)
+    if type(GetItemInfo)=="function" then
+        local name=GetItemInfo(link)
+        if name then return name end
     end
+    local _,_,name=string.find(link or "","%[(.-)%]")
+    return name
 end
-function I.Scan()
-    local db=DB()
-    local matches={}
-    local i,bag,slot
+local function TooltipText(bag,slot)
+    if not I.tooltip then
+        I.tooltip=CreateFrame("GameTooltip","TaiYangDrinkWalkScanTooltip",UIParent,"GameTooltipTemplate")
+        I.tooltip:SetOwner(UIParent,"ANCHOR_NONE")
+    end
+    local tip=I.tooltip
+    if not tip or type(tip.SetBagItem)~="function" then return "" end
+    tip:ClearLines()
+    tip:SetBagItem(bag,slot)
+    local text=""
+    for i=1,12 do
+        local left=getglobal("TaiYangDrinkWalkScanTooltipTextLeft"..i)
+        local right=getglobal("TaiYangDrinkWalkScanTooltipTextRight"..i)
+        if left and left:GetText() then text=text.." "..string.lower(left:GetText()) end
+        if right and right:GetText() then text=text.." "..string.lower(right:GetText()) end
+    end
+    return text
+end
+local function Classify(bag,slot)
+    local t=TooltipText(bag,slot)
+    if t=="" then return "UNKNOWN" end
+    local mana=string.find(t,"mana") or string.find(t,"法力")
+    local health=string.find(t,"health") or string.find(t,"生命")
+    local drink=string.find(t,"drink") or string.find(t,"饮用") or string.find(t,"饮料") or string.find(t,"喝")
+    local food=string.find(t,"eat") or string.find(t,"food") or string.find(t,"进食") or string.find(t,"食用") or string.find(t,"食物") or string.find(t,"吃")
+    local restore=string.find(t,"restore") or string.find(t,"regener") or string.find(t,"恢复") or string.find(t,"回复")
+    local d=mana and (drink or restore)
+    local f=health and (food or restore)
+    if d and f then return "BOTH" end
+    if d then return "DRINK" end
+    if f then return "FOOD" end
+    return "UNKNOWN"
+end
+local function Score(item,hpNeed,manaNeed)
+    if item.kind=="BOTH" then
+        if hpNeed and manaNeed then return 120 end
+        if hpNeed or manaNeed then return 100 end
+        return 10
+    elseif item.kind=="FOOD" then
+        return hpNeed and 90 or 5
+    elseif item.kind=="DRINK" then
+        return manaNeed and 90 or 5
+    end
+    return (hpNeed or manaNeed) and 50 or 1
+end
+local function Needs()
+    local hp=tonumber(UnitHealth("player")) or 0
+    local maxhp=tonumber(UnitHealthMax("player")) or 0
+    -- WoW 1.12.1 UnitPowerType: 0=mana, 1=rage, 3=energy.
+    local isMana=(type(UnitPowerType)=="function" and UnitPowerType("player")==0)
+    local mana=tonumber(UnitMana("player")) or 0
+    local maxmana=tonumber(UnitManaMax("player")) or 0
+    return maxhp>0 and hp<maxhp,isMana and maxmana>0 and mana<maxmana
+end
+function I.Find()
+    I.current=nil
+    I.status="未配置物品名/ID"
+    local ids,names=Parse()
+    if table.getn(ids)==0 and table.getn(names)==0 then return nil end
     if type(GetContainerNumSlots)~="function" or type(GetContainerItemLink)~="function" then
-        return matches,"背包 API 不可用"
+        I.status="背包接口不可用";return nil
     end
-    for bag=0,4 do
-        local count=GetContainerNumSlots(bag) or 0
-        for slot=1,count do
-            local link=GetContainerItemLink(bag,slot)
-            if link then
-                local id=ID(link)
-                local display=string.match(link,"%[(.-)%]") or link
-                local lower=string.lower(display)
-                for i=1,table.getn(db.itemRules) do
-                    local rule=db.itemRules[i]
-                    if type(rule)=="table" then
-                        local match=(rule.id and id==rule.id) or
-                           (rule.name and string.lower(rule.name)==lower)
-                        if match then
-                            local texture,stack=GetContainerItemInfo(bag,slot)
-                            table.insert(matches,{kind=rule.kind,id=id,name=display,bag=bag,slot=slot,count=stack or 1,rule=i})
-                            break
+    local candidates={}
+    local function FindOne(wantedId,wantedName)
+        local first=nil
+        local total=0
+        for bag=0,4 do
+            local slots=GetContainerNumSlots(bag) or 0
+            for slot=1,slots do
+                local link=GetContainerItemLink(bag,slot)
+                if link then
+                    local id=ItemId(link)
+                    local name=ItemName(link)
+                    local matched=(wantedId and wantedId==id) or
+                        (wantedName and name and string.lower(wantedName)==string.lower(name))
+                    if matched then
+                        local texture,count,locked=GetContainerItemInfo(bag,slot)
+                        count=tonumber(count) or 1
+                        total=total+count
+                        if not first then
+                            first={bag=bag,slot=slot,id=id,name=name or ("item:"..tostring(id)),
+                                count=count,locked=locked,match=wantedId and "ID" or "NAME"}
+                            first.kind=Classify(bag,slot)
                         end
                     end
                 end
             end
         end
+        if first then first.totalCount=total;table.insert(candidates,first) end
     end
-    return matches,nil
+    for i=1,table.getn(ids) do FindOne(ids[i],nil) end
+    for i=1,table.getn(names) do FindOne(nil,names[i]) end
+    local hpNeed,manaNeed=Needs()
+    local best,bestScore=nil,-1
+    for i=1,table.getn(candidates) do
+        local score=Score(candidates[i],hpNeed,manaNeed)
+        if score>bestScore then best=candidates[i];bestScore=score end
+    end
+    I.current=best
+    if best then
+        I.status=string.format("%s [%s] ID:%s 包%d 格%d x%d (评分:%d)",
+            tostring(best.name),best.kind,tostring(best.id),best.bag,best.slot,best.totalCount,bestScore)
+    else
+        I.status="背包中未找到精确匹配"
+    end
+    return best
 end
 function I.Report()
-    local matches,err=I.Scan()
-    if err then DW.Print(err);return end
-    if table.getn(matches)==0 then DW.Print("扫描完成：未发现匹配规则的物品"); return end
-    DW.Print("扫描完成：匹配格子 " .. table.getn(matches))
-    local i
-    for i=1,math.min(table.getn(matches),12) do
-        local m=matches[i]
-        DW.Print(m.kind.." "..m.name.." (ID "..tostring(m.id)..") 包"..m.bag.." 格"..m.slot.." x"..m.count)
-    end
-    if table.getn(matches)>12 then DW.Print("仅展示前12项") end
+    I.Find()
+    DW.Print(I.status)
+    return I.current
 end
 DW.RegisterModule("Items")
