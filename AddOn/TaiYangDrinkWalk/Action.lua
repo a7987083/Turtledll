@@ -1,125 +1,175 @@
--- TaiYangDrinkWalk 0.5.0: explicit keypress -> native DLL item use.
--- WoW 1.12.1 Lua 5.0. No scheduler, no Lua UseContainerItem.
+-- TaiYangDrinkWalk 0.5.1. Explicit /zchihe macro only; native DLL item use.
+-- Lua 5.0 / WoW 1.12.1. No autonomous scheduler; no key binding.
 local DW=TaiYangDrinkWalk
-local A={implemented=true,lastCode="NOT_CALLED",state="IDLE",lastTry=-100000,attempts=0,confirmed=0}
+local A={implemented=true,state="IDLE",lastCode="NOT_CALLED",attempts=0,confirmed=0,
+         lastTry=-100000,tickKey=nil,tickAttempts=0}
 DW.Action=A
 local function Now() return GetTime()*1000 end
 local function Native(cmd,bag,slot)
     if type(TaiYangShenDian)~="function" then return false,"DLL_MISSING" end
-    if bag~=nil then
-        local ok,a,b,c,d=pcall(TaiYangShenDian,cmd,bag,slot)
-        if not ok then return false,"CALL_ERROR:"..tostring(a) end
-        return a,b,c,d
-    end
-    local ok,a=pcall(TaiYangShenDian,cmd)
-    if not ok then return false,"CALL_ERROR:"..tostring(a) end
-    return true,a
+    local ok,a,b,c
+    if bag~=nil then ok,a,b,c=pcall(TaiYangShenDian,cmd,bag,slot)
+    else ok,a=pcall(TaiYangShenDian,cmd) end
+    if not ok then return false,"DLL_EXCEPTION:"..tostring(a) end
+    return a,b,c
 end
-local function Stop(code)
-    A.lastCode=tostring(code)
+local function Block(reason)
+    A.lastCode=tostring(reason)
     A.state="BLOCKED"
     return false
 end
-local function CheckConfirm()
+local function ConsumableAuraKinds()
+    local found={FOOD=false,DRINK=false}
+    if type(GetPlayerBuff)~="function" or type(getglobal)~="function" then return found end
+    if not A.tooltip then
+        A.tooltip=CreateFrame("GameTooltip","TaiYangDrinkWalkAuraTooltip",UIParent,"GameTooltipTemplate")
+        A.tooltip:SetOwner(UIParent,"ANCHOR_NONE")
+    end
+    if not A.tooltip or type(A.tooltip.SetPlayerBuff)~="function" then return found end
+    for i=0,31 do
+        local index=GetPlayerBuff(i,"HELPFUL")
+        if not index or index<0 then break end
+        A.tooltip:ClearLines()
+        A.tooltip:SetPlayerBuff(index)
+        local text=""
+        for line=1,8 do
+            local l=getglobal("TaiYangDrinkWalkAuraTooltipTextLeft"..line)
+            local r=getglobal("TaiYangDrinkWalkAuraTooltipTextRight"..line)
+            if l and l:GetText() then text=text.." "..string.lower(l:GetText()) end
+            if r and r:GetText() then text=text.." "..string.lower(r:GetText()) end
+        end
+        if string.find(text,"drink") or string.find(text,"饮用") or string.find(text,"喝水") then found.DRINK=true end
+        if string.find(text,"food") or string.find(text,"eating") or string.find(text,"进食") or string.find(text,"食用") then found.FOOD=true end
+    end
+    return found
+end
+local function RelevantAura(kind,aura)
+    if kind=="FOOD" then return aura.FOOD end
+    if kind=="DRINK" then return aura.DRINK end
+    if kind=="BOTH" then return aura.FOOD or aura.DRINK end
+    return false
+end
+local function CountIdentity(id)
+    local total=0
+    if type(GetContainerNumSlots)~="function" then return 0 end
+    for bag=0,4 do
+        for slot=1,(GetContainerNumSlots(bag) or 0) do
+            local link=GetContainerItemLink(bag,slot)
+            local found=link and tonumber(string.match(link,"item:(%d+)"))
+            if found==id then
+                local _,n=GetContainerItemInfo(bag,slot)
+                total=total+(tonumber(n) or 1)
+            end
+        end
+    end
+    return total
+end
+local function Confirm()
     local p=A.pending
     if not p then return end
-    local now=Now()
-    if now>p.untilTime then
-        A.state="UNCONFIRMED";A.lastCode="CONFIRM_TIMEOUT"
-        A.pending=nil;return
+    local n=Now()
+    local count=CountIdentity(p.id)
+    if count<p.beforeTotal then p.bagEvidence=true end
+    local aura=ConsumableAuraKinds()
+    if RelevantAura(p.kind,aura) and not RelevantAura(p.kind,p.beforeAura) then
+        p.auraEvidence=true
     end
-    local link=GetContainerItemLink(p.bag,p.slot)
-    local id=link and string.match(link,"item:(%d+)") or nil
-    local _,count=GetContainerItemInfo(p.bag,p.slot)
-    count=tonumber(count) or 0
-    if tostring(id or "")~=tostring(p.id or "") or count<p.count then
-        A.state="CONFIRMED";A.lastCode="STACK_DECREASED";A.confirmed=A.confirmed+1
+    if p.bagEvidence or p.auraEvidence then
+        A.state="CONFIRMED"
+        A.lastCode=(p.bagEvidence and "BAG" or "")..
+                   (p.bagEvidence and p.auraEvidence and "+" or "")..
+                   (p.auraEvidence and "AURA" or "")
+        A.lastEvidence=A.lastCode
+        A.confirmed=A.confirmed+1
+        A.completedTick=p.tickKey
+        A.pending=nil
+    elseif n>=p.deadline then
+        A.state="UNCONFIRMED"
+        A.lastCode="CONFIRM_TIMEOUT"
         A.pending=nil
     end
 end
+function A.ObserveBag() if A.pending then Confirm() end end
+function A.ObserveAura() if A.pending then Confirm() end end
+function A.Update() if A.pending then Confirm() end end
 function A.Check()
-    CheckConfirm()
     local ok,status=Native("DrinkWalk.Status")
-    if not ok or type(status)~="table" then
-        return false,"DLL_STATUS_FAILED"
-    end
+    if type(status)~="table" then return false,tostring(status or "DLL_STATUS_FAILED") end
     if status.available~=true then return false,"DLL_UNAVAILABLE:"..tostring(status.lastCode) end
-    return true,status.mode or "READY"
+    return true,tostring(status.mode or "READY")
 end
-local function CanWindow()
-    if not DW.HUD or not DW.ManaTick or not DW.EnergyTick then return false,"TICK_MISSING" end
+local function Window()
+    if not DW.HUD then return false,"HUD_MISSING" end
     local power=type(UnitPowerType)=="function" and UnitPowerType("player") or -1
     local source
     if power==0 then source=DW.ManaTick
     elseif power==3 then source=DW.EnergyTick
-    else return false,"NO_MANA_OR_ENERGY_TICK" end
-    if source.state~="LOCKED" or not source.Next then return false,"TICK_NOT_LOCKED" end
+    else return false,"NO_TICK_RESOURCE" end
+    if not source or source.state~="LOCKED" or not source.Next then return false,"TICK_NOT_LOCKED" end
     local now=Now()
     local nextTick=source.Next(now)
-    if not nextTick then return false,"NO_TICK_FORECAST" end
+    if not nextTick then return false,"NO_NEXT_TICK" end
     local inside=DW.HUD.Window(nextTick,now,true)
-    if not inside then return false,"OUTSIDE_TICK_WINDOW" end
-    return true,"WINDOW_OK"
+    if not inside then return false,"OUTSIDE_WINDOW" end
+    -- Quantize expected tick to a stable key; do not use raw drifting anchor as key.
+    local key=math.floor(nextTick/100+0.5)
+    return true,key
 end
 function A.Activate()
-    CheckConfirm()
-    if not DW.ready then return Stop("NOT_READY") end
-    if type(TaiYangDrinkWalkDB)~="table" or TaiYangDrinkWalkDB.mode~="SPAM" then
-        return Stop("WATCH_MODE_NO_USE")
-    end
-    if A.pending then return Stop("AWAITING_CONFIRMATION") end
-    local now=Now()
-    if now-A.lastTry<75 then return Stop("RATE_LIMIT_75MS") end
-    -- One native dispatch per expected tick, regardless of repeated key presses.
-    if A.nextAllowed and now<A.nextAllowed then return Stop("TICK_RETRY_BLOCKED") end
+    Confirm()
+    if not DW.ready then return Block("NOT_READY") end
     local ready,reason=A.Check()
-    if not ready then return Stop(reason) end
-    local window,why=CanWindow()
-    if not window then return Stop(why) end
-    if not DW.Items or not DW.Items.Find then return Stop("ITEMS_MISSING") end
+    if not ready then return Block(reason) end
+    local inside,key=Window()
+    if not inside then return Block(key) end
+    if A.tickKey~=key then A.tickKey=key;A.tickAttempts=0 end
+    if A.completedTick==key then return Block("TICK_ALREADY_CONFIRMED") end
+    if A.tickAttempts>=2 then return Block("TICK_MAX_2") end
+    local now=Now()
+    if now-A.lastTry<75 then return Block("RATE_LIMIT_75MS") end
+    -- Hold briefly after dispatch for server response; after timeout allow one retry.
+    if A.pending then return Block("WAIT_CONFIRM") end
+    if not DW.Items or not DW.Items.Find then return Block("ITEM_MODULE_MISSING") end
     local item=DW.Items.Find()
-    if not item or not item.id or not item.bag or not item.slot then return Stop("NO_CONFIGURED_ITEM") end
-    if item.kind=="UNKNOWN" then return Stop("UNKNOWN_ITEM_KIND") end
-    local beforeLink=GetContainerItemLink(item.bag,item.slot)
-    local beforeId=beforeLink and tonumber(string.match(beforeLink,"item:(%d+)"))
-    local _,beforeCount,beforeLocked=GetContainerItemInfo(item.bag,item.slot)
-    if beforeId~=item.id or beforeLocked then return Stop("SLOT_CHANGED_OR_LOCKED") end
-    beforeCount=tonumber(beforeCount) or 0
-    if beforeCount<1 then return Stop("EMPTY_STACK") end
-    local resolved,code=Native("DrinkWalk.ResolveItem",item.bag,item.slot)
-    if resolved~=true then return Stop("RESOLVE:"..tostring(code)) end
-    -- Verify a second time after native resolution.
-    local afterLink=GetContainerItemLink(item.bag,item.slot)
-    local afterId=afterLink and tonumber(string.match(afterLink,"item:(%d+)"))
-    local _,afterCount,afterLocked=GetContainerItemInfo(item.bag,item.slot)
-    if afterId~=beforeId or tonumber(afterCount)~=beforeCount or afterLocked then
-        return Stop("SLOT_CHANGED_AFTER_RESOLVE")
-    end
+    if not item or not item.id then return Block("NO_CONFIGURED_ITEM") end
+    if item.kind=="UNKNOWN" then return Block("ITEM_KIND_UNKNOWN") end
+    local link=GetContainerItemLink(item.bag,item.slot)
+    local id=link and tonumber(string.match(link,"item:(%d+)"))
+    local _,count,locked=GetContainerItemInfo(item.bag,item.slot)
+    if id~=item.id or locked or (tonumber(count) or 0)<1 then return Block("SLOT_INVALID") end
+    local beforeTotal=CountIdentity(item.id)
+    local beforeAura=ConsumableAuraKinds()
+    if RelevantAura(item.kind,beforeAura) then return Block("CONSUMABLE_AURA_ALREADY_ACTIVE") end
+    local resolved,resolveCode=Native("DrinkWalk.ResolveItem",item.bag,item.slot)
+    if resolved~=true then return Block("RESOLVE:"..tostring(resolveCode)) end
+    local check=GetContainerItemLink(item.bag,item.slot)
+    local second=check and tonumber(string.match(check,"item:(%d+)"))
+    local _,checkCount,checkLocked=GetContainerItemInfo(item.bag,item.slot)
+    if second~=id or tonumber(checkCount)~=tonumber(count) or checkLocked then return Block("SLOT_CHANGED") end
     A.lastTry=now
-    local used,code,engineRet=Native("DrinkWalk.UseItem",item.bag,item.slot)
-    A.lastCode=tostring(code);A.engineReturn=engineRet
-    if used~=true then A.state="FAILED";return false end
-    A.state="DISPATCHED_UNCONFIRMED";A.attempts=A.attempts+1
-    A.nextAllowed=now+math.max(700,(type(DW.ManaTick)=="table" and DW.ManaTick.period or 2000))
-    A.pending={bag=item.bag,slot=item.slot,id=item.id,count=beforeCount,untilTime=now+900}
+    A.tickAttempts=A.tickAttempts+1
+    local sent,code,ret=Native("DrinkWalk.UseItem",item.bag,item.slot)
+    A.lastCode=tostring(code)
+    A.engineReturn=ret
+    if sent~=true then A.state="NATIVE_FAILED";return false end
+    A.attempts=A.attempts+1
+    A.state="DISPATCHED_UNCONFIRMED"
+    -- Short confirmation timeout ensures the second attempt can fit the window,
+    -- but do not retry while an unconfirmed dispatch is still pending.
+    A.pending={id=item.id,kind=item.kind,beforeTotal=beforeTotal,beforeAura=beforeAura,
+               deadline=now+90,tickKey=key,bagEvidence=false,auraEvidence=false}
     return true
 end
 function A.Summary()
-    CheckConfirm()
-    return "Native: "..A.state.." / "..A.lastCode.." / sent="..A.attempts.." confirmed="..A.confirmed
-end
-function A.ObserveBag()
-    CheckConfirm()
-end
-function A.Update()
-    if A.pending then CheckConfirm() end
+    Confirm()
+    return "Macro/DLL: "..A.state.." / "..A.lastCode..
+           " | sent="..A.attempts.." confirmed="..A.confirmed..
+           " | tickTry="..A.tickAttempts.."/2"
 end
 function DW.ActionKey()
     local ok,err=pcall(A.Activate)
-    if not ok then
-        A.state="ERROR";A.lastCode=tostring(err)
-        DW.Print("动作异常: "..A.lastCode)
-    end
+    if not ok then A.state="ERROR";A.lastCode=tostring(err);DW.Print("宏执行异常: "..A.lastCode) end
 end
-TaiYangDrinkWalk_ActionKey=function() DW.ActionKey() end
+SLASH_TAIYANGZCHIHE1="/zchihe"
+SlashCmdList["TAIYANGZCHIHE"]=function() DW.ActionKey() end
 DW.RegisterModule("Action")
