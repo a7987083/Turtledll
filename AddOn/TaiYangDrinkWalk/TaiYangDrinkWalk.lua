@@ -1,4 +1,4 @@
--- TaiYangDrinkWalk v0.6.0
+-- TaiYangDrinkWalk v0.6.1
 -- Formal user UI:
 --   * SPAM is the default runtime mode.
 --   * Two independent HUD switches: adaptive Tick Timer and Adaptive Resource/Spark.
@@ -14,7 +14,7 @@
 TaiYangDrinkWalkDiagDB = TaiYangDrinkWalkDiagDB or {}
 
 local DW = {}
-local VERSION = "0.6.0"
+local VERSION = "0.6.1"
 local PERIOD_MS = 2000
 local SETTINGS_REFRESH_SEC = 0.20
 local PHASE_TOLERANCE_MS = 450
@@ -486,6 +486,7 @@ end
 
 local function ClearPhase(reason)
     DW.state = "UNSYNCED"
+    DW.reloadVerifyPending = nil
     DW.anchorMS = nil
     DW.lastSampleMS = nil
     DW.lastAcceptedMS = nil
@@ -754,6 +755,7 @@ local function RestoreReloadPhase()
     if not valid then return false end
     DW.anchorMS = tonumber(db.phaseAnchorMS)
     DW.state = "VERIFY"
+    DW.reloadVerifyPending = true
     DW.confidence = Clamp(tonumber(db.phaseConfidence) or 0.45, 0.20, 0.80)
     DW.jitterMS = tonumber(db.phaseJitterMS) or 0
     DW.phaseErrors = {0}
@@ -2221,13 +2223,14 @@ local function HandleMiscEvent(e, unit)
         DW.playerDead = false
         ClearPhase("RESURRECT")
         DW.resourceEventValue = nil
+        ResetEnergyRuntime("RESURRECT")
         RefreshResourceContext(true)
         DW.lastMana = DW.resourceValue
         return
     end
 
     if e == "ZONE_CHANGED_NEW_AREA" then
-        if DW.anchorMS and DW.state ~= "UNSYNCED" then
+        if DW.anchorMS and DW.state ~= "UNSYNCED" and not DW.reloadVerifyPending then
             DW.state = "VERIFY"
             DW.resumeReason = "ZONE_VERIFY"
             DW.AddLog("区域变化：保留phase但进入VERIFY")
@@ -2236,9 +2239,12 @@ local function HandleMiscEvent(e, unit)
     end
 
     if e == "PLAYER_ENTERING_WORLD" then
-        -- Reload restoration already enters VERIFY; do not discard that
-        -- candidate merely because PLAYER_ENTERING_WORLD follows VARIABLES_LOADED.
-        if DW.state ~= "VERIFY" then ClearPhase("ENTER_WORLD") end
+        -- Preserve ONLY the first world-entry immediately following a verified
+        -- /reload. Other world entries invalidate stale Mana phase anchors.
+        local restorePending = DW.reloadVerifyPending and DW.state == "VERIFY"
+        DW.reloadVerifyPending = nil
+        if not restorePending then ClearPhase("ENTER_WORLD") end
+        ResetEnergyRuntime("ENTER_WORLD")
         DW.recentDispatch = nil
         DW.lastDispatchMS = nil
         DW.resourceEventValue = nil
