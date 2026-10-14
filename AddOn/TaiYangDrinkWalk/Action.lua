@@ -9,7 +9,11 @@ local function Native(cmd,bag,slot)
     if type(TaiYangShenDian)~="function" then return false,"DLL_MISSING" end
     local ok,a,b,c
     if bag~=nil then ok,a,b,c=pcall(TaiYangShenDian,cmd,bag,slot)
-    else ok,a=pcall(TaiYangShenDian,cmd) end
+    else
+        ok,a=pcall(TaiYangShenDian,cmd)
+        if not ok then return false,"DLL_EXCEPTION:"..tostring(a) end
+        return true,a
+    end
     if not ok then return false,"DLL_EXCEPTION:"..tostring(a) end
     return a,b,c
 end
