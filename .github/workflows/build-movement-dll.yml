@@ -1,0 +1,48 @@
+name: Build Movement DLL x86
+
+on:
+  push:
+    branches: [dll-dev]
+    paths:
+      - 'src/**'
+      - 'build/**'
+      - '.github/workflows/build-movement-dll.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LLVM Windows cross-toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang lld llvm
+          echo "/usr/lib/llvm-18/bin" >> "$GITHUB_PATH"
+      - name: Verify toolchain
+        run: |
+          command -v clang-cl
+          command -v lld-link
+          clang-cl --version
+          lld-link --version
+      - name: Compile Windows x86 DLL
+        shell: bash
+        run: bash build/build.sh
+      - name: Validate PE and exports
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s taiyangshendian.dll
+          file taiyangshendian.dll
+          llvm-readobj --file-headers --coff-exports taiyangshendian.dll
+          sha256sum taiyangshendian.dll > taiyangshendian.dll.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taiyangshendian-movement-x86
+          path: |
+            taiyangshendian.dll
+            taiyangshendian.dll.sha256
+          if-no-files-found: error
