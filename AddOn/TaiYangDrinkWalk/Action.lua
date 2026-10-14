@@ -2,7 +2,7 @@
 -- Lua 5.0 / WoW 1.12.1. No autonomous scheduler; no key binding.
 local DW=TaiYangDrinkWalk
 local A={implemented=true,state="IDLE",lastCode="NOT_CALLED",attempts=0,confirmed=0,
-         lastTry=-100000,tickKey=nil,tickAttempts=0}
+         lastTry=-100000,tickKey=nil,tickAttempts=0,rejected=0}
 DW.Action=A
 local function Now() return GetTime()*1000 end
 local function Native(cmd,bag,slot)
@@ -89,12 +89,22 @@ local function Confirm()
         A.pending=nil
     elseif n>=p.deadline then
         A.state="UNCONFIRMED"
-        A.lastCode="CONFIRM_TIMEOUT"
+        A.lastCode=p.error and ("GAME_REJECTED:"..p.error) or "CONFIRM_TIMEOUT_900MS"
         A.pending=nil
     end
 end
 function A.ObserveBag() if A.pending then Confirm() end end
 function A.ObserveAura() if A.pending then Confirm() end end
+function A.ObserveError(message)
+    local p=A.pending
+    if p and Now()-p.sentAt<=400 then
+        p.error=tostring(message or "UI_ERROR")
+        A.rejected=A.rejected+1
+        A.lastCode="GAME_REJECTED:"..p.error
+        A.state="REJECTED_PENDING_EVIDENCE"
+        -- Keep the evidence window until 900ms; do not learn from this as a tick miss.
+    end
+end
 function A.Update() if A.pending then Confirm() end end
 function A.Check()
     local ok,status=Native("DrinkWalk.Status")
@@ -132,11 +142,16 @@ function A.Activate()
     local now=Now()
     if now-A.lastTry<75 then return Block("RATE_LIMIT_75MS") end
     -- Hold briefly after dispatch for server response; after timeout allow one retry.
-    if A.pending then return Block("WAIT_CONFIRM") end
+    if A.pending then
+        A.lastCode="WAIT_CONFIRM_900MS"
+        return false
+    end
     if not DW.Items or not DW.Items.Find then return Block("ITEM_MODULE_MISSING") end
     local item=DW.Items.Find()
     if not item or not item.id then return Block("NO_CONFIGURED_ITEM") end
-    if item.kind=="UNKNOWN" then return Block("ITEM_KIND_UNKNOWN") end
+    if item.kind~="DRINK" and item.kind~="BOTH" then return Block("NOT_DRINK") end
+    if type(UnitPowerType)~="function" or UnitPowerType("player")~=0 then return Block("NOT_MANA_RESOURCE") end
+    if (UnitManaMax("player") or 0)<=0 or (UnitMana("player") or 0)>=(UnitManaMax("player") or 0) then return Block("MANA_FULL") end
     local link=GetContainerItemLink(item.bag,item.slot)
     local id=link and tonumber(string.match(link,"item:(%d+)"))
     local _,count,locked=GetContainerItemInfo(item.bag,item.slot)
@@ -161,14 +176,14 @@ function A.Activate()
     -- Short confirmation timeout ensures the second attempt can fit the window,
     -- but do not retry while an unconfirmed dispatch is still pending.
     A.pending={id=item.id,kind=item.kind,beforeTotal=beforeTotal,beforeAura=beforeAura,
-               deadline=now+90,tickKey=key,bagEvidence=false,auraEvidence=false}
+               sentAt=now,deadline=now+900,tickKey=key,bagEvidence=false,auraEvidence=false,error=nil}
     return true
 end
 function A.Summary()
     Confirm()
     return "Macro/DLL: "..A.state.." / "..A.lastCode..
            " | sent="..A.attempts.." confirmed="..A.confirmed..
-           " | tickTry="..A.tickAttempts.."/2"
+           " | tickTry="..A.tickAttempts.."/2 | rejected="..A.rejected
 end
 function DW.ActionKey()
     local ok,err=pcall(A.Activate)
