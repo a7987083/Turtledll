@@ -42,7 +42,7 @@ function H.Update()
     if not source or not source.anchor or source.state=="UNSYNCED" then
         H.bar:SetMinMaxValues(0,1);H.bar:SetValue(0)
         H.label:SetText(resource.." | 未同步")
-        H.detail:SetText("窗口: 不可判定 · WATCH/预览")
+        H.detail:SetText("窗口: 不可判定 · 宏 /zchihe")
         return
     end
     local period=source.period or 2000
@@ -56,8 +56,7 @@ function H.Update()
     H.bar:SetMinMaxValues(0,period);H.bar:SetValue(elapsed)
     H.label:SetText(string.format("%s | %s | 下次 %.2fs",resource,source.state,remaining/1000))
     local inside=H.Window(nextTick,now,source.state=="LOCKED")
-    local mode=(type(TaiYangDrinkWalkDB)=="table" and TaiYangDrinkWalkDB.mode) or "WATCH"
-    H.detail:SetText("窗口: "..(inside and "|cff55ff55是|r" or "否").." | "..mode.." (仅预览)")
+    H.detail:SetText("窗口: "..(inside and "|cff55ff55是|r" or "否").." | 宏 /zchihe")
 end
 function H.Create()
     if H.frame or not UIParent then return end
