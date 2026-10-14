@@ -1,8 +1,0 @@
-## Interface: 11200
-## Title: TaiYangDrinkWalk
-## Notes: TaiYangShenDian API33 DrinkWalk native manual diagnostics
-## Author: TaiYangShenDian
-## Version: 1.0.0
-## SavedVariables: TaiYangDrinkWalkDB
-
-TaiYangDrinkWalk.lua
