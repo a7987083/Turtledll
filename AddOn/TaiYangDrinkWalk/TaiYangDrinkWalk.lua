@@ -1,4 +1,4 @@
--- TaiYangDrinkWalk v0.6.1
+-- TaiYangDrinkWalk v0.6.2
 -- Formal user UI:
 --   * SPAM is the default runtime mode.
 --   * Two independent HUD switches: adaptive Tick Timer and Adaptive Resource/Spark.
@@ -14,7 +14,7 @@
 TaiYangDrinkWalkDiagDB = TaiYangDrinkWalkDiagDB or {}
 
 local DW = {}
-local VERSION = "0.6.1"
+local VERSION = "0.6.2"
 local PERIOD_MS = 2000
 local SETTINGS_REFRESH_SEC = 0.20
 local PHASE_TOLERANCE_MS = 450
@@ -734,7 +734,8 @@ local function SetSpamWindowSpec(text)
 end
 
 local function SavePhaseForReload()
-    TaiYangDrinkWalkDiagDB.reloadRequested = true
+    -- Never advertise an UNSYNCED / anchor-less phase as restorable.
+    TaiYangDrinkWalkDiagDB.reloadRequested = DW.anchorMS ~= nil and (DW.state == "LOCKED" or DW.state == "VERIFY")
     TaiYangDrinkWalkDiagDB.characterKey = CharKey()
     TaiYangDrinkWalkDiagDB.phaseAnchorMS = DW.anchorMS
     TaiYangDrinkWalkDiagDB.phaseState = DW.state
@@ -749,11 +750,14 @@ local function RestoreReloadPhase()
     local now = NowMS()
     local elapsed = savedAt and (now - savedAt) or nil
     -- Reject stale/cross-session phase data; only a recent /reload may resume VERIFY.
+    local anchor = tonumber(db.phaseAnchorMS)
     local valid = db.reloadRequested and db.characterKey == CharKey()
-        and tonumber(db.phaseAnchorMS) and elapsed and elapsed >= 0 and elapsed <= 120000
+        and (db.phaseState == "LOCKED" or db.phaseState == "VERIFY")
+        and anchor and anchor >= 0 and anchor <= now
+        and elapsed and elapsed >= 0 and elapsed <= 120000
     db.reloadRequested = false
     if not valid then return false end
-    DW.anchorMS = tonumber(db.phaseAnchorMS)
+    DW.anchorMS = anchor
     DW.state = "VERIFY"
     DW.reloadVerifyPending = true
     DW.confidence = Clamp(tonumber(db.phaseConfidence) or 0.45, 0.20, 0.80)
