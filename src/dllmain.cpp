@@ -992,6 +992,71 @@ static int doUnitStateByGuid(Lua50::State L){
     return 1;
 }
 
+// M3: explicit-call-only Boss.State. Observed unit state is NOT raid encounter victory.
+static int doBossState(Lua50::State L){
+    const char* code="OK";const char* state="UNKNOWN";const char* evidence="NONE";
+    const char* unit="target";void* obj=0;unsigned long long guid=0;
+    unsigned long entry=0;bool entryKnown=false,combatKnown=false,combat=false,deadKnown=false,dead=false;
+    unsigned long health=0,maxHealth=0;bool healthKnown=false;
+    char name[256]={0},cls[80]={0},gh[17]={0};double level=0;
+    bool nameKnown=false,clsKnown=false,levelKnown=false;
+    if(!detectBuild().ok)code="UNSUPPORTED_BUILD";
+    else if(Lua50::GetTop(L)>=2&&(!Lua50::IsString(L,2)||!validUnitToken(Lua50::ToString(L,2))))code="BAD_ARGUMENT";
+    else {
+        if(Lua50::GetTop(L)>=2)unit=Lua50::ToString(L,2);
+        obj=resolveUnit(unit);
+        if(!obj)code="UNIT_NOT_FOUND";
+        else {
+            unsigned long type=0;
+            if(!objectType(obj,&type)||(type!=WoW112::TYPE_UNIT&&type!=WoW112::TYPE_PLAYER))code="UNIT_NOT_SUPPORTED";
+            else if(!objectGuid(obj,&guid))code="GUID_UNAVAILABLE";
+            else {
+                hex64(gh,sizeof(gh),guid);
+                entryKnown=objectEntry(obj,&entry);
+                nameKnown=identityLuaString(L,"UnitName",unit,name,sizeof(name));
+                clsKnown=identityLuaString(L,"UnitClassification",unit,cls,sizeof(cls));
+                levelKnown=identityLuaLevel(L,unit,&level);
+                combatKnown=m2CombatByToken(L,unit,&combat);
+                unsigned char* d=0;unsigned long dyn=0;
+                if(descriptorPtr(obj,&d)&&descriptorU32At(d,WoW112::UNIT_FIELD_HEALTH_INDEX,&health)&&
+                   descriptorU32At(d,WoW112::UNIT_FIELD_MAXHEALTH_INDEX,&maxHealth)&&
+                   descriptorU32At(d,WoW112::UNIT_DYNAMIC_FLAGS_INDEX,&dyn)){
+                    healthKnown=true;deadKnown=true;dead=(health==0)||((dyn&WoW112::UNIT_DYNFLAG_DEAD)!=0);
+                }
+                if(deadKnown&&dead){state="DEAD";evidence="UNIT_DEATH_FLAG_OR_ZERO_HP";}
+                else if(combatKnown&&combat){state="ENGAGED";evidence="UNIT_AFFECTING_COMBAT";}
+                else if(deadKnown&&!dead){state="DETECTED";evidence="UNIT_ALIVE";}
+                else {state="UNKNOWN";evidence="INSUFFICIENT_DATA";}
+            }
+        }
+    }
+    Lua50::NewTable(L);
+    tableSetBool(L,"ok",eq(code,"OK"));tableSetString(L,"code",code);
+    tableSetNumber(L,"schemaVersion",1);
+    tableSetString(L,"state",state);tableSetString(L,"evidence",evidence);
+    tableSetString(L,"encounterResult","UNCONFIRMED");
+    tableSetNumber(L,"timestampMS",(double)GetTickCount());
+    Lua50::PushString(L,"data");Lua50::NewTable(L);
+    tableSetString(L,"unit",unit);
+    if(guid)tableSetString(L,"guid",gh);
+    if(entryKnown)tableSetNumber(L,"entry",(double)entry);
+    if(nameKnown)tableSetString(L,"name",name);
+    if(clsKnown)tableSetString(L,"classification",cls);
+    if(levelKnown)tableSetNumber(L,"level",level);
+    tableSetBool(L,"entryKnown",entryKnown);tableSetBool(L,"nameKnown",nameKnown);
+    tableSetBool(L,"classificationKnown",clsKnown);tableSetBool(L,"levelKnown",levelKnown);
+    tableSetBool(L,"inCombatKnown",combatKnown);
+    if(combatKnown)tableSetBool(L,"inCombat",combat);
+    tableSetBool(L,"deadKnown",deadKnown);
+    if(deadKnown)tableSetBool(L,"dead",dead);
+    if(healthKnown){tableSetNumber(L,"health",(double)health);tableSetNumber(L,"maxHealth",(double)maxHealth);}
+    tableSetBool(L,"healthKnown",healthKnown);
+    // Candidate classification is advisory only; elite does not imply boss.
+    tableSetBool(L,"bossCandidate",(clsKnown&&ieq(cls,"worldboss"))||(levelKnown&&level==-1));
+    Lua50::SetTable(L,-3);
+    return 1;
+}
+
 static int doGroundStatus(Lua50::State L){ int e=requireFeature(L,&g_groundProbeEnabled);if(e)return e;BuildInfo b=detectBuild();Lua50::PushBool(L,b.ok);Lua50::PushString(L,b.ok?"OK":"UNSUPPORTED_BUILD");Lua50::PushString(L,b.ok?"GroundProbe one-shot query pack ready":"unsupported client");return 3; }
 static int doPlayerPosition(Lua50::State L){
     int e=requireFeature(L,&g_groundProbeEnabled);if(e)return e;g_recordScratch[0]=0;void* p=resolveUnit("player");if(!p){Lua50::PushString(L,"E|PLAYER_OBJECT_UNAVAILABLE|player object is not available");return 1;}float v[3]={0};if(!objectPosition(p,v)){Lua50::PushString(L,"E|PLAYER_POSITION_INVALID|player position is not readable");return 1;}cat(g_recordScratch,sizeof(g_recordScratch),"P|");appendFloat4(g_recordScratch,sizeof(g_recordScratch),v[0]);appendChar(g_recordScratch,sizeof(g_recordScratch),'|');appendFloat4(g_recordScratch,sizeof(g_recordScratch),v[1]);appendChar(g_recordScratch,sizeof(g_recordScratch),'|');appendFloat4(g_recordScratch,sizeof(g_recordScratch),v[2]);Lua50::PushString(L,g_recordScratch);return 1;
@@ -1166,7 +1231,7 @@ static int __fastcall scriptMain(Lua50::State _L){
     if(eq(cmd,"MoonMarker.Runtime.Status"))return doMoonMarkerRuntimeStatus(L);
     if(isMoonMarkerGuardedCommand(cmd)&&!TysMoonRuntimeGuard::enabled())return pushMoonMarkerGuardFailure(L);
     if(eq(cmd,"facing"))return doFacing(L); if(eq(cmd,"speed"))return doSpeed(L);
-    if(eq(cmd,"Unit.Identity"))return doUnitIdentity(L); if(eq(cmd,"Unit.Guid"))return doUnitGuid(L); if(eq(cmd,"Unit.InSight"))return doUnitInSight(L);
+    if(eq(cmd,"Boss.State"))return doBossState(L); if(eq(cmd,"Unit.Identity"))return doUnitIdentity(L); if(eq(cmd,"Unit.Guid"))return doUnitGuid(L); if(eq(cmd,"Unit.InSight"))return doUnitInSight(L);
     if(eq(cmd,"GroundProbe.Status"))return doGroundStatus(L); if(eq(cmd,"GroundProbe.PlayerPosition"))return doPlayerPosition(L); if(eq(cmd,"GroundProbe.Snapshot"))return doSnapshot(L); if(eq(cmd,"GroundProbe.UnitByGuid"))return doUnitByGuid(L); if(eq(cmd,"GroundProbe.UnitStateByGuid"))return doUnitStateByGuid(L); if(eq(cmd,"GroundProbe.DynamicByGuid"))return doDynamicByGuid(L); if(eq(cmd,"GroundProbe.ScopeByGuid"))return doScopeByGuid(L); if(eq(cmd,"GroundProbe.TotemSnapshot"))return doTotemSnapshot(L);
     if(eq(cmd,"AutoRange.RelationByUnit"))return doRelationByUnit(L); if(eq(cmd,"AutoRange.RelationByGuid"))return doRelationByGuid(L);
     // V1.3-DW5: authorization is classified by command type, not by the
