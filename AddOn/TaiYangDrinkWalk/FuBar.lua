@@ -15,6 +15,20 @@ TaiYangDrinkWalkFu.hasNoColor = true
 TaiYangDrinkWalkFu.cannotDetachTooltip = true
 TaiYangDrinkWalkFu.clickableTooltip = false
 TaiYangDrinkWalkFu.defaultMinimapPosition = 210
+-- Use an addon-owned context menu instead of Ace/FuBar implied options.
+-- Keep the built-in menu title and Close line; only add About here.
+TaiYangDrinkWalkFu.overrideMenu = true
+
+function TaiYangDrinkWalkFu:OnMenuRequest(level, value)
+    if not AceLibrary:HasInstance("Dewdrop-2.0") then return end
+    local Dewdrop = AceLibrary("Dewdrop-2.0")
+    if level == 1 then
+        Dewdrop:AddLine("text", "关于", "hasArrow", true, "value", "about")
+    elseif level == 2 and value == "about" then
+        Dewdrop:AddLine("text", "太阳神殿 DrinkWalk", "isTitle", true)
+        Dewdrop:AddLine("text", "左键点击酒杯：打开 / 关闭设置", "disabled", true)
+    end
+end
 
 function TaiYangDrinkWalkFu:OnInitialize()
     self:RegisterDB("TaiYangDrinkWalkFuDB")
