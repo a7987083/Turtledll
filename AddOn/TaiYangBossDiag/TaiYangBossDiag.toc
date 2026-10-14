@@ -1,0 +1,5 @@
+## Interface: 11200
+## Title: TaiYang Boss M1 Diagnostic
+## Notes: One-shot identity diagnostics; requires TaiYangShenDian DLL
+## Version: 0.1.0
+TaiYangBossDiag.lua
