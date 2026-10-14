@@ -33,7 +33,7 @@ function DW.BuildSettings()
     f:SetMovable(true);f:EnableMouse(true);f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart",function() f:StartMoving() end)
     f:SetScript("OnDragStop",function() f:StopMovingOrSizing() end)
-    Label(f,"TaiYangDrinkWalk - Tick 观测 0.3.0",20,-20)
+    Label(f,"TaiYangDrinkWalk - HUD 预览 0.4.0",20,-20)
     local close=CreateFrame("Button",nil,f,"UIPanelCloseButton")
     close:SetPoint("TOPRIGHT",f,"TOPRIGHT",-4,-4)
     DW.statusText=Label(f,"DLL",20,-58)
@@ -69,6 +69,12 @@ function DW.BuildSettings()
         if TaiYangDrinkWalkDB.mode=="WATCH" then TaiYangDrinkWalkDB.mode="SPAM"
         else TaiYangDrinkWalkDB.mode="WATCH" end
         DW.RefreshSettings()
+    end)
+    Button("显示/隐藏 HUD",148,-227,130,function()
+        if DW.HUD then DW.HUD.Toggle() end
+    end)
+    Button("窗口详情",289,-227,125,function()
+        if DW.HUD then DW.HUD.Report() end
     end)
     DW.itemText=Label(f,"尚未扫描",20,-262)
     DW.itemText:SetWidth(430);DW.itemText:SetJustifyH("LEFT")
