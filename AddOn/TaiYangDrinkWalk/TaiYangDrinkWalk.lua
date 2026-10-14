@@ -567,6 +567,7 @@ local function SetClassifier(className, reason, accepted)
     end
 end
 
+local RecordTickCalibration -- forward declaration: Lua 5.0 local scope
 local function AcceptSample(sampleMS, deltaMana, phaseError)
     DW.goodSamples = DW.goodSamples + 1
     DW.badSamples = 0
@@ -749,7 +750,7 @@ local function SetTickCalibrationEnabled(enabled)
     AddLog("Mana Tick 自动校准：" .. DW.tickCalibrationState)
 end
 
-local function RecordTickCalibration(phaseError)
+RecordTickCalibration = function(phaseError)
     if not TickCalibrationEnabled() or DW.state ~= "LOCKED" then return end
     if (DW.confidence or 0) < 0.80 or (DW.jitterMS or 9999) > 140 then return end
     DW.tickCalibrationErrors = DW.tickCalibrationErrors or {}
