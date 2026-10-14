@@ -1,4 +1,4 @@
--- TaiYangDrinkWalk v0.5.4
+-- TaiYangDrinkWalk v0.6.0
 -- Formal user UI:
 --   * SPAM is the default runtime mode.
 --   * Two independent HUD switches: adaptive Tick Timer and Adaptive Resource/Spark.
@@ -14,7 +14,7 @@
 TaiYangDrinkWalkDiagDB = TaiYangDrinkWalkDiagDB or {}
 
 local DW = {}
-local VERSION = "0.5.4"
+local VERSION = "0.6.0"
 local PERIOD_MS = 2000
 local SETTINGS_REFRESH_SEC = 0.20
 local PHASE_TOLERANCE_MS = 450
@@ -1904,7 +1904,7 @@ local function CreateUI()
 
         DW.settingsAccum = (DW.settingsAccum or 0) + (arg1 or 0)
         if DW.settingsAccum >= SETTINGS_REFRESH_SEC then
-            DW.settingsAccum = 0
+            DW.settingsAccum = DW.settingsAccum - SETTINGS_REFRESH_SEC
             RefreshResourceContext(false)
             if DW.bagDirty then FindConfiguredItem() end
             RefreshSettingsUI()
