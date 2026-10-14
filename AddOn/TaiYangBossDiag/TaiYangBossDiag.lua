@@ -1,7 +1,7 @@
 -- TaiYangBossDiag M2: WoW 1.12 / Lua 5.0, Chinese one-shot graphical panel.
 -- No OnUpdate scanner and no game memory access.
 local frame = CreateFrame("Frame", "TaiYangBossDiagWindow", UIParent)
-frame:SetWidth(430); frame:SetHeight(310)
+frame:SetWidth(500); frame:SetHeight(435)
 frame:SetPoint("CENTER", UIParent, "CENTER", 0, 65)
 frame:SetFrameStrata("DIALOG")
 frame:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=11,top=12,bottom=11}})
@@ -14,12 +14,12 @@ local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
 title:SetPoint("TOP",frame,"TOP",0,-22);title:SetText("太阳神殿 · Boss 状态诊断")
 local sub=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
 sub:SetPoint("TOP",title,"BOTTOM",0,-8)
-sub:SetText("M3 · 中文 API 查询器 · 0.5 秒 / 次 · 关闭后停查")
+sub:SetText("M4 · Boss 事件 / API 查询 · 每 0.5 秒 · 仅窗口打开时")
 local lines={}
 for i=1,9 do
     local font=frame:CreateFontString(nil,"OVERLAY","GameFontHighlight")
     font:SetPoint("TOPLEFT",frame,"TOPLEFT",27,-66-(i-1)*21)
-    font:SetWidth(375);font:SetJustifyH("LEFT")
+    font:SetWidth(450);font:SetJustifyH("LEFT")
     lines[i]=font
 end
 local function showLine(i,s) lines[i]:SetText(s or "") end
@@ -28,13 +28,39 @@ local function boolText(known,value,yes,no)
     if value then return "|cff55ff55"..yes.."|r" end
     return "|cffffff55"..no.."|r"
 end
-local function safeCall(api,...)
-    if type(TaiYangShenDian)~="function" then return nil,"DLL 未加载" end
-    local ok,result=pcall(TaiYangShenDian,api,unpack(arg or {}))
-    -- Lua 5.0 implicit arg with vararg is not relied upon: replaced below.
-    if not ok then return nil,tostring(result) end
-    if type(result)~="table" then return nil,"接口没有返回表" end
-    return result,nil
+local eventLines={}
+local historyTitle=frame:CreateFontString(nil,"OVERLAY","GameFontNormal")
+historyTitle:SetPoint("TOPLEFT",frame,"TOPLEFT",27,-260)
+historyTitle:SetText("事件记录（仅查询到的状态变化）")
+for i=1,5 do
+    local f=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    f:SetPoint("TOPLEFT",frame,"TOPLEFT",27,-279-(i-1)*20)
+    f:SetWidth(450);f:SetJustifyH("LEFT");eventLines[i]=f
+end
+local lastSeq=0
+local eventHistory={}
+local eventNames={DETECTED="发现",ENGAGED="进入战斗",DEAD="单位死亡"}
+local function updateEvents()
+    local ok,e=pcall(TaiYangShenDian,"Boss.Event.GetAfter",lastSeq)
+    if not ok or type(e)~="table" then
+        eventLines[1]:SetText("事件接口调用失败："..tostring(e));return
+    end
+    if e.lost then
+        table.insert(eventHistory,1,"警告：部分事件已被覆盖（序号超出缓冲区）")
+    end
+    local items=e.events or {}
+    for i=1,table.getn(items) do
+        local v=items[i]
+        if v and type(v.seq)=="number" and v.seq>lastSeq then
+            local desc="#"..tostring(v.seq).." Entry "..tostring(v.entry or "?").."  "..tostring(eventNames[v.state] or v.state)
+            if not v.bossCandidate then desc=desc.." [非首领候选]" end
+            table.insert(eventHistory,1,desc)
+            if table.getn(eventHistory)>25 then table.remove(eventHistory) end
+            lastSeq=v.seq
+        end
+    end
+    if type(e.latestSeq)=="number" and e.latestSeq>lastSeq then lastSeq=e.latestSeq end
+    for i=1,5 do eventLines[i]:SetText(eventHistory[i] or (i==1 and "暂无事件，先选中目标并进行状态变化测试" or "")) end
 end
 local queryCount=0
 local queryErrors=0
@@ -56,7 +82,7 @@ local function refresh(unit)
     showLine(1,"接口 Unit.Identity | "..tostring(id.code).." | 第 "..queryCount.." 次查询")
     if not id.ok then
         showLine(2,"当前单位不可用："..tostring(id.code))
-        showLine(9,"累计查询："..queryCount.."  异常："..queryErrors)
+        showLine(9,"累计查询："..queryCount.."  异常："..queryErrors)\n        updateEvents()
         return
     end
     showLine(2,"单位："..tostring(d.name or "未知").."   Entry："..tostring(d.entry or "?"))
@@ -77,7 +103,7 @@ local function refresh(unit)
         local flag=(boss.data and boss.data.bossCandidate) and "首领候选" or "普通目标 / 未识别"
         showLine(8,"Boss.State："..tostring(stateNames[boss.state] or boss.state).." | "..flag)
     end
-    showLine(9,"查询："..queryCount.."  异常："..queryErrors.."  采样："..tostring(g.timestampMS or "?"))
+    showLine(9,"查询："..queryCount.."  异常："..queryErrors.."  采样："..tostring(g.timestampMS or "?"))\n    updateEvents()
 end
 local function makeButton(label,x,callback)
     local b=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
@@ -87,11 +113,11 @@ local function makeButton(label,x,callback)
     return b
 end
 makeButton("立即查询",-120,function() refresh(currentUnit) end)
-makeButton("暂停 / 恢复",0,function() running=not running; refresh(currentUnit) end)
+makeButton("暂停 / 恢复",0,function() running=not running end)
 makeButton("关闭",120,function() frame:Hide() end)
 local clock=0
 frame:SetScript("OnUpdate",function()
-    if not running then return end
+    if not frame:IsVisible() or not running then return end
     clock=clock+arg1
     if clock>=0.5 then clock=0;refresh(currentUnit) end
 end)
