@@ -1,24 +1,30 @@
-# TaiYangDrinkWalk 0.4.0 — Tick HUD 与走喝窗口预览
+# TaiYangDrinkWalk 0.5.0 — DLL 原生走喝按键执行
 
-针对 WoW 1.12.1 / Lua 5.0。保留已验证的基础框架、物品配置/Tooltip 分类及 0.3.0 的 Mana/Energy Tick 观测。
+WoW 1.12.1 / Lua 5.0。继承 0.4.0 的物品 Tooltip 分类、Mana/Energy Tick 与 HUD。
 
-**本阶段只显示，不使用物品。** `Action.lua` 仍为安全占位；WATCH 和 SPAM 都不执行 `DrinkWalk.UseItem`。
+**DLL 必须提供 API33 的 DrinkWalk.Status / DrinkWalk.ResolveItem / DrinkWalk.UseItem**。无 DLL 不会执行物品操作。不会调用 Lua UseContainerItem，也没有后台自动使用调度。
 
-## 新增
-- 独立可拖动 HUD；位置及显隐保存到 `TaiYangDrinkWalkDB.hud`。
-- Mana / Energy 按玩家当前资源自动选择进度条；Rage 显示未同步提示，不虚构怒气恢复 Tick。
-- Tick 锁定状态、预计距下一次 Tick 的秒数，以及红色 Tick 零点线。
-- 根据已有 Tick 预测的演示窗口：剩余 320–170 毫秒标记为 YES，其他时间为 NO。只在状态为 LOCKED 时显示 YES。
-- 设置窗口「显示/隐藏 HUD」「窗口详情」按钮。
-- `/tsdw hud` 开关 HUD；`/tsdw window` 打印窗口详情；`/tsdw tick` 保持既有采样诊断。
-- 无有效 Tick 锚点时显示 UNSYNCED，不伪造时间窗口。
+## 执行顺序
+1. 玩家按游戏绑定中的 TaiYangDrinkWalk 动作按键（Bindings.xml）。
+2. 仅 SPAM 模式继续；WATCH 只观察。
+3. 防重入、75ms 间隔、同一预测 Tick 最多执行一次；有未确认调用时暂不再次派发。
+4. DLL `DrinkWalk.Status` 检查 `available==true`。
+5. Mana/Energy Tick 必须 LOCKED，且处于距下次 Tick 320–170ms 的窗口。
+6. 按配置扫描物品并通过 Tooltip 判断类型；UNKNOWN 不使用。
+7. 使用前再次读取背包格子物品 ID、数量和锁定状态；`DrinkWalk.ResolveItem` 后再校验一次。
+8. `DrinkWalk.UseItem` 派发原生物品操作。成功返回仅代表**原生派发**，不是服务器接受。
+9. BAG_UPDATE 及周期轮询检查原格子数量减少；900ms 未观察到消耗标记 UNCONFIRMED。
 
-## 界面和操作
-`/tsdw` 打开设置界面；`/tsdw hud` 显隐进度条；`/tsdw window` 查询当前预览窗口；`/tsdw scan` 保留只读物品识别。
+## 命令
+- `/tsdw` 设置窗口：配置物品、切换 WATCH/SPAM、HUD 控制
+- `/tsdw native` 查看 DLL 原生接口是否可用
+- `/tsdw action` 查看上次执行状态、错误码和派发/确认次数
+- `/tsdw tick`、`/tsdw window`、`/tsdw scan` 保留原功能
 
-## 限制
-- HUD 的 80ms 近似刷新只用来显示；不是精确的服务端 Tick 定时。
-- 320ms/170ms 是初始参考数值，**不是**已实测的最佳使用窗口。
-- Mana/Energy 仍使用当前 0.3.0 的简化观测模型，尚未移植原版全部异常分类与 Blade Rush 调整。
-- 不包含自动物品使用、成功确认、自适应 Lead、实际按键触发。
-- GitHub Actions 打包成功不能代表乌龟服游戏内运行成功。
+## 测试重点
+- 首先 WATCH 模式下按动作键，确认不会使用物品。
+- SPAM 模式检查 DLL 状态、Tick LOCKED、背包物品配置，再进入预览窗口按键。
+- 成功派发要与实际扣除物品分开判断；`/tsdw action` 应显示 DISPATCHED_UNCONFIRMED、CONFIRMED 或 UNCONFIRMED。
+- 没有使用物品时，确认逻辑可能因背包物品移动产生误判；本阶段只实现基本数量确认，Aura 佐证及更严格交易判定留到下一阶段。
+
+**重要：** 这是未经过乌龟服实机验证的原生执行测试版；请先用可消耗的普通食物/饮料测试，保留原来能使用的插件 ZIP 以便回退。
