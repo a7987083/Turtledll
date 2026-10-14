@@ -1,7 +1,7 @@
 -- WoW 1.12.1 / Lua 5.0. Bootstrap and public API.
 TaiYangDrinkWalk = TaiYangDrinkWalk or {}
 local DW = TaiYangDrinkWalk
-DW.version = "0.3.0-tick-observer"
+DW.version = "0.4.0-hud"
 DW.modules = {}
 DW.ready = false
 DW.uiError = nil
@@ -22,7 +22,7 @@ function DW.RegisterModule(name)
 end
 function DW.ShowStatus()
     DW.Print("框架: " .. tostring(DW.version) .. " | " .. DW.DLLStatus())
-    DW.Print("模块: Items=只读选择; ManaTick/EnergyTick=只读观测; Action=未接入")
+    DW.Print("模块: Items=只读选择; Tick/HUD=观测预览; Action=未接入")
     if DW.TickReport then DW.TickReport() end
     if DW.uiError then DW.Print("UI error: " .. tostring(DW.uiError)) end
 end
@@ -51,6 +51,8 @@ SlashCmdList["TAIYANGDRINKWALK"] = function(msg)
     local cmd = string.lower(msg or "")
     if cmd == "status" then DW.ShowStatus()
     elseif cmd == "tick" then if DW.TickReport then DW.TickReport() end
+    elseif cmd == "hud" then if DW.HUD then DW.HUD.Toggle() end
+    elseif cmd == "window" then if DW.HUD then DW.HUD.Report() end
     elseif cmd == "scan" then DW.Items.Report()
     elseif cmd == "list" then DW.Print("配置: "..DW.Items.GetSpec())
     elseif string.sub(cmd,1,4) == "set " then
@@ -96,6 +98,10 @@ events:SetScript("OnEvent", function()
         end
     elseif event == "PLAYER_LOGIN" then
         DW.ready = true
+        if DW.HUD then
+            local ok,err=pcall(DW.HUD.Create)
+            if not ok then DW.Print("HUD创建失败: "..tostring(err)) end
+        end
         if DW.BuildSettings then
             local ok, err = pcall(DW.BuildSettings)
             if not ok then DW.uiError = tostring(err); DW.Print("设置界面创建失败: " .. DW.uiError) end
