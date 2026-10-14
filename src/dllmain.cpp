@@ -933,17 +933,62 @@ static int doUnitInSight(Lua50::State L){
     Lua50::PushBool(L,los);Lua50::PushString(L,los?"OK":"BLOCKED");return 2;
 }
 
+// M2: no new hook. Combat is known only when a supplied live unit token
+// resolves to the exact same GUID and the native Lua combat API succeeds.
+static bool m2CombatByToken(Lua50::State L,const char* token,bool* combat){
+    if(!token||!combat||!validUnitToken(token))return false;
+    int top=Lua50::GetTop(L);
+    Lua50::GetGlobal(L,"UnitAffectingCombat");
+    if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);return false;}
+    Lua50::PushString(L,token);
+    bool ok=Lua50::PCall(L,1,1,0)==0;
+    if(ok){
+        int typ=Lua50::Type(L,-1);
+        // WoW 1.12 may return nil for false; a successful nil result is false.
+        if(typ==WoW112::LUA_TBOOLEAN || typ==WoW112::LUA_TNIL)*combat=Lua50::ToBoolean(L,-1)!=0;
+        else ok=false;
+    }
+    Lua50::SetTop(L,top);
+    return ok;
+}
 static int doUnitStateByGuid(Lua50::State L){
     int e=requireFeature(L,&g_groundProbeEnabled);if(e)return e;if(!detectBuild().ok)return pushError(L,"UNSUPPORTED_BUILD");
-    if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2))return pushError(L,"BAD_ARGUMENT");unsigned long long g=0;if(!parseGuid(Lua50::ToString(L,2),&g))return pushError(L,"GUID_INVALID");
-    char h[17]={0};hex64(h,sizeof(h),g);Lua50::NewTable(L);tableSetString(L,"guid",h);void* o=findObjectByGuid(g);
+    if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2))return pushError(L,"BAD_ARGUMENT");
+    unsigned long long g=0;if(!parseGuid(Lua50::ToString(L,2),&g))return pushError(L,"GUID_INVALID");
+    const char* token=(Lua50::GetTop(L)>=3&&Lua50::IsString(L,3))?Lua50::ToString(L,3):0;
+    bool combatKnown=false,combat=false;
+    if(token&&validUnitToken(token)){
+        void* resolved=resolveUnit(token);unsigned long long tokenGuid=0;
+        if(resolved&&objectGuid(resolved,&tokenGuid)&&tokenGuid==g)
+            combatKnown=m2CombatByToken(L,token,&combat);
+    }
+    char h[17]={0};hex64(h,sizeof(h),g);
+    Lua50::NewTable(L);tableSetString(L,"guid",h);
+    tableSetNumber(L,"schemaVersion",2);
+    tableSetNumber(L,"timestampMS",(double)GetTickCount());
+    tableSetBool(L,"inCombatKnown",combatKnown);
+    if(combatKnown)tableSetBool(L,"inCombat",combat);
+    tableSetString(L,"lifeState","UNKNOWN");
+    void* o=findObjectByGuid(g);
     if(!o){tableSetBool(L,"visible",false);tableSetBool(L,"deadKnown",false);tableSetString(L,"code","GUID_NOT_VISIBLE");return 1;}
-    unsigned long t=0;if(!objectType(o,&t)||(t!=WoW112::TYPE_UNIT&&t!=WoW112::TYPE_PLAYER)){tableSetBool(L,"visible",true);tableSetBool(L,"deadKnown",false);tableSetString(L,"code","GUID_NOT_UNIT");return 1;}
-    tableSetBool(L,"visible",true);tableSetNumber(L,"objectType",(double)t);unsigned long entry=0;if(objectEntry(o,&entry))tableSetNumber(L,"entry",(double)entry);
-    float p[3]={0,0,0};if(objectPosition(o,p)){tableSetNumber(L,"x",(double)p[0]);tableSetNumber(L,"y",(double)p[1]);tableSetNumber(L,"z",(double)p[2]);}
-    unsigned char* d=0;unsigned long hp=0,maxHp=0,dyn=0;bool fields=descriptorPtr(o,&d)&&descriptorU32At(d,WoW112::UNIT_FIELD_HEALTH_INDEX,&hp)&&descriptorU32At(d,WoW112::UNIT_FIELD_MAXHEALTH_INDEX,&maxHp)&&descriptorU32At(d,WoW112::UNIT_DYNAMIC_FLAGS_INDEX,&dyn);
-    if(fields){bool dead=(hp<1UL)||((dyn&WoW112::UNIT_DYNFLAG_DEAD)!=0);tableSetBool(L,"deadKnown",true);tableSetBool(L,"dead",dead);tableSetNumber(L,"health",(double)hp);tableSetNumber(L,"maxHealth",(double)maxHp);tableSetNumber(L,"dynamicFlags",(double)dyn);tableSetString(L,"code","OK");}
-    else {tableSetBool(L,"deadKnown",false);tableSetString(L,"code","UNIT_FIELDS_UNAVAILABLE");}
+    unsigned long t=0;if(!objectType(o,&t)||(t!=WoW112::TYPE_UNIT&&t!=WoW112::TYPE_PLAYER)){
+        tableSetBool(L,"visible",true);tableSetBool(L,"deadKnown",false);tableSetString(L,"code","GUID_NOT_UNIT");return 1;
+    }
+    tableSetBool(L,"visible",true);tableSetNumber(L,"objectType",(double)t);
+    unsigned long entry=0;if(objectEntry(o,&entry))tableSetNumber(L,"entry",(double)entry);
+    float pos[3]={0,0,0};if(objectPosition(o,pos)){
+        tableSetNumber(L,"x",(double)pos[0]);tableSetNumber(L,"y",(double)pos[1]);tableSetNumber(L,"z",(double)pos[2]);
+    }
+    unsigned char* d=0;unsigned long hp=0,maxHp=0,dyn=0;
+    bool fields=descriptorPtr(o,&d)&&descriptorU32At(d,WoW112::UNIT_FIELD_HEALTH_INDEX,&hp)&&
+        descriptorU32At(d,WoW112::UNIT_FIELD_MAXHEALTH_INDEX,&maxHp)&&descriptorU32At(d,WoW112::UNIT_DYNAMIC_FLAGS_INDEX,&dyn);
+    if(fields){
+        bool dead=(hp<1UL)||((dyn&WoW112::UNIT_DYNFLAG_DEAD)!=0);
+        tableSetBool(L,"deadKnown",true);tableSetBool(L,"dead",dead);
+        tableSetString(L,"lifeState",dead?"DEAD":"ALIVE");
+        tableSetNumber(L,"health",(double)hp);tableSetNumber(L,"maxHealth",(double)maxHp);
+        tableSetNumber(L,"dynamicFlags",(double)dyn);tableSetString(L,"code","OK");
+    }else{tableSetBool(L,"deadKnown",false);tableSetString(L,"code","UNIT_FIELDS_UNAVAILABLE");}
     return 1;
 }
 
