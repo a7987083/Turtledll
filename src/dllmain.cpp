@@ -623,9 +623,16 @@ static bool movementCall(Lua50::State L,const char* name){
     Lua50::SetTop(L,top);
     return ok;
 }
+typedef SHORT (WINAPI *MovementKeyStateFn)(int);
+static MovementKeyStateFn movementKeyState(){
+    HMODULE user32=GetModuleHandleA("user32.dll");
+    return user32?(MovementKeyStateFn)GetProcAddress(user32,"GetAsyncKeyState"):0;
+}
 static unsigned long physicalMovementKeys(){
+    MovementKeyStateFn read=movementKeyState();
+    if(!read)return 0;
     unsigned long mask=0;
-    for(unsigned i=0;i<4;++i)if(GetAsyncKeyState(kMoveKeys[i]) & 0x8000)mask|=(1UL<<i);
+    for(unsigned i=0;i<4;++i)if(read(kMoveKeys[i]) & 0x8000)mask|=(1UL<<i);
     return mask;
 }
 static bool movementFunctionsReady(Lua50::State L){
@@ -660,7 +667,7 @@ static int doMovement(Lua50::State L,const char* cmd){
     }
     if(eq(cmd,"Movement.Pause")){
         if(g_movementPaused){Lua50::PushBool(L,true);Lua50::PushString(L,"ALREADY_PAUSED");return 2;}
-        if(!movementFunctionsReady(L)){Lua50::PushBool(L,false);Lua50::PushString(L,"MOVE_API_UNAVAILABLE");return 2;}
+        if(!movementFunctionsReady(L) || !movementKeyState()){Lua50::PushBool(L,false);Lua50::PushString(L,"MOVE_API_UNAVAILABLE");return 2;}
         // Do not claim coverage of auto-run or mouse movement; this is a WASD prototype.
         const unsigned long held=physicalMovementKeys();
         if(!held){Lua50::PushBool(L,false);Lua50::PushString(L,"NO_WASD_INTENT");return 2;}
