@@ -1497,15 +1497,23 @@ local function RenderManaTimerUI(nowMS, nextTickMS, tickInMS, tickPeriodMS, tick
 
     DW.manaTimerFrame:Show()
     local ratio = Clamp(current / maximum, 0, 1)
-    DW.manaTimerBar:SetValue(ratio)
-
-    local r, g, b = ResourceColor(kind)
-    local br, bg, bb, ba = ResourceBGColor(kind)
-    DW.manaTimerBar:SetStatusBarColor(r, g, b)
-    if DW.manaTimerBG then DW.manaTimerBG:SetVertexColor(br, bg, bb, ba) end
+    -- Preserve smooth spark updates, but avoid unchanged status/color work per frame.
+    if DW.hudLastRatio ~= ratio then
+        DW.manaTimerBar:SetValue(ratio)
+        DW.hudLastRatio = ratio
+    end
+    if DW.hudLastKind ~= kind then
+        local r, g, b = ResourceColor(kind)
+        local br, bg, bb, ba = ResourceBGColor(kind)
+        DW.manaTimerBar:SetStatusBarColor(r, g, b)
+        if DW.manaTimerBG then DW.manaTimerBG:SetVertexColor(br, bg, bb, ba) end
+        DW.hudLastKind = kind
+    end
 
     local displayCurrent, displayMax = DisplayResourceValues(kind, current, maximum)
-    if DW.resourceText then
+    if DW.resourceText and (DW.hudTextCurrent ~= displayCurrent or DW.hudTextMax ~= displayMax or DW.hudTextKind ~= kind or (kind == "ENERGY" and DW.hudTextEnergyPeriod ~= EffectiveEnergyTickMS())) then
+        DW.hudTextCurrent, DW.hudTextMax, DW.hudTextKind = displayCurrent, displayMax, kind
+        if kind == "ENERGY" then DW.hudTextEnergyPeriod = EffectiveEnergyTickMS() end
         -- All resource types use the same high-contrast text overlay.
         -- Keep presentation separate from energy tick timing/spark behavior.
         if kind == "RAGE" then
@@ -1531,12 +1539,18 @@ local function RenderManaTimerUI(nowMS, nextTickMS, tickInMS, tickPeriodMS, tick
             local startPct = 1 - Clamp(SpamOpenMS() / tickPeriodMS, 0, 1)
             local endPct = 1 - Clamp(SpamCloseMS() / tickPeriodMS, 0, 1)
             local widthPct = math.max(0, endPct - startPct)
-            DW.manaDrinkWindow:ClearAllPoints()
-            DW.manaDrinkWindow:SetPoint("LEFT", DW.manaTimerBar, "LEFT", startPct * UI_MANA_BAR_WIDTH, 0)
-            DW.manaDrinkWindow:SetWidth(math.max(1, widthPct * UI_MANA_BAR_WIDTH))
-            DW.manaDrinkWindow:SetHeight(UI_MANA_BAR_HEIGHT)
+            if DW.windowStartPct ~= startPct or DW.windowEndPct ~= endPct then
+                DW.manaDrinkWindow:ClearAllPoints()
+                DW.manaDrinkWindow:SetPoint("LEFT", DW.manaTimerBar, "LEFT", startPct * UI_MANA_BAR_WIDTH, 0)
+                DW.manaDrinkWindow:SetWidth(math.max(1, widthPct * UI_MANA_BAR_WIDTH))
+                DW.manaDrinkWindow:SetHeight(UI_MANA_BAR_HEIGHT)
+                DW.windowStartPct, DW.windowEndPct = startPct, endPct
+            end
             local active = tickInMS <= SpamOpenMS() and tickInMS >= SpamCloseMS()
-            DW.manaDrinkWindow:SetVertexColor(active and 0.17 or 0.12, active and 1.00 or 0.70, active and 0.35 or 0.24, active and 0.92 or 0.67)
+            if DW.windowLastActive ~= active then
+                DW.manaDrinkWindow:SetVertexColor(active and 0.17 or 0.12, active and 1.00 or 0.70, active and 0.35 or 0.24, active and 0.92 or 0.67)
+                DW.windowLastActive = active
+            end
             DW.manaDrinkWindow:Show()
         else
             DW.manaDrinkWindow:Hide()
