@@ -1,7 +1,7 @@
--- TaiYangBossMemo 0.5.0 | WoW 1.12 / Lua 5.0 | No external DLL dependencies.
+-- TaiYangBossMemo 0.6.0-A | WoW 1.12 / Lua 5.0 | No external DLL dependencies.
 -- Observational only: DEAD means unit death, not authoritative encounter victory.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
-local db,shown,firstSeq = nil,{},nil
+local db,shown = nil,{}
 local tracks,lastEntry={},nil
 local cursor=0
 local timer=0
@@ -14,6 +14,7 @@ local function getDB()
     if db.enabled==nil then db.enabled=true end
     if db.before==nil then db.before=true end
     if db.after==nil then db.after=true end
+    if db.pollInterval~=0.2 and db.pollInterval~=0.5 and db.pollInterval~=1 and db.pollInterval~=2 then db.pollInterval=0.5 end
     return db
 end
 local function api(cmd,a,b)
@@ -41,7 +42,7 @@ local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
 title:SetPoint("TOP",frame,"TOP",0,-21);title:SetText("太阳神殿 · Boss 战斗备忘录")
 local subtitle=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
 subtitle:SetPoint("TOP",title,"BOTTOM",0,-8)
-subtitle:SetText("以 NPC Entry 保存｜战前与死亡后独立备注｜每 0.5 秒查询")
+subtitle:SetText("以 NPC Entry 保存｜持续追踪 GUID｜间隔通过 /bossmemo interval 设置")
 local function textAt(y,text)
     local x=frame:CreateFontString(nil,"OVERLAY","GameFontNormal")
     x:SetPoint("TOPLEFT",frame,"TOPLEFT",28,y);x:SetText(text)
@@ -150,25 +151,84 @@ local function alert(entry,phase)
     say((phase=="before" and "战前：" or "死亡后：")..(item.name or tostring(entry)))
 end
 
--- Poll while monitoring is enabled regardless of editor visibility.
--- M4 journal is driven by Boss.State calls, and only observed transitions are emitted.
-local watched={}
-local function observe()
-    local d=getDB()
-    if not d.enabled then return end
-    local id=api("Unit.Identity","target")
-    if id and id.ok and id.data and id.data.guid and id.data.entry then
-        local entry=id.data.entry
-        if note(entry) then
-            local boss=api("Boss.State","target")
-            -- Defensive: never infer kill from loss of target or missing GUID.
-            if boss and boss.ok then watched[id.data.guid]=entry end
+-- V0.6.0-A: only session-local GUID tracking. SavedVariables hold notes/settings.
+-- GUID snapshots need the object to remain visible; invisibility is never interpreted as death.
+local MAX_TRACKS=16
+local TRACK_TTL_MS=300000
+local TRACK_INVISIBLE_MS=60000
+local function milliseconds() return math.floor(GetTime()*1000) end
+local function countTracks()
+    local n=0
+    for guid,t in pairs(tracks) do n=n+1 end
+    return n
+end
+local function resetSession()
+    tracks={};shown={};cursor=0;timer=0
+    local st=api("Boss.Status")
+    if st and type(st.latestSeq)=="number" then cursor=st.latestSeq end
+end
+local function removeOldest()
+    local oldestGuid,oldestTime=nil,nil
+    for guid,t in pairs(tracks) do
+        if not oldestTime or t.firstSeen<oldestTime then
+            oldestGuid=guid;oldestTime=t.firstSeen
         end
     end
+    if oldestGuid then tracks[oldestGuid]=nil end
+end
+local function addTrack(guid,entry)
+    if type(guid)~="string" or not entry or not note(entry) then return end
+    local t=tracks[guid]
+    if t then t.lastSeen=milliseconds();t.invisibleSince=nil;return end
+    if countTracks()>=MAX_TRACKS then removeOldest() end
+    local now=milliseconds()
+    tracks[guid]={entry=entry,firstSeen=now,lastSeen=now,invisibleSince=nil}
+end
+local function trigger(guid,entry,phase)
+    if not note(entry) then return end
+    if not shown[guid] then shown[guid]={} end
+    if shown[guid][phase] then return end
+    shown[guid][phase]=true
+    alert(entry,phase)
+end
+local function observe()
+    if not getDB().enabled then return end
+    local id=api("Unit.Identity","target")
+    local targetGuid=nil
+    if id and id.ok and id.data and id.data.guid and id.data.entry and note(id.data.entry) then
+        targetGuid=id.data.guid
+        addTrack(targetGuid,id.data.entry)
+        -- Boss.State generates M4 journal entries; call once while target is available.
+        local boss=api("Boss.State","target")
+        if boss and boss.ok then
+            if boss.state=="DETECTED" or boss.state=="ENGAGED" then
+                trigger(targetGuid,id.data.entry,"before")
+            elseif boss.state=="DEAD" then
+                trigger(targetGuid,id.data.entry,"after")
+            end
+        end
+    end
+    -- Once a GUID was seen, check its exact object even when target switches.
+    -- Query limits: 16 tracked GUIDs, once per configured interval.
+    local now=milliseconds()
+    for guid,t in pairs(tracks) do
+        if now-t.firstSeen>TRACK_TTL_MS then
+            tracks[guid]=nil
+        else
+            local state=api("GroundProbe.UnitStateByGuid",guid)
+            if state and state.visible and state.deadKnown then
+                t.lastSeen=now;t.invisibleSince=nil
+                if state.dead then trigger(guid,t.entry,"after") end
+            elseif not state or not state.visible then
+                if not t.invisibleSince then t.invisibleSince=now end
+                if now-t.invisibleSince>TRACK_INVISIBLE_MS then tracks[guid]=nil end
+            end
+        end
+    end
+    -- Read any M4 transitions produced by Boss.State or other API clients.
     local ev=api("Boss.Event.GetAfter",cursor)
     if not ev then return end
     if ev.lost then
-        -- Missing observations should never be replayed as reliable event triggers.
         cursor=ev.latestSeq or cursor
         return
     end
@@ -177,42 +237,49 @@ local function observe()
         local v=items[i]
         if v and type(v.seq)=="number" and v.seq>cursor then
             cursor=v.seq
-            local entry=v.entry
-            local item=entry and note(entry) or nil
-            if item and v.guid then
-                local key=v.guid
-                if not shown[key] then shown[key]={} end
-                if (v.state=="DETECTED" or v.state=="ENGAGED") and not shown[key].before then
-                    shown[key].before=true
-                    alert(entry,"before")
-                elseif v.state=="DEAD" and not shown[key].after then
-                    shown[key].after=true
-                    alert(entry,"after")
+            if v.guid and v.entry and note(v.entry) then
+                if v.state=="DETECTED" or v.state=="ENGAGED" then
+                    trigger(v.guid,v.entry,"before")
+                elseif v.state=="DEAD" then
+                    trigger(v.guid,v.entry,"after")
                 end
             end
         end
     end
-    if ev.latestSeq and ev.latestSeq>cursor then cursor=ev.latestSeq end
+    if type(ev.latestSeq)=="number" and ev.latestSeq>cursor then cursor=ev.latestSeq end
 end
 local driver=CreateFrame("Frame")
 driver:RegisterEvent("VARIABLES_LOADED")
+driver:RegisterEvent("PLAYER_LOGOUT")
 driver:SetScript("OnEvent",function()
     if event=="VARIABLES_LOADED" then
         getDB()
-        local st=api("Boss.Status")
-        -- On login, never replay older historical events as new reminders.
-        if st and type(st.latestSeq)=="number" then cursor=st.latestSeq end
+        resetSession()
+    elseif event=="PLAYER_LOGOUT" then
+        -- Never persist GUIDs, timestamps, pop-up dedup state or event cursors.
+        resetSession()
     end
 end)
 driver:SetScript("OnUpdate",function()
+    local d=getDB()
+    if not d.enabled then return end
     timer=timer+arg1
-    if timer>=0.5 then timer=0;observe() end
+    if timer>=d.pollInterval then timer=0;observe() end
 end)
 frame:Hide()
 SLASH_TAIYANGBOSSMEMO1="/bossmemo"
 SlashCmdList["TAIYANGBOSSMEMO"]=function(msg)
     local cmd=trim(msg)
     if cmd=="off" then getDB().enabled=false;say("自动提醒已关闭。");return end
+    if cmd=="status" then say("追踪 "..countTracks().."/"..MAX_TRACKS.." 个 Boss，查询间隔 "..getDB().pollInterval.." 秒。");return end
+    local newInterval=string.match(cmd,"^interval%s+(%S+)$")
+    if newInterval then
+        local n=tonumber(newInterval)
+        if n==0.2 or n==0.5 or n==1 or n==2 then
+            getDB().pollInterval=n;timer=0;say("查询间隔已设为 "..n.." 秒。")
+        else say("可设置的间隔：0.2、0.5、1、2 秒。例如 /bossmemo interval 1") end
+        return
+    end
     if cmd=="on" then getDB().enabled=true;say("自动提醒已开启。");return end
     if cmd=="target" then frame:Show();currentTarget();return end
     frame:Show()
