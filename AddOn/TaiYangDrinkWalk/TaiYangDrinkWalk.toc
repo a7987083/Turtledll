@@ -1,8 +1,8 @@
 ## Interface: 11200
 ## Title: TaiYangDrinkWalk
-## Notes: Lua 5.0 read-only Mana/Energy tick observer; no item use
+## Notes: Lua 5.0 read-only Tick HUD and window preview; no item use
 ## Author: TaiYangShenDian
-## Version: 0.3.0-tick-observer
+## Version: 0.4.0-hud
 ## SavedVariables: TaiYangDrinkWalkDB
 ## OptionalDeps: FuBar
 
