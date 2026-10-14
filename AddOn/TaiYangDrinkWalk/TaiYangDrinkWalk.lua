@@ -2222,7 +2222,8 @@ local function HandleMiscEvent(e, unit)
         end
         FindConfiguredItem()
         return
-    endend
+    end
+end
 
 local function OnEvent()
     local e, unit = event, arg1
