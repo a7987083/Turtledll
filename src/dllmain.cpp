@@ -718,6 +718,9 @@ static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
         return;
     }
     if(eq(ev,"PLAYER_ENTERING_WORLD")){
+        // Reset stale Movement pause before the world-phase deduplication gate.
+        // Never synthesize movement Start when entering a world.
+        MovementNative::onWorldLeaving();
         if(InterlockedCompareExchange(&g_worldPhase,1,1)==1)return;
         InterlockedExchange(&g_worldPhase,1);
         TysProfiler::onWorldEntering(L);
@@ -1084,6 +1087,9 @@ static bool globalFunctionPresent(Lua50::State L){
     if(!L)return false; int top=Lua50::GetTop(L); Lua50::PushString(L,"TaiYangShenDian"); Lua50::GetTable(L,WoW112::LUA_GLOBALSINDEX); bool ok=Lua50::Type(L,-1)==WoW112::LUA_TFUNCTION; Lua50::SetTop(L,top); return ok;
 }
 static void registerAfterLifecycle(const char* why){
+    // Player script reload is an independent recovery boundary even when the
+    // event frame was lost or Lua reuses its previous state.
+    MovementNative::onWorldLeaving();
     Lua50::State L=Lua50::GetState();
     if(!L){ cpy(g_lastRegisterCode,sizeof(g_lastRegisterCode),"LUA_STATE_MISSING"); InterlockedExchange(&g_luaRegistered,0); logText("Lua post-register: state missing\r\n"); return; }
     if(L==g_lastRegisteredState && globalFunctionPresent(L)){
