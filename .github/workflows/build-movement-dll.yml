@@ -21,6 +21,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y clang lld llvm
+          echo "/usr/lib/llvm-18/bin" >> "$GITHUB_PATH"
       - name: Verify toolchain
         run: |
           command -v clang-cl
