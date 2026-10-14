@@ -144,16 +144,24 @@ function I.Find()
     for i=1,table.getn(names) do FindOne(nil,names[i]) end
     local hpNeed,manaNeed=Needs()
     local best,bestScore=nil,-1
+    if not manaNeed then
+        I.status="法力已满或当前不是 Mana 资源，不需要喝水"
+        return nil
+    end
     for i=1,table.getn(candidates) do
-        local score=Score(candidates[i],hpNeed,manaNeed)
-        if score>bestScore then best=candidates[i];bestScore=score end
+        local candidate=candidates[i]
+        -- Drink-only edition: never select FOOD, UNKNOWN, or health-only candidates.
+        if candidate.kind=="DRINK" or candidate.kind=="BOTH" then
+            local score=candidate.kind=="DRINK" and 100 or 90
+            if score>bestScore then best=candidate;bestScore=score end
+        end
     end
     I.current=best
     if best then
         I.status=string.format("%s [%s] ID:%s 包%d 格%d x%d (评分:%d)",
             tostring(best.name),best.kind,tostring(best.id),best.bag,best.slot,best.totalCount,bestScore)
     else
-        I.status="背包中未找到精确匹配"
+        I.status="背包中未找到已配置且可识别的饮料"
     end
     return best
 end
