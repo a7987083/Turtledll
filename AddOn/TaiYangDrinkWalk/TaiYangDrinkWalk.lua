@@ -1843,34 +1843,14 @@ local function RenderManaTimerUI(nowMS, nextTickMS, tickInMS, tickPeriodMS, tick
 
     local displayCurrent, displayMax = DisplayResourceValues(kind, current, maximum)
     if DW.resourceText then
-        -- Rage sits on a dark-red bar and the old small white text looked too
-        -- faint in combat. Give Rage its own high-contrast presentation while
-        -- leaving Mana/Energy visually unchanged.
+        -- All resource types use the same high-contrast text overlay.
+        -- Keep presentation separate from energy tick timing/spark behavior.
         if kind == "RAGE" then
-            if type(STANDARD_TEXT_FONT) == "string" then
-                DW.resourceText:SetFont(STANDARD_TEXT_FONT, 13, "OUTLINE")
-            end
-            DW.resourceText:SetTextColor(1.00, 0.88, 0.18)
-            DW.resourceText:SetAlpha(1.00)
-            if DW.resourceText.SetShadowColor then
-                DW.resourceText:SetShadowColor(0, 0, 0, 1)
-            end
-            if DW.resourceText.SetShadowOffset then
-                DW.resourceText:SetShadowOffset(1, -1)
-            end
+            DW.resourceText:SetTextColor(1.00, 0.90, 0.26)
         else
-            if type(STANDARD_TEXT_FONT) == "string" then
-                DW.resourceText:SetFont(STANDARD_TEXT_FONT, 10, "")
-            end
-            DW.resourceText:SetTextColor(1, 1, 1)
-            DW.resourceText:SetAlpha(1.00)
-            if DW.resourceText.SetShadowColor then
-                DW.resourceText:SetShadowColor(0, 0, 0, 0)
-            end
-            if DW.resourceText.SetShadowOffset then
-                DW.resourceText:SetShadowOffset(0, 0)
-            end
+            DW.resourceText:SetTextColor(1.00, 1.00, 1.00)
         end
+        DW.resourceText:SetAlpha(1.00)
 
         if kind == "ENERGY" then
             DW.resourceText:SetText(string.format("%s  %d / %d    Tick %.2fs", ResourceNameZh(kind), Round(displayCurrent), Round(displayMax), EffectiveEnergyTickMS() / 1000))
@@ -1995,9 +1975,18 @@ local function CreateManaSparkHUD()
     bg:SetTexture("Interface\\TARGETINGFRAME\\UI-StatusBar")
     bg:SetVertexColor(0.03, 0.03, 0.09, 0.88)
 
-    local resourceText = holder:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    resourceText:SetPoint("CENTER", bar, "CENTER", 0, 0)
+    -- A dedicated child frame places the label above the StatusBar frame.
+    -- Parent OVERLAY alone does not guarantee visibility above child frames.
+    local textOverlay = CreateFrame("Frame", nil, holder)
+    textOverlay:SetAllPoints(bar)
+    textOverlay:SetFrameLevel(bar:GetFrameLevel() + 2)
+    local resourceText = textOverlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    resourceText:SetPoint("CENTER", textOverlay, "CENTER", 0, 0)
+    resourceText:SetFont(type(STANDARD_TEXT_FONT) == "string" and STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
     resourceText:SetTextColor(1, 1, 1)
+    resourceText:SetAlpha(1)
+    resourceText:SetShadowColor(0, 0, 0, 1)
+    resourceText:SetShadowOffset(1, -1)
     resourceText:SetText("资源 -- / --")
 
     local spark = bar:CreateTexture(nil, "OVERLAY")
