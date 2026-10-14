@@ -17,6 +17,10 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Install LLVM Windows cross-toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang lld llvm
       - name: Verify toolchain
         run: |
           command -v clang-cl
