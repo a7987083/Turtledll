@@ -2121,7 +2121,7 @@ local function CreateUI()
 
     local f = CreateFrame("Frame", "TaiYangDrinkWalkDiagFrame", UIParent)
     f:SetWidth(445)
-    f:SetHeight(320)
+    f:SetHeight(365)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     f:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border", tile=true, tileSize=32, edgeSize=32, insets={left=8,right=8,top=8,bottom=8}})
     f:SetMovable(true)
@@ -2145,11 +2145,11 @@ local function CreateUI()
     DW.manaCheck = CreateCheck(f, "TaiYangDrinkWalkShowManaCheck", "显示 自适应资源条 / Spark", 18, -101, ShowManaSparkEnabled(), SetManaSparkEnabled)
 
     DW.calibrateCheck = CreateCheck(f, "TaiYangDrinkWalkCalibrateCheck", "Mana Tick 自动校准（15次稳定采样）", 18, -129, TickCalibrationEnabled(), SetTickCalibrationEnabled)
-    local retryLabel = CreateLabel(f, 20, -161, 156, "GameFontNormalSmall")
+    local retryLabel = CreateLabel(f, 20, -310, 156, "GameFontNormalSmall")
     retryLabel:SetText("狂按重试间隔(ms)：")
     local retryEdit = CreateFrame("EditBox", "TaiYangDrinkWalkRetryEdit", f, "InputBoxTemplate")
     retryEdit:SetWidth(65); retryEdit:SetHeight(20)
-    retryEdit:SetPoint("TOPLEFT", f, "TOPLEFT", 170, -155)
+    retryEdit:SetPoint("TOPLEFT", f, "TOPLEFT", 170, -304)
     retryEdit:SetAutoFocus(false)
     retryEdit:SetText(tostring(SpamRetryMS()))
     DW.retryEdit = retryEdit
@@ -2166,7 +2166,7 @@ local function CreateUI()
     end
     retryEdit:SetScript("OnEnterPressed", function() ApplyRetry(); this:ClearFocus() end)
     retryEdit:SetScript("OnEscapePressed", function() this:ClearFocus(); this:SetText(tostring(SpamRetryMS())) end)
-    CreateButton(f, "应用", 250, -155, 65, ApplyRetry)
+    CreateButton(f, "应用", 250, -304, 65, ApplyRetry)
     local calibrationLabel = CreateLabel(f, 320, -134, 109, "GameFontNormalSmall")
     DW.calibrationLabel = calibrationLabel
 
@@ -2572,8 +2572,13 @@ local function SlashHandler(msg)
     if low == "calibrate off" then SetTickCalibrationEnabled(false); return end
     if low == "autolead on" then SetTickCalibrationEnabled(true); return end
     if low == "autolead off" then SetTickCalibrationEnabled(false); return end
-    if low == "autolead reset" then ResetAutoLead(); return end
-    if string.find(low, "autolead ") == 1 then SetAutoLeadMS(string.sub(msg, 10), "SLASH"); return end
+    if low == "autolead reset" then
+        DW.tickCalibrationErrors = {}; DW.tickCalibrationCount = 0
+        DW.tickCalibrationState = TickCalibrationEnabled() and "采样中" or "关闭"
+        AddLog("Tick校准样本已重置")
+        return
+    end
+    if string.find(low, "autolead ") == 1 then AddLog("提前量学习已废弃；改用 /tsdw calibrate on|off"); return end
     if string.find(low, "lead ") == 1 then SetWatchLead(string.sub(msg, 6)); return end
     if string.find(low, "item ") == 1 then SetItemSpec(string.sub(msg, 6)); return end
     if low == "unbind" then UnbindActionKey(false); RefreshSettingsUI(); return end
