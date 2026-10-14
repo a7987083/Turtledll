@@ -1282,7 +1282,7 @@ function DW:HandleActionKey()
 
 
     local tickIn = nextTick - now
-    if tickIn > EffectiveSpamOpenMS() then
+    if tickIn > SpamOpenMS() then
         self.lastKeyResult = "太早：" .. tostring(timingKind) .. "窗口未开"
         return
     end
@@ -1520,14 +1520,14 @@ local function RenderManaTimerUI(nowMS, nextTickMS, tickInMS, tickPeriodMS, tick
             and nextTickMS and tickInMS and tickPeriodMS
             and not (DW.uiFSREndMS and nowMS < DW.uiFSREndMS)
         if show then
-            local startPct = 1 - Clamp(EffectiveSpamOpenMS() / tickPeriodMS, 0, 1)
+            local startPct = 1 - Clamp(SpamOpenMS() / tickPeriodMS, 0, 1)
             local endPct = 1 - Clamp(SpamCloseMS() / tickPeriodMS, 0, 1)
             local widthPct = math.max(0, endPct - startPct)
             DW.manaDrinkWindow:ClearAllPoints()
             DW.manaDrinkWindow:SetPoint("LEFT", DW.manaTimerBar, "LEFT", startPct * UI_MANA_BAR_WIDTH, 0)
             DW.manaDrinkWindow:SetWidth(math.max(1, widthPct * UI_MANA_BAR_WIDTH))
             DW.manaDrinkWindow:SetHeight(UI_MANA_BAR_HEIGHT)
-            local active = tickInMS <= EffectiveSpamOpenMS() and tickInMS >= SpamCloseMS()
+            local active = tickInMS <= SpamOpenMS() and tickInMS >= SpamCloseMS()
             DW.manaDrinkWindow:SetVertexColor(active and 0.17 or 0.12, active and 1.00 or 0.70, active and 0.35 or 0.24, active and 0.92 or 0.67)
             DW.manaDrinkWindow:Show()
         else
