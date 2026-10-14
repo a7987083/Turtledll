@@ -271,13 +271,14 @@ local function RefreshResourceContext(force)
     local rawMaximum = UnitManaMax("player")
     local current = tonumber(rawCurrent) or 0
     local maximum = tonumber(rawMaximum) or 0
-    local changed = force or DW.resourceType ~= kind
+    local changed = DW.resourceType ~= kind
 
     if changed then
         local previous = DW.resourceType
         DW.resourceType = kind
         DW.resourceEventValue = current
         DW.resourceSwitchMS = NowMS()
+        DW.resourceGeneration = (DW.resourceGeneration or 0) + 1
 
         if kind == "ENERGY" then
             ResetEnergyRuntime("POWER_SWITCH")
@@ -352,7 +353,14 @@ local function OnEnergyChanged(oldValue, newValue, timestampMS)
     local n = Round(gap / reference)
     if n < 1 then n = 1 end
     if n > 4 then n = 4 end
-    if gap > reference * ENERGY_SAMPLE_MAX_MULT then return end
+    if gap > reference * ENERGY_SAMPLE_MAX_MULT then
+        DW.energySamples = {}
+        DW.energyObservedTickMS = nil
+        DW.energyLastAcceptedGainMS = timestampMS
+        DW.energyAnchorMS = timestampMS
+        DW.energySyncReason = "STALE_RESEED"
+        return
+    end
 
     local normalized = gap / n
     local tolerance = Clamp(reference * 0.28, ENERGY_SAMPLE_TOLERANCE_MIN_MS, ENERGY_SAMPLE_TOLERANCE_MAX_MS)
@@ -489,6 +497,8 @@ local function ClearPhase(reason)
     DW.resumeReason = reason or "RESET"
     DW.spamTickMS = nil
     DW.spamAttemptsThisTick = 0
+    DW.recentDispatch = nil
+    DW.lastDispatchMS = nil
     DW.uiFSRStartMS = nil
     DW.uiFSREndMS = nil
     ResetClassifierRuntime()
@@ -592,6 +602,10 @@ local function ProcessManaGain(sampleMS, deltaMana)
     end
 
     local acceptedGap = DW.lastAcceptedMS and (sampleMS - DW.lastAcceptedMS) or nil
+    if acceptedGap and acceptedGap > PERIOD_MS * 8 then
+        DW.state = "VERIFY"
+        DW.resumeReason = "STALE_SAMPLE_VERIFY"
+    end
     if acceptedGap and acceptedGap < MIN_SAMPLE_GAP_MS then
         RejectSample("TOO_CLOSE", "gap=" .. FormatMS(acceptedGap), sampleMS, deltaMana)
         return
@@ -627,6 +641,11 @@ local function ProcessManaGain(sampleMS, deltaMana)
     -- out of lock.  This is the main classifier hardening over v0.3.
     if DW.state == "LOCKED" then
         RejectSample("PHASE_OUTLIER", "err=" .. FormatMS(err) .. " tol=" .. FormatMS(tolerance), sampleMS, deltaMana)
+        if DW.classifierOutlierStreak >= 3 then
+            DW.state = "VERIFY"
+            DW.provisionalRejects = 0
+            DW.resumeReason = "REPEATED_OUTLIERS"
+        end
         return
     end
 
@@ -1174,7 +1193,9 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
         itemId = a.id,
         itemName = a.name,
         itemKind = a.kind,
-        match = a.match
+        match = a.match,
+        generation = DW.resourceGeneration,
+        dispatched = false
     }
     DW.lastKeyResult = string.format("真实按键尝试 #%d Lead=%s", DW.spamAttemptsThisTick, FormatMS(lead))
 
@@ -1188,6 +1209,7 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
         DW.lastKeyResult = "Native未分派：" .. tostring(code or "?")
         return false
     end
+    DW.recentDispatch.dispatched = true
     DW.lastDispatchMS = nowMS
     DW.lastNativeCode = code
     DW.lastNativeReturn = engineRet
@@ -1990,6 +2012,8 @@ local function InitState()
     DW.resourceValue = 0
     DW.resourceMax = 0
     DW.resourceEventValue = nil
+    DW.resourceGeneration = 0
+    DW.playerDead = false
     DW.resourceFlashKind = nil
     DW.resourceFlashDelta = nil
     DW.resourceFlashMS = nil
@@ -2011,7 +2035,7 @@ end
 DW.AddLog = AddLog
 
 local function OnEvent()
-    local e = event
+    local e, unit = event, arg1
     if e == "VARIABLES_LOADED" then
         -- SavedVariables are authoritative only after their load stage.
         if type(TaiYangDrinkWalkDiagDB) ~= "table" then
@@ -2044,38 +2068,38 @@ local function OnEvent()
     end
 
     if e == "UNIT_MANA" then
-        if arg1 and arg1 ~= "player" then return end
+        if DW.playerDead then return end
+        if unit and unit ~= "player" then return end
         local now = NowMS()
         local kind, newValue, maxValue = RefreshResourceContext(false)
-        local oldResource = DW.resourceEventValue
         DW.resourceValue = newValue
         DW.resourceMax = maxValue
-        DW.resourceEventValue = newValue
 
         if kind == "MANA" then
-            local oldMana = DW.lastMana or newValue
+            local oldMana = DW.lastMana
+            if oldMana == nil then oldMana = newValue end
             DW.lastMana = newValue
             DW.maxMana = maxValue
             if newValue ~= oldMana then OnManaChanged(oldMana, newValue, maxValue, now, "LUA_UNIT_MANA") end
-        elseif oldResource ~= nil then
-            -- Some vanilla clients can emit UNIT_MANA around a power-type
-            -- transition.  Never feed those values into the mana classifier.
-            DW.resourceEventValue = newValue
         end
         return
     end
 
     if e == "UNIT_MAXMANA" then
-        if arg1 and arg1 ~= "player" then return end
+        if unit and unit ~= "player" then return end
         local kind, current, maximum = RefreshResourceContext(false)
         DW.resourceValue = current
         DW.resourceMax = maximum
-        if kind == "MANA" then DW.maxMana = maximum end
+        if kind == "MANA" then
+            DW.maxMana = maximum
+            DW.lastMana = current -- MAX updates baseline without a natural-gain sample.
+        end
         return
     end
 
     if e == "UNIT_ENERGY" then
-        if arg1 and arg1 ~= "player" then return end
+        if DW.playerDead then return end
+        if unit and unit ~= "player" then return end
         local now = NowMS()
         local kind, newValue, maxValue = RefreshResourceContext(false)
         local oldValue = DW.resourceEventValue
@@ -2084,12 +2108,13 @@ local function OnEvent()
         if kind == "ENERGY" and oldValue ~= nil and newValue ~= oldValue then
             OnEnergyChanged(oldValue, newValue, now)
         end
-        DW.resourceEventValue = newValue
+        if kind == "ENERGY" then DW.resourceEventValue = newValue end
         return
     end
 
     if e == "UNIT_RAGE" then
-        if arg1 and arg1 ~= "player" then return end
+        if DW.playerDead then return end
+        if unit and unit ~= "player" then return end
         local now = NowMS()
         local kind, newValue, maxValue = RefreshResourceContext(false)
         local oldValue = DW.resourceEventValue
@@ -2098,18 +2123,18 @@ local function OnEvent()
         if kind == "RAGE" and oldValue ~= nil and newValue ~= oldValue then
             OnRageChanged(oldValue, newValue, now)
         end
-        DW.resourceEventValue = newValue
+        if kind == "RAGE" then DW.resourceEventValue = newValue end
         return
     end
 
     if e == "UNIT_DISPLAYPOWER" then
-        if arg1 and arg1 ~= "player" then return end
+        if unit and unit ~= "player" then return end
         RefreshResourceContext(true)
         return
     end
 
     if e == "UNIT_STATS" then
-        if arg1 and arg1 ~= "player" then return end
+        if unit and unit ~= "player" then return end
         if DW.resourceType == "ENERGY" then RecomputeEnergyModel(true) end
         return
     end
@@ -2131,14 +2156,16 @@ local function OnEvent()
 
     if e == "UI_ERROR_MESSAGE" then
         local r = DW.recentDispatch
-        if r and NowMS() - (r.requestedMS or 0) <= 400 then
-            r.contextRejected = true
-            DW.lastKeyResult = "本次尝试被拒绝：" .. tostring(arg1 or "UI_ERROR") .. "；该Tick不参与Lead降档"
+        local age = r and (NowMS() - (r.requestedMS or 0)) or -1
+        if r and r.dispatched and r.generation == DW.resourceGeneration and age >= 0 and age <= 400 then
+            r.possibleError = tostring(unit or "UI_ERROR")
+            DW.lastKeyResult = "分派后收到UI错误（未确认关联）：" .. r.possibleError
         end
         return
     end
 
     if e == "PLAYER_DEAD" then
+        DW.playerDead = true
         ClearPhase("DEATH")
         ResetEnergyRuntime("DEATH")
         DW.AddLog("死亡：旧phase作废")
@@ -2146,8 +2173,11 @@ local function OnEvent()
     end
 
     if e == "PLAYER_ALIVE" or e == "PLAYER_UNGHOST" then
-        if DW.state ~= "UNSYNCED" then ClearPhase("RESURRECT") end
+        DW.playerDead = false
+        ClearPhase("RESURRECT")
+        DW.resourceEventValue = nil
         RefreshResourceContext(true)
+        DW.lastMana = DW.resourceValue
         return
     end
 
@@ -2161,6 +2191,8 @@ local function OnEvent()
     end
 
     if e == "PLAYER_ENTERING_WORLD" then
+        ClearPhase("ENTER_WORLD")
+        DW.resourceEventValue = nil
         RefreshResourceContext(true)
         if DW.resourceType == "MANA" then
             DW.lastMana = DW.resourceValue or 0
