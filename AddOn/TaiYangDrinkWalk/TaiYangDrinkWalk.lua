@@ -2191,7 +2191,11 @@ local function OnEvent()
     end
 
     if e == "PLAYER_ENTERING_WORLD" then
-        ClearPhase("ENTER_WORLD")
+        -- Reload restoration already enters VERIFY; do not discard that
+        -- candidate merely because PLAYER_ENTERING_WORLD follows VARIABLES_LOADED.
+        if DW.state ~= "VERIFY" then ClearPhase("ENTER_WORLD") end
+        DW.recentDispatch = nil
+        DW.lastDispatchMS = nil
         DW.resourceEventValue = nil
         RefreshResourceContext(true)
         if DW.resourceType == "MANA" then
