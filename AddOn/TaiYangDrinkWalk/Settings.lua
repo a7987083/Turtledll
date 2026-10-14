@@ -7,11 +7,7 @@ local function Label(f,text,x,y)
 end
 function DW.RefreshSettings()
     if DW.statusText then DW.statusText:SetText(DW.DLLStatus()) end
-    if DW.modeText then
-        local mode="WATCH"
-        if type(TaiYangDrinkWalkDB)=="table" then mode=TaiYangDrinkWalkDB.mode or "WATCH" end
-        DW.modeText:SetText("模式: "..mode.." （仅保存设置）")
-    end
+
     if DW.specEdit then
         local focused = false
         if type(GetCurrentKeyBoardFocus) == "function" then
@@ -34,12 +30,12 @@ function DW.BuildSettings()
     f:SetMovable(true);f:EnableMouse(true);f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart",function() f:StartMoving() end)
     f:SetScript("OnDragStop",function() f:StopMovingOrSizing() end)
-    Label(f,"TaiYangDrinkWalk - Native Action 0.5.0",20,-20)
+    Label(f,"TaiYangDrinkWalk - Macro Native 0.5.1",20,-20)
     local close=CreateFrame("Button",nil,f,"UIPanelCloseButton")
     close:SetPoint("TOPRIGHT",f,"TOPRIGHT",-4,-4)
     DW.statusText=Label(f,"DLL",20,-58)
     DW.statusText:SetWidth(420);DW.statusText:SetJustifyH("LEFT")
-    DW.modeText=Label(f,"模式: WATCH",20,-88)
+    Label(f,"走喝宏: /zchihe  (DLL原生执行)",20,-88)
     Label(f,"允许使用的物品 ID 或完整名称（逗号分隔）",20,-117)
     local spec=CreateFrame("EditBox","TaiYangDrinkWalkItemSpec",f,"InputBoxTemplate")
     spec:SetAutoFocus(false);spec:SetWidth(402);spec:SetHeight(22)
@@ -65,12 +61,7 @@ function DW.BuildSettings()
         spec:ClearFocus();DW.RefreshSettings()
     end)
     Button("Tick 状态",270,-180,100,function() DW.TickReport();DW.RefreshSettings() end)
-    Button("切换模式",20,-227,110,function()
-        if type(TaiYangDrinkWalkDB)~="table" then TaiYangDrinkWalkDB={} end
-        if TaiYangDrinkWalkDB.mode=="WATCH" then TaiYangDrinkWalkDB.mode="SPAM"
-        else TaiYangDrinkWalkDB.mode="WATCH" end
-        DW.RefreshSettings()
-    end)
+
     Button("显示/隐藏 HUD",148,-227,130,function()
         if DW.HUD then DW.HUD.Toggle() end
     end)
