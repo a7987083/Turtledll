@@ -1914,13 +1914,27 @@ local function SetFuBarIconVisible(show)
         AddLog(DW.lastKeyResult)
         return false
     end
-    local ok, err = pcall(fn, fu)
+    -- FuBar's right-click Enabled toggle can put the AceAddon into standby.
+    -- A plain frame:Show() does not reactivate a disabled plugin.
+    local ok, err = pcall(function()
+        if show then
+            if fu.db and fu.db.profile then
+                fu.db.profile.hidden = nil
+                fu.db.profile.disabled = nil
+            end
+            if type(fu.IsActive) == "function" and type(fu.ToggleActive) == "function"
+                and not fu:IsActive() then
+                fu:ToggleActive()
+            end
+        end
+        fn(fu)
+    end)
     if not ok then
         DW.lastKeyResult = "FuBar图标操作失败：" .. tostring(err or "unknown")
         AddLog(DW.lastKeyResult)
         return false
     end
-    DW.lastKeyResult = show and "FuBar酒杯已恢复" or "FuBar酒杯已隐藏；/tsdw icon show 可恢复"
+    DW.lastKeyResult = show and "FuBar酒杯恢复请求已发送" or "FuBar酒杯已隐藏；/tsdw icon show 可恢复"
     AddLog(DW.lastKeyResult)
     return true
 end
