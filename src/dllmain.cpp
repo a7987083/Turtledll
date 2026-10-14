@@ -845,6 +845,74 @@ static void tableSetString(Lua50::State L,const char* key,const char* value){Lua
 static void tableSetBool(Lua50::State L,const char* key,bool value){Lua50::PushString(L,key);Lua50::PushBool(L,value);Lua50::SetTable(L,-3);}
 static void tableSetNumber(Lua50::State L,const char* key,double value){Lua50::PushString(L,key);Lua50::PushNumber(L,value);Lua50::SetTable(L,-3);}
 
+// M1: one-shot identity query; reuses existing object resolution and Lua 5.0 globals.
+// No new hook, ObjectManager sweep, native ABI guesswork, or background watcher.
+static bool identityLuaString(Lua50::State L,const char* api,const char* token,char* out,unsigned long cap){
+    const int top=Lua50::GetTop(L);out[0]=0;
+    Lua50::GetGlobal(L,api);
+    if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);return false;}
+    Lua50::PushString(L,token);
+    bool ok=Lua50::PCall(L,1,1,0)==0 && Lua50::IsString(L,-1);
+    if(ok)cpy(out,cap,Lua50::ToString(L,-1));
+    Lua50::SetTop(L,top);return ok&&out[0]!=0;
+}
+static bool identityLuaLevel(Lua50::State L,const char* token,double* out){
+    const int top=Lua50::GetTop(L);
+    Lua50::GetGlobal(L,"UnitLevel");
+    if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);return false;}
+    Lua50::PushString(L,token);
+    bool ok=Lua50::PCall(L,1,1,0)==0 && Lua50::IsNumber(L,-1);
+    if(ok)*out=Lua50::ToNumber(L,-1);
+    Lua50::SetTop(L,top);return ok;
+}
+static int doUnitIdentity(Lua50::State L){
+    const char* code="OK";const char* token=0;void* obj=0;
+    unsigned long long guid=0;unsigned long entry=0,type=0;
+    bool guidKnown=false,entryKnown=false,typeKnown=false;
+    char name[256]={0},classification[80]={0},guidText[17]={0};
+    double level=0;
+    bool nameKnown=false,levelKnown=false,classificationKnown=false;
+    if(!detectBuild().ok)code="UNSUPPORTED_BUILD";
+    else if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2)||!validUnitToken(Lua50::ToString(L,2)))code="BAD_ARGUMENT";
+    else {
+        token=Lua50::ToString(L,2);
+        obj=resolveUnit(token);
+        if(!obj)code="UNIT_NOT_FOUND";
+        else if(!objectType(obj,&type)||(type!=WoW112::TYPE_UNIT&&type!=WoW112::TYPE_PLAYER))code="UNIT_NOT_SUPPORTED";
+        else {
+            typeKnown=true;
+            guidKnown=objectGuid(obj,&guid);
+            if(guidKnown)hex64(guidText,sizeof(guidText),guid);
+            entryKnown=objectEntry(obj,&entry);
+            nameKnown=identityLuaString(L,"UnitName",token,name,sizeof(name));
+            levelKnown=identityLuaLevel(L,token,&level);
+            classificationKnown=identityLuaString(L,"UnitClassification",token,classification,sizeof(classification));
+            if(!guidKnown)code="GUID_UNAVAILABLE";
+            else if(!entryKnown)code="ENTRY_UNAVAILABLE";
+        }
+    }
+    Lua50::NewTable(L);
+    tableSetBool(L,"ok",eq(code,"OK"));
+    tableSetString(L,"code",code);
+    tableSetNumber(L,"schemaVersion",1);
+    Lua50::PushString(L,"data");Lua50::NewTable(L);
+    if(token)tableSetString(L,"unit",token);
+    if(guidKnown)tableSetString(L,"guid",guidText);
+    if(entryKnown)tableSetNumber(L,"entry",(double)entry);
+    if(typeKnown)tableSetNumber(L,"objectType",(double)type);
+    if(nameKnown)tableSetString(L,"name",name);
+    if(levelKnown)tableSetNumber(L,"level",level);
+    if(classificationKnown)tableSetString(L,"classification",classification);
+    tableSetBool(L,"guidKnown",guidKnown);
+    tableSetBool(L,"entryKnown",entryKnown);
+    tableSetBool(L,"nameKnown",nameKnown);
+    tableSetBool(L,"levelKnown",levelKnown);
+    tableSetBool(L,"classificationKnown",classificationKnown);
+    tableSetNumber(L,"timestampMS",(double)GetTickCount());
+    Lua50::SetTable(L,-3);
+    return 1;
+}
+
 static int doUnitGuid(Lua50::State L){
     if(!detectBuild().ok)return pushError(L,"UNSUPPORTED_BUILD");
     if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2))return pushError(L,"BAD_ARGUMENT");const char* token=Lua50::ToString(L,2);
@@ -1053,7 +1121,7 @@ static int __fastcall scriptMain(Lua50::State _L){
     if(eq(cmd,"MoonMarker.Runtime.Status"))return doMoonMarkerRuntimeStatus(L);
     if(isMoonMarkerGuardedCommand(cmd)&&!TysMoonRuntimeGuard::enabled())return pushMoonMarkerGuardFailure(L);
     if(eq(cmd,"facing"))return doFacing(L); if(eq(cmd,"speed"))return doSpeed(L);
-    if(eq(cmd,"Unit.Guid"))return doUnitGuid(L); if(eq(cmd,"Unit.InSight"))return doUnitInSight(L);
+    if(eq(cmd,"Unit.Identity"))return doUnitIdentity(L); if(eq(cmd,"Unit.Guid"))return doUnitGuid(L); if(eq(cmd,"Unit.InSight"))return doUnitInSight(L);
     if(eq(cmd,"GroundProbe.Status"))return doGroundStatus(L); if(eq(cmd,"GroundProbe.PlayerPosition"))return doPlayerPosition(L); if(eq(cmd,"GroundProbe.Snapshot"))return doSnapshot(L); if(eq(cmd,"GroundProbe.UnitByGuid"))return doUnitByGuid(L); if(eq(cmd,"GroundProbe.UnitStateByGuid"))return doUnitStateByGuid(L); if(eq(cmd,"GroundProbe.DynamicByGuid"))return doDynamicByGuid(L); if(eq(cmd,"GroundProbe.ScopeByGuid"))return doScopeByGuid(L); if(eq(cmd,"GroundProbe.TotemSnapshot"))return doTotemSnapshot(L);
     if(eq(cmd,"AutoRange.RelationByUnit"))return doRelationByUnit(L); if(eq(cmd,"AutoRange.RelationByGuid"))return doRelationByGuid(L);
     // V1.3-DW5: authorization is classified by command type, not by the
