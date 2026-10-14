@@ -1,8 +1,8 @@
 ## Interface: 11200
 ## Title: TaiYangDrinkWalk
-## Notes: Lua 5.0 macro-only DLL-backed item use with aura/bag confirmation; no item use
+## Notes: Lua 5.0 drink-only native DLL action with 900ms evidence and rejection handling; no item use
 ## Author: TaiYangShenDian
-## Version: 0.5.1-macro-native
+## Version: 0.5.2-drink-only
 ## SavedVariables: TaiYangDrinkWalkDB
 ## OptionalDeps: FuBar
 
