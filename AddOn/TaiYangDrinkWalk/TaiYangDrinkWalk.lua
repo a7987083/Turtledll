@@ -744,7 +744,12 @@ end
 
 local function RestoreReloadPhase()
     local db = TaiYangDrinkWalkDiagDB
-    local valid = db.reloadRequested and db.characterKey == CharKey() and tonumber(db.phaseAnchorMS)
+    local savedAt = tonumber(db.savedAtClientMS)
+    local now = NowMS()
+    local elapsed = savedAt and (now - savedAt) or nil
+    -- Reject stale/cross-session phase data; only a recent /reload may resume VERIFY.
+    local valid = db.reloadRequested and db.characterKey == CharKey()
+        and tonumber(db.phaseAnchorMS) and elapsed and elapsed >= 0 and elapsed <= 120000
     db.reloadRequested = false
     if not valid then return false end
     DW.anchorMS = tonumber(db.phaseAnchorMS)
@@ -2324,4 +2329,4 @@ SlashCmdList["TAIYANGZCHIHE"] = function(msg)
     if DW and DW.HandleActionKey then DW:HandleActionKey() end
 end
 
-DEFAULT_CHAT_FRAME:AddMessage("|cff33ff66[太阳神殿 DrinkWalk]|r V0.5.2 已加载。Food/Drink识别；Mana/Energy吃喝窗口；按键替换/解绑；FuBar酒杯可恢复；/zchihe 吃喝；/tsdw 设置。")
+DEFAULT_CHAT_FRAME:AddMessage("|cff33ff66[太阳神殿 DrinkWalk]|r V" .. VERSION .. " 已加载。Food/Drink识别；Mana/Energy吃喝窗口；按键替换/解绑；FuBar酒杯可恢复；/zchihe 吃喝；/tsdw 设置。")
