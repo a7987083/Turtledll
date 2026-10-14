@@ -1,8 +1,8 @@
 ## Interface: 11200
 ## Title: TaiYangDrinkWalk
-## Notes: Lua 5.0 explicit DLL-backed item action on player keypress; no item use
+## Notes: Lua 5.0 macro-only DLL-backed item use with aura/bag confirmation; no item use
 ## Author: TaiYangShenDian
-## Version: 0.5.0-native-action
+## Version: 0.5.1-macro-native
 ## SavedVariables: TaiYangDrinkWalkDB
 ## OptionalDeps: FuBar
 
@@ -14,4 +14,3 @@ Action.lua
 HUD.lua
 Settings.lua
 FuBar.lua
-Bindings.xml
