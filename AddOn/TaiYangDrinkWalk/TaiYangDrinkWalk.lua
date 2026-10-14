@@ -835,8 +835,11 @@ local function TooltipTextForBagItem(bag, slot)
 end
 
 local function ConsumableKindFromBagSlot(bag, slot, itemId)
-    -- ID 159: 清凉的泉水; item identity is authoritative over localized tooltip text.
+    -- Cache positively identified types by ID; keep UNKNOWN re-probeable.
     if tonumber(itemId) == 159 then return "DRINK" end
+    if itemId and DW.consumableKindCache and DW.consumableKindCache[itemId] then
+        return DW.consumableKindCache[itemId]
+    end
     local text = TooltipTextForBagItem(bag, slot)
     if text == "" then return "UNKNOWN" end
 
@@ -848,10 +851,15 @@ local function ConsumableKindFromBagSlot(bag, slot, itemId)
 
     local isDrink = mana and (drinkWord or restore)
     local isFood = health and (foodWord or restore)
-    if isDrink and isFood then return "BOTH" end
-    if isDrink then return "DRINK" end
-    if isFood then return "FOOD" end
-    return "UNKNOWN"
+    local kind = "UNKNOWN"
+    if isDrink and isFood then kind = "BOTH"
+    elseif isDrink then kind = "DRINK"
+    elseif isFood then kind = "FOOD" end
+    if kind ~= "UNKNOWN" and itemId then
+        DW.consumableKindCache = DW.consumableKindCache or {}
+        DW.consumableKindCache[itemId] = kind
+    end
+    return kind
 end
 
 local function ConsumableKindZh(kind)
@@ -939,7 +947,7 @@ local function FindConfiguredItem()
                     total = total + count
                     if not first then
                         first = {bag=bag, slot=slot, id=id, name=name or wantedName, count=count, locked=locked, match="NAME"}
-                        first.kind = ConsumableKindFromBagSlot(bag, slot)
+                        first.kind = ConsumableKindFromBagSlot(bag, slot, id)
                     end
                 end
             end
@@ -2037,6 +2045,7 @@ local function InitState()
     DW.resourceGeneration = 0
     DW.playerDead = false
     DW.bagDirty = false
+    DW.consumableKindCache = {}
     DW.resourceFlashKind = nil
     DW.resourceFlashDelta = nil
     DW.resourceFlashMS = nil
