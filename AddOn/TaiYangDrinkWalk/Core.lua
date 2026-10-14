@@ -42,7 +42,16 @@ SLASH_TAIYANGDRINKWALK2 = "/drinkwalk"
 SlashCmdList["TAIYANGDRINKWALK"] = function(msg)
     local cmd = string.lower(msg or "")
     if cmd == "status" then DW.ShowStatus()
-    elseif cmd == "scan" then DW.Items.Report()\n    elseif cmd == "list" then DW.Items.List()\n    elseif string.sub(cmd,1,4) == "add " then\n        local kind,query=string.match(string.sub(msg,5),"^(%S+)%s+(.+)$")\n        local ok,result=DW.Items.Add(kind,query)\n        DW.Print(result)\n    elseif string.sub(cmd,1,7) == "remove " then\n        local ok,result=DW.Items.Remove(string.sub(cmd,8))\n        DW.Print(result)\n    elseif cmd == "help" then DW.Print("/tsdw, status, add food|drink|both <ID或名称>, list, remove <序号>, scan")
+    elseif cmd == "scan" then DW.Items.Report()
+    elseif cmd == "list" then DW.Items.List()
+    elseif string.sub(cmd,1,4) == "add " then
+        local kind,query=string.match(string.sub(msg,5),"^(%S+)%s+(.+)$")
+        local ok,result=DW.Items.Add(kind,query)
+        DW.Print(result)
+    elseif string.sub(cmd,1,7) == "remove " then
+        local ok,result=DW.Items.Remove(string.sub(cmd,8))
+        DW.Print(result)
+    elseif cmd == "help" then DW.Print("/tsdw, status, add food|drink|both ID或名称, list, remove 序号, scan")
     else DW.Toggle() end
 end
 SLASH_TAIYANGDRINKWALKDIAG1 = "/tsdwdiag"
