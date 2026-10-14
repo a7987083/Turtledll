@@ -1,7 +1,7 @@
 -- WoW 1.12.1 / Lua 5.0. Bootstrap and public API.
 TaiYangDrinkWalk = TaiYangDrinkWalk or {}
 local DW = TaiYangDrinkWalk
-DW.version = "0.4.0-hud"
+DW.version = "0.5.0-native-action"
 DW.modules = {}
 DW.ready = false
 DW.uiError = nil
@@ -22,7 +22,8 @@ function DW.RegisterModule(name)
 end
 function DW.ShowStatus()
     DW.Print("框架: " .. tostring(DW.version) .. " | " .. DW.DLLStatus())
-    DW.Print("模块: Items=只读选择; Tick/HUD=观测预览; Action=未接入")
+    DW.Print("模块: Items/Tick/HUD; Action=DLL显式按键执行")
+    if DW.Action then DW.Print(DW.Action.Summary()) end
     if DW.TickReport then DW.TickReport() end
     if DW.uiError then DW.Print("UI error: " .. tostring(DW.uiError)) end
 end
@@ -51,6 +52,8 @@ SlashCmdList["TAIYANGDRINKWALK"] = function(msg)
     local cmd = string.lower(msg or "")
     if cmd == "status" then DW.ShowStatus()
     elseif cmd == "tick" then if DW.TickReport then DW.TickReport() end
+    elseif cmd == "action" then if DW.Action then DW.Print(DW.Action.Summary()) end
+    elseif cmd == "native" then if DW.Action then local ok,why=DW.Action.Check();DW.Print("DLL Native: "..tostring(ok).." / "..tostring(why)) end
     elseif cmd == "hud" then if DW.HUD then DW.HUD.Toggle() end
     elseif cmd == "window" then if DW.HUD then DW.HUD.Report() end
     elseif cmd == "scan" then DW.Items.Report()
@@ -67,6 +70,7 @@ SlashCmdList["TAIYANGDRINKWALKDIAG"] = function() DW.ShowStatus() end
 local events = CreateFrame("Frame", "TaiYangDrinkWalkEvents")
 events:RegisterEvent("VARIABLES_LOADED")
 events:RegisterEvent("PLAYER_LOGIN")
+events:RegisterEvent("BAG_UPDATE")
 events:RegisterEvent("UNIT_MANA")
 events:RegisterEvent("UNIT_ENERGY")
 events:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -80,6 +84,8 @@ events:SetScript("OnEvent", function()
         DW.lastMana=nil;DW.lastEnergy=nil
         if DW.ManaTick then DW.ManaTick.Reset() end
         if DW.EnergyTick then DW.EnergyTick.Reset() end
+    elseif event == "BAG_UPDATE" then
+        if DW.Action then DW.Action.ObserveBag() end
     elseif event == "UNIT_MANA" and arg1 == "player" then
         if type(UnitMana) == "function" then
             local now=GetTime()*1000
