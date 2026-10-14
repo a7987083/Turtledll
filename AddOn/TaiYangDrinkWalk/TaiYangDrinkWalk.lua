@@ -1,4 +1,4 @@
--- TaiYangDrinkWalk v0.6.2
+-- TaiYangDrinkWalk v0.6.3
 -- Formal user UI:
 --   * SPAM is the default runtime mode.
 --   * Two independent HUD switches: adaptive Tick Timer and Adaptive Resource/Spark.
@@ -14,7 +14,7 @@
 TaiYangDrinkWalkDiagDB = TaiYangDrinkWalkDiagDB or {}
 
 local DW = {}
-local VERSION = "0.6.2"
+local VERSION = "0.6.3"
 local PERIOD_MS = 2000
 local SETTINGS_REFRESH_SEC = 0.20
 local PHASE_TOLERANCE_MS = 450
@@ -1192,7 +1192,7 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
         return false
     end
     if itemKind == "UNKNOWN" and not healthNeed and not manaNeed then
-        DW.lastKeyResult = "生命/Mana均无需恢复，不使用未识别物品"
+        DW.lastKeyResult = "生命/Mana均无需恢复，不使用类型待确认物品"
         return false
     end
 
