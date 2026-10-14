@@ -55,16 +55,6 @@ local UI_TICK_BAR_HEIGHT = 26
 local DEFAULT_SPAM_OPEN_MS = 320
 local DEFAULT_SPAM_CLOSE_MS = 170
 local DEFAULT_SPAM_RETRY_MS = 75
-local DEFAULT_DRINK_OPEN_PCT = 84.0
-local DEFAULT_DRINK_CLOSE_PCT = 91.5
-local DEFAULT_AUTO_LEAD_MS = 320
-local AUTO_LEAD_MIN_MS = 200
-local AUTO_LEAD_MAX_MS = 380
-local AUTO_LEAD_STEP_DOWN_MS = 10
-local AUTO_LEAD_STEP_UP_MS = 20
-local AUTO_LEAD_SUCCESS_STREAK = 6
-local AUTO_LEAD_MISS_STREAK = 2
-local AUTO_LEAD_MAX_JITTER_FOR_DOWN_MS = 140
 
 BINDING_HEADER_TAIYANGDRINKWALK = "太阳神殿 DrinkWalk"
 BINDING_NAME_TAIYANGDRINKWALK_ACTION = "吃喝动作（与 /zchihe 相同）"
@@ -113,13 +103,6 @@ local function Trim(text)
     return out or text
 end
 
-local function StateZh(s)
-    if s == "UNSYNCED" then return "未同步" end
-    if s == "PROVISIONAL" then return "候选同步" end
-    if s == "LOCKED" then return "已锁定" end
-    if s == "VERIFY" then return "等待验证" end
-    return tostring(s or "?")
-end
 
 local function FormatMS(ms)
     ms = tonumber(ms)
@@ -695,74 +678,6 @@ local function SpamRetryMS()
     return Clamp(tonumber(TaiYangDrinkWalkDiagDB.spamRetryMS) or DEFAULT_SPAM_RETRY_MS, 0, 250)
 end
 
-local function LeadMSToProgressPct(leadMS)
-    local lead = Clamp(tonumber(leadMS) or 0, 0, PERIOD_MS)
-    return Clamp((1 - (lead / PERIOD_MS)) * 100, 0, 100)
-end
-
-local function ProgressPctToLeadMS(pct)
-    pct = Clamp(tonumber(pct) or 0, 0, 100)
-    return Round(PERIOD_MS * (1 - pct / 100))
-end
-
-local function DrinkOpenPct()
-    if TaiYangDrinkWalkDiagDB.drinkOpenPct ~= nil then
-        return Clamp(tonumber(TaiYangDrinkWalkDiagDB.drinkOpenPct) or DEFAULT_DRINK_OPEN_PCT, 2.5, 98)
-    end
-    return LeadMSToProgressPct(SpamOpenMS())
-end
-
-local function DrinkClosePct()
-    if TaiYangDrinkWalkDiagDB.drinkClosePct ~= nil then
-        return Clamp(tonumber(TaiYangDrinkWalkDiagDB.drinkClosePct) or DEFAULT_DRINK_CLOSE_PCT, 5, 99.5)
-    end
-    return LeadMSToProgressPct(SpamCloseMS())
-end
-
-local function AutoLeadEnabled()
-    -- Legacy auto-lead is no longer used to move the dispatch window.
-    return false
-end
-
-local function AutoLeadMS()
-    local v = tonumber(TaiYangDrinkWalkDiagDB.autoLeadMS) or DEFAULT_AUTO_LEAD_MS
-    local floorMS = math.min(AUTO_LEAD_MAX_MS, math.max(AUTO_LEAD_MIN_MS, SpamCloseMS() + 30))
-    return Clamp(v, floorMS, AUTO_LEAD_MAX_MS)
-end
-
-local function EffectiveSpamOpenMS()
-    -- Stable manual dispatch window; Tick calibration moves the phase, not Lead.
-    return SpamOpenMS()
-end
-
-local function SetAutoLeadMS(v, why)
-    local floorMS = math.min(AUTO_LEAD_MAX_MS, math.max(AUTO_LEAD_MIN_MS, SpamCloseMS() + 30))
-    v = Clamp(tonumber(v) or DEFAULT_AUTO_LEAD_MS, floorMS, AUTO_LEAD_MAX_MS)
-    TaiYangDrinkWalkDiagDB.autoLeadMS = v
-    DW.autoLeadLastChange = why or "MANUAL"
-    if DW.autoLeadEdit then DW.autoLeadEdit:SetText(tostring(v)) end
-end
-
-local function SetAutoLeadEnabled(enabled)
-    TaiYangDrinkWalkDiagDB.autoLeadEnabled = enabled and true or false
-    DW.autoLeadSuccessStreak = 0
-    DW.autoLeadMissStreak = 0
-    AddLog("Auto Lead " .. (AutoLeadEnabled() and "ON" or "OFF"))
-end
-
-local function ResetAutoLead()
-    TaiYangDrinkWalkDiagDB.autoLeadMS = DEFAULT_AUTO_LEAD_MS
-    TaiYangDrinkWalkDiagDB.autoLeadEnabled = true
-    DW.autoLeadSuccessStreak = 0
-    DW.autoLeadMissStreak = 0
-    DW.autoLeadConfirmedTicks = 0
-    DW.autoLeadAdjustDown = 0
-    DW.autoLeadAdjustUp = 0
-    DW.autoLeadLastChange = "RESET"
-    if DW.autoLeadEdit then DW.autoLeadEdit:SetText(tostring(DEFAULT_AUTO_LEAD_MS)) end
-    AddLog("Auto Lead 重置为 " .. tostring(DEFAULT_AUTO_LEAD_MS) .. "ms")
-end
-
 local function NormalizeSpamWindow(openMS, closeMS, retryMS)
     openMS = Clamp(tonumber(openMS) or DEFAULT_SPAM_OPEN_MS, 50, 1950)
     closeMS = Clamp(tonumber(closeMS) or DEFAULT_SPAM_CLOSE_MS, 0, 1900)
@@ -796,37 +711,6 @@ local function SetSpamWindowSpec(text)
         return
     end
     SetSpamWindow(nums[1], nums[2], nums[3] or SpamRetryMS())
-end
-
-local function SetDrinkWindowRatio(openPct, closePct)
-    openPct = Clamp(tonumber(openPct) or DEFAULT_DRINK_OPEN_PCT, 2.5, 98)
-    closePct = Clamp(tonumber(closePct) or DEFAULT_DRINK_CLOSE_PCT, 5, 99.5)
-    if closePct <= openPct then closePct = math.min(99.5, openPct + 1) end
-
-    TaiYangDrinkWalkDiagDB.drinkOpenPct = openPct
-    TaiYangDrinkWalkDiagDB.drinkClosePct = closePct
-
-    -- A user-entered percentage is authoritative. Convert it back to the
-    -- existing SPAM timing contract so the native/API layer remains unchanged.
-    local openMS = ProgressPctToLeadMS(openPct)
-    local closeMS = ProgressPctToLeadMS(closePct)
-    SetSpamWindow(openMS, closeMS, SpamRetryMS())
-    SetAutoLeadEnabled(false)
-
-    if DW.ratioOpenEdit then DW.ratioOpenEdit:SetText(string.format("%.1f", openPct)) end
-    if DW.ratioCloseEdit then DW.ratioCloseEdit:SetText(string.format("%.1f", closePct)) end
-    AddLog(string.format("吃喝窗口比例=%.1f%%~%.1f%% (%d~%dms before tick)", openPct, closePct, openMS, closeMS))
-end
-
-local function SetDrinkWindowRatioSpec(openText, closeText)
-    local openPct = tonumber(Trim(openText or ""))
-    local closePct = tonumber(Trim(closeText or ""))
-    if not openPct or not closePct then
-        AddLog("吃喝窗口比例格式错误，例如 84 / 91.5")
-        return false
-    end
-    SetDrinkWindowRatio(openPct, closePct)
-    return true
 end
 
 local function SavePhaseForReload()
@@ -1083,100 +967,6 @@ local function SetItemSpec(text)
     FindConfiguredItem()
 end
 
-local function CountItemIdentity(item)
-    if not item then return 0 end
-    local total = 0
-    local bag, slot
-    for bag = 0, 4 do
-        local slots = GetContainerNumSlots(bag) or 0
-        for slot = 1, slots do
-            local link = GetContainerItemLink(bag, slot)
-            local matched = false
-            if item.match == "ID" then
-                matched = ItemMatches(link, item.id, nil)
-            else
-                matched = ItemMatches(link, nil, item.name)
-            end
-            if matched then
-                local texture, count = GetContainerItemInfo(bag, slot)
-                total = total + (tonumber(count) or 1)
-            end
-        end
-    end
-    return total
-end
-
-local function TooltipConsumableAuraKind(buffIndex)
-    if not DW.scanTooltip or type(DW.scanTooltip.SetPlayerBuff) ~= "function" then return nil end
-    DW.scanTooltip:ClearLines()
-    DW.scanTooltip:SetPlayerBuff(buffIndex)
-    local i
-    local text = ""
-    for i = 1, 8 do
-        local obj = getglobal("TaiYangDrinkWalkScanTooltipTextLeft" .. i)
-        if obj and obj:GetText() then text = text .. " " .. string.lower(obj:GetText()) end
-        obj = getglobal("TaiYangDrinkWalkScanTooltipTextRight" .. i)
-        if obj and obj:GetText() then text = text .. " " .. string.lower(obj:GetText()) end
-    end
-
-    local drinkWord = string.find(text, "drink") or string.find(text, "drinking") or string.find(text, "饮用") or string.find(text, "喝水") or string.find(text, "喝")
-    local foodWord = string.find(text, "eat") or string.find(text, "eating") or string.find(text, "food") or string.find(text, "进食") or string.find(text, "食用") or string.find(text, "吃")
-    if drinkWord and foodWord then return "BOTH" end
-    if drinkWord then return "DRINK" end
-    if foodWord then return "FOOD" end
-    return nil
-end
-
-local function ScanDrinkAura()
-    DW.drinkState = "UNKNOWN"
-    DW.foodState = "UNKNOWN"
-    DW.consumeState = "NONE"
-    DW.drinkDetection = "事件扫描/食物饮料启发式"
-    if type(GetPlayerBuff) ~= "function" then return end
-    local i
-    local foundAny = false
-    for i = 0, 31 do
-        local buffIndex = GetPlayerBuff(i, "HELPFUL")
-        if not buffIndex or buffIndex < 0 then break end
-        foundAny = true
-        local kind = TooltipConsumableAuraKind(buffIndex)
-        if kind == "DRINK" then
-            DW.drinkState = "YES"
-            DW.consumeState = (DW.foodState == "YES") and "BOTH" or "DRINK"
-        elseif kind == "FOOD" then
-            DW.foodState = "YES"
-            DW.consumeState = (DW.drinkState == "YES") and "BOTH" or "FOOD"
-        elseif kind == "BOTH" then
-            DW.drinkState = "YES"
-            DW.foodState = "YES"
-            DW.consumeState = "BOTH"
-        end
-    end
-    if foundAny then
-        if DW.drinkState ~= "YES" then DW.drinkState = "NO" end
-        if DW.foodState ~= "YES" then DW.foodState = "NO" end
-    end
-end
-
-local function MatchingConsumableAuraActive(itemKind)
-    if itemKind == "FOOD" then return DW.foodState == "YES" end
-    if itemKind == "DRINK" then return DW.drinkState == "YES" end
-    if itemKind == "BOTH" then return DW.foodState == "YES" or DW.drinkState == "YES" end
-    return DW.foodState == "YES" or DW.drinkState == "YES"
-end
-
-local function ProbeCore()
-    if type(TaiYangShenDian) ~= "function" then return "未检测到 DLL" end
-    local ok, ver, api, build = pcall(TaiYangShenDian, "Core.Version")
-    if not ok then return "Core.Version 调用失败" end
-    local suffix = ""
-    if tonumber(api or 0) >= 24 then
-        local sok, st = pcall(TaiYangShenDian, "DrinkWalk.Status")
-        if sok and type(st) == "table" then suffix = st.available and " / Native READY" or " / Native FAIL" end
-    end
-    return tostring(ver or "?") .. " / API " .. tostring(api or "?") .. suffix
-end
-
 local function NativeReady()
     if type(TaiYangShenDian) ~= "function" then return false, "DLL_MISSING" end
     local ok, st = pcall(TaiYangShenDian, "DrinkWalk.Status")
@@ -1273,67 +1063,10 @@ local function NormalizeStoredBinding()
     if key == "" then UnbindActionKey(true) else BindActionKey(key, true) end
 end
 
-local function AutoLeadCanLearnDown()
-    return (DW.state == "LOCKED")
-        and (DW.confidence or 0) >= 0.80
-        and (DW.jitterMS or 9999) <= AUTO_LEAD_MAX_JITTER_FOR_DOWN_MS
-end
-
-local function FinalizeSpamTick()
-    if not DW.spamTickMS then return end
-    -- Keep the old diagnostic tick finalizer inert: calibration uses only
-    -- accepted periodic mana ticks, never item-use outcomes.
-    if true then return end
-
-    if DW.spamTickLearnableSuccess then
-        DW.autoLeadConfirmedTicks = (DW.autoLeadConfirmedTicks or 0) + 1
-        DW.autoLeadSuccessStreak = (DW.autoLeadSuccessStreak or 0) + 1
-        DW.autoLeadMissStreak = 0
-        if DW.spamTickSuccessLeadMS then
-            PushBounded(DW.autoLeadSuccessLeads, DW.spamTickSuccessLeadMS, 20)
-        end
-        if DW.autoLeadSuccessStreak >= AUTO_LEAD_SUCCESS_STREAK and AutoLeadCanLearnDown() then
-            local old = AutoLeadMS()
-            local new = math.max(math.max(AUTO_LEAD_MIN_MS, SpamCloseMS() + 30), old - AUTO_LEAD_STEP_DOWN_MS)
-            if new < old then
-                SetAutoLeadMS(new, "SUCCESS_STREAK_DOWN")
-                DW.autoLeadAdjustDown = (DW.autoLeadAdjustDown or 0) + 1
-                AddLog(string.format("AutoLead学习：%d次稳定命中 %d->%dms", AUTO_LEAD_SUCCESS_STREAK, old, new))
-            end
-            DW.autoLeadSuccessStreak = 0
-        end
-        return
-    end
-
-    if DW.spamTickHadRequest and not DW.spamTickContextRejected then
-        DW.autoLeadMissStreak = (DW.autoLeadMissStreak or 0) + 1
-        DW.autoLeadSuccessStreak = 0
-        if DW.autoLeadMissStreak >= AUTO_LEAD_MISS_STREAK then
-            local old = AutoLeadMS()
-            local new = math.min(AUTO_LEAD_MAX_MS, old + AUTO_LEAD_STEP_UP_MS)
-            if new > old then
-                SetAutoLeadMS(new, "UNCONFIRMED_UP")
-                DW.autoLeadAdjustUp = (DW.autoLeadAdjustUp or 0) + 1
-                AddLog(string.format("AutoLead保护：连续未确认 %d->%dms", old, new))
-            end
-            DW.autoLeadMissStreak = 0
-        end
-        return
-    end
-
-    -- No request, or the game explicitly rejected the attempt (commonly still
-    -- moving / item unavailable).  Those ticks are not timing evidence.
-    DW.autoLeadSuccessStreak = 0
-end
-
 local function ResetSpamTickLearning(nextTick)
     DW.spamTickMS = nextTick
     DW.spamAttemptsThisTick = 0
     DW.lastDispatchMS = nil
-    DW.spamTickHadRequest = false
-    DW.spamTickContextRejected = false
-    DW.spamTickLearnableSuccess = false
-    DW.spamTickSuccessLeadMS = nil
     DW.recentDispatch = nil
     DW.lastKeyResult = "新Tick：等待进入狂按窗口"
 end
@@ -1345,7 +1078,6 @@ local function EnsureSpamTick(nextTick)
         return
     end
     if math.abs(nextTick - DW.spamTickMS) > 500 then
-        FinalizeSpamTick()
         ResetSpamTickLearning(nextTick)
     end
 end
@@ -1432,16 +1164,13 @@ local function NativeUseFromHardwareKey(nowMS, tickMS)
     end
 
     local a = DW.item
-    local beforeTotal = CountItemIdentity(a)
     local lead = tickMS - nowMS
     DW.spamAttemptsThisTick = (DW.spamAttemptsThisTick or 0) + 1
     DW.spamRequestCount = (DW.spamRequestCount or 0) + 1
-    DW.spamTickHadRequest = true
     DW.recentDispatch = {
         requestedMS = nowMS,
         tickMS = tickMS,
         leadMS = lead,
-        beforeTotal = beforeTotal,
         itemId = a.id,
         itemName = a.name,
         itemKind = a.kind,
@@ -2233,29 +1962,14 @@ local function InitState()
 
     DW.item = nil
     DW.itemStatus = "未扫描"
-    DW.drinkState = "UNKNOWN"
-    DW.foodState = "UNKNOWN"
-    DW.consumeState = "NONE"
-    DW.drinkDetection = "未扫描"
     DW.spamTickMS = nil
     DW.spamAttemptsThisTick = 0
     DW.spamRequestCount = 0
-    DW.spamTickHadRequest = false
-    DW.spamTickContextRejected = false
-    DW.spamTickLearnableSuccess = false
-    DW.spamTickSuccessLeadMS = nil
     DW.keyPressCount = 0
     DW.lastKeyResult = "SPAM默认启动"
     DW.recentDispatch = nil
     DW.lastDispatchMS = nil
 
-    DW.autoLeadSuccessStreak = 0
-    DW.autoLeadMissStreak = 0
-    DW.autoLeadConfirmedTicks = 0
-    DW.autoLeadAdjustDown = 0
-    DW.autoLeadAdjustUp = 0
-    DW.autoLeadSuccessLeads = {}
-    DW.autoLeadLastChange = "START"
 
     DW.playerClassToken = nil
     DW.resourceType = nil
@@ -2305,7 +2019,6 @@ local function OnEvent()
         TaiYangDrinkWalkDiagDB.autoLeadEnabled = false
         TaiYangDrinkWalkDiagDB.tickCalibrationEnabled = nil
         RestoreReloadPhase()
-        ScanDrinkAura()
         NormalizeStoredBinding()
         SetItemSpec(TaiYangDrinkWalkDiagDB.itemSpec or "")
         DW.lastKeyResult = "按键或 /zchihe 触发"
@@ -2393,7 +2106,6 @@ local function OnEvent()
     end
 
     if e == "PLAYER_AURAS_CHANGED" then
-        ScanDrinkAura()
         RefreshResourceContext(false)
         return
     end
@@ -2406,7 +2118,6 @@ local function OnEvent()
     if e == "UI_ERROR_MESSAGE" then
         local r = DW.recentDispatch
         if r and NowMS() - (r.requestedMS or 0) <= 400 then
-            DW.spamTickContextRejected = true
             r.contextRejected = true
             DW.lastKeyResult = "本次尝试被拒绝：" .. tostring(arg1 or "UI_ERROR") .. "；该Tick不参与Lead降档"
         end
@@ -2441,7 +2152,6 @@ local function OnEvent()
             DW.lastMana = DW.resourceValue or 0
             DW.maxMana = DW.resourceMax or 0
         end
-        ScanDrinkAura()
         FindConfiguredItem()
         return
     end
