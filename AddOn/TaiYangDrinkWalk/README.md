@@ -1,11 +1,19 @@
-# TaiYangDrinkWalk 0.1.0-framework
+# TaiYangDrinkWalk 0.2.0 — 物品管理阶段
 
-首阶段：WoW 1.12.1 / Lua 5.0 插件骨架，**不含走喝动作**。
+适配：WoW 1.12.1（Lua 5.0）。保留 0.1.0 已验收框架，不调用 DrinkWalk.UseItem。
 
-已实现：核心加载顺序、/tsdw 与 /tsdwdiag、DLL Core.Version 检测、设置 UI、WATCH/SPAM 偏好保存、动作绑定安全占位。
+新增：背包 0–4 只读扫描；手工配置食物 food / 饮料 drink / 双恢复 both 规则（物品 ID 或完整名称）；匹配格子、数量和 ID 的聊天报告；规则存档与删除。
 
-未实现：食物/饮料识别、背包扫描、Mana/Energy Tick、时间窗口、原生 UseItem、成功确认、资源 HUD、FuBar 集成。WATCH/SPAM 只是占位偏好，不触发任何物品使用。
+## 游戏命令
+- `/tsdw` 打开/关闭设置窗口
+- `/tsdw status` DLL 与模块状态
+- `/tsdw add drink 8079` 添加饮料物品 ID 示例
+- `/tsdw add food 物品完整名称` 添加食物名称规则
+- `/tsdw add both 物品ID` 添加双恢复规则
+- `/tsdw list` 显示规则及序号
+- `/tsdw remove 1` 删除第一条规则
+- `/tsdw scan` 扫描所有背包并输出匹配结果
 
-安装：将 TaiYangDrinkWalk 文件夹放到 Interface/AddOns/，禁用原 TaiYangDrinkWalk 和 TaiYangDrinkWalkDiag。输入 /tsdw 打开，/tsdw status 或 /tsdwdiag 查看状态。
+**物品规则严格按 ID 或完整显示名称匹配**，不使用 Tooltip 猜测类型；未知物品不自动加入。扫描是只读操作；ManaTick/EnergyTick/Action/HUD/FuBar 仍为占位模块。
 
-DLL 未加载时仍可打开设置；快捷键动作只显示未接入提醒。**未完成 WoW 游戏内实机测试。**
+测试建议：先确认 /tsdw 与模式切换仍正常，添加背包内真实物品的 ID，执行 /tsdw scan；换包和减少物品后再次扫描，确认位置和数量更新。本版未经实机验证。
