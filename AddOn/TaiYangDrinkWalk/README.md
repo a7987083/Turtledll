@@ -1,4 +1,4 @@
-# TaiYangDrinkWalk v0.6.0
+# TaiYangDrinkWalk v0.6.1
 
 原始来源：DrinkWalk_v0.5.4_Lua50_Fixed2(1).zip。
 
@@ -31,7 +31,7 @@
 
 未在游戏内验证；请对比无天赋 2.00 秒与点天赋例如 1.57 秒时的光标完整移动时间。
 
-## v0.6.0：维护和稳定性
+## v0.6.1：维护和稳定性
 
 - Lua 5.0 / WoW 1.12 CI 语法检查；OnEvent 事件处理拆分，背包扫描合并，槽位 ID 校验。
 - HUD 不变项更新缓存，Tooltip 成功分类缓存；保留逐帧 Spark、现有 Tick 公式与手动操作。
@@ -39,3 +39,11 @@
 - 保留现有 SavedVariables 名称，不迁移用户配置。
 
 请重点复测换图、死亡复活、/reload、切换能量/Mana、FuBar 图标恢复。
+
+## v0.6.1：生命周期防护
+
+- `/reload` 恢复的 `VERIFY` 相位只允许首次 `PLAYER_ENTERING_WORLD` 保留，其他进世界事件清除过期相位。
+- 复活和进入世界时重置 Energy 采样锚点，避免复用过期采样。
+- Mana/Energy Tick 数学公式、绿色窗口和 DLL API 保持不变。
+
+注意：这些变化经过 Lua 5.0 语法和 CI 打包测试后，仍需在游戏中验证跨地图、复活与重载场景。
