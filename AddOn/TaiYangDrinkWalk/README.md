@@ -1,27 +1,24 @@
-# TaiYangDrinkWalk 0.3.0 — Tick 观测阶段
+# TaiYangDrinkWalk 0.4.0 — Tick HUD 与走喝窗口预览
 
-WoW 1.12.1 / Lua 5.0；基于实测通过的框架和物品分类版本扩展。**不会调用 DrinkWalk.UseItem，不会自动吃喝，不会控制移动。**
+针对 WoW 1.12.1 / Lua 5.0。保留已验证的基础框架、物品配置/Tooltip 分类及 0.3.0 的 Mana/Energy Tick 观测。
 
-## 新增内容
-- 接收玩家的 UNIT_MANA 与 UNIT_ENERGY 事件，比较相邻资源值，只读采样。
-- Mana Tick 2.0 秒初始模型：700ms 最小样本间隔、450ms 候选容差，三次周期一致后标记 LOCKED；已锁定时容差 280ms。
-- Energy Tick：过滤非 +14～22 的瞬时增加，使用 0.35 秒最小采样间隔；支持错过多个 Tick 时的间隔归一化，最多保存八个观测样本并采用中位数更新周期。
-- PLAYER_ENTERING_WORLD 重置观测状态，以免跨世界沿用旧 Tick 锚点。
-- 设置界面展示 Mana 和 Energy 的当前锁定状态（点击 Tick 状态按钮刷新）。
-- /tsdw tick 显示独立采样状态，/tsdw status 同时显示 Tick 状态。
+**本阶段只显示，不使用物品。** `Action.lua` 仍为安全占位；WATCH 和 SPAM 都不执行 `DrinkWalk.UseItem`。
 
-## 已知限制
-- **本阶段仅迁移参考插件的 Tick 采样核心思路，不是完整 V0.5.4 算法移植。** 原版的 Mana 多层异常分类/鲁棒偏差、自适应窗口/Lead、Blade Rush 天赋及敏捷修正、HUD 动态条和实物确认仍未接入。
-- 资源满值期间不会产生自然恢复样本，状态可能保持 UNSYNCED。
-- 客户端事件不是服务器精确计时源；瞬时回蓝等特殊效果可能影响估计。
-- Energy 初始周期为 2000ms，特殊天赋改变周期时，当前简化观测可能无法锁定；后续阶段再接入专门模型。
-- 本次已提交与自动打包，但仍需用户在乌龟服中实机验证 UI 和 Tick 观测。
+## 新增
+- 独立可拖动 HUD；位置及显隐保存到 `TaiYangDrinkWalkDB.hud`。
+- Mana / Energy 按玩家当前资源自动选择进度条；Rage 显示未同步提示，不虚构怒气恢复 Tick。
+- Tick 锁定状态、预计距下一次 Tick 的秒数，以及红色 Tick 零点线。
+- 根据已有 Tick 预测的演示窗口：剩余 320–170 毫秒标记为 YES，其他时间为 NO。只在状态为 LOCKED 时显示 YES。
+- 设置窗口「显示/隐藏 HUD」「窗口详情」按钮。
+- `/tsdw hud` 开关 HUD；`/tsdw window` 打印窗口详情；`/tsdw tick` 保持既有采样诊断。
+- 无有效 Tick 锚点时显示 UNSYNCED，不伪造时间窗口。
 
-## 游戏命令
-- /tsdw — 打开设置窗口
-- /tsdw tick — 打印 Mana/Energy 观测结果
-- /tsdw status — DLL、模块和观测状态
-- /tsdw set 8079, 魔法晶水 — 配置允许选择的物品
-- /tsdw scan — 只读扫描，按 Tooltip 分类并评分
+## 界面和操作
+`/tsdw` 打开设置界面；`/tsdw hud` 显隐进度条；`/tsdw window` 查询当前预览窗口；`/tsdw scan` 保留只读物品识别。
 
-**安全边界：** 无后台物品使用，Action.lua 仍为占位模块。
+## 限制
+- HUD 的 80ms 近似刷新只用来显示；不是精确的服务端 Tick 定时。
+- 320ms/170ms 是初始参考数值，**不是**已实测的最佳使用窗口。
+- Mana/Energy 仍使用当前 0.3.0 的简化观测模型，尚未移植原版全部异常分类与 Blade Rush 调整。
+- 不包含自动物品使用、成功确认、自适应 Lead、实际按键触发。
+- GitHub Actions 打包成功不能代表乌龟服游戏内运行成功。
