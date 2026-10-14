@@ -41,3 +41,6 @@ jobs:
             /tmp/lua50-src/lua-5.0.3/bin/luac -p "$file"
           done
           echo "Lua 5.0.3 syntax passed for ${#files[@]} files."
+      - name: Check addon compatibility contracts
+        shell: bash
+        run: python3 AddOn/TaiYangDrinkWalk/tests/check_contracts.py
