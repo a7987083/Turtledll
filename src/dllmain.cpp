@@ -608,8 +608,76 @@ static bool commandNeedsVisualRuntime(const char* cmd){
     return false;
 }
 
+// Movement API prototype: keyboard WASD only; reject unverified movement modes.
+// Movement input is driven through the client's Lua movement functions.
+static bool g_movementPaused=false;
+static unsigned long g_movementHeldMask=0;
+static const int kMoveKeys[4]={'W','S','A','D'};
+static const char* kMoveStart[4]={"MoveForwardStart","MoveBackwardStart","StrafeLeftStart","StrafeRightStart"};
+static const char* kMoveStop[4]={"MoveForwardStop","MoveBackwardStop","StrafeLeftStop","StrafeRightStop"};
+static bool movementCall(Lua50::State L,const char* name){
+    int top=Lua50::GetTop(L);
+    Lua50::GetGlobal(L,name);
+    if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);return false;}
+    bool ok=Lua50::PCall(L,0,0,0)==0;
+    Lua50::SetTop(L,top);
+    return ok;
+}
+static unsigned long physicalMovementKeys(){
+    unsigned long mask=0;
+    for(unsigned i=0;i<4;++i)if(GetAsyncKeyState(kMoveKeys[i]) & 0x8000)mask|=(1UL<<i);
+    return mask;
+}
+static bool movementFunctionsReady(Lua50::State L){
+    int top=Lua50::GetTop(L);
+    for(unsigned i=0;i<4;++i)for(unsigned j=0;j<2;++j){
+        Lua50::GetGlobal(L,j?kMoveStop[i]:kMoveStart[i]);
+        bool ok=Lua50::Type(L,-1)==WoW112::LUA_TFUNCTION;
+        Lua50::SetTop(L,top);
+        if(!ok)return false;
+    }
+    return true;
+}
+static bool movementRelease(Lua50::State L){
+    if(!g_movementPaused)return true;
+    // Never replay a stale press. Start only keys still physically held.
+    const unsigned long held=physicalMovementKeys();
+    bool ok=true;
+    for(unsigned i=0;i<4;++i){
+        if(held&(1UL<<i))ok=movementCall(L,kMoveStart[i]) && ok;
+    }
+    g_movementPaused=false;
+    g_movementHeldMask=0;
+    return ok;
+}
+static int doMovement(Lua50::State L,const char* cmd){
+    if(eq(cmd,"Movement.IsPaused")){
+        Lua50::PushBool(L,g_movementPaused);Lua50::PushString(L,"OK");return 2;
+    }
+    if(eq(cmd,"Movement.Resume")){
+        bool ok=movementRelease(L);
+        Lua50::PushBool(L,ok);Lua50::PushString(L,ok?"OK":"MOVE_RESUME_FAILED");return 2;
+    }
+    if(eq(cmd,"Movement.Pause")){
+        if(g_movementPaused){Lua50::PushBool(L,true);Lua50::PushString(L,"ALREADY_PAUSED");return 2;}
+        if(!movementFunctionsReady(L)){Lua50::PushBool(L,false);Lua50::PushString(L,"MOVE_API_UNAVAILABLE");return 2;}
+        // Do not claim coverage of auto-run or mouse movement; this is a WASD prototype.
+        const unsigned long held=physicalMovementKeys();
+        if(!held){Lua50::PushBool(L,false);Lua50::PushString(L,"NO_WASD_INTENT");return 2;}
+        bool ok=true;
+        for(unsigned i=0;i<4;++i)if(held&(1UL<<i))ok=movementCall(L,kMoveStop[i]) && ok;
+        if(!ok){for(unsigned i=0;i<4;++i)if(held&(1UL<<i))movementCall(L,kMoveStart[i]);
+            Lua50::PushBool(L,false);Lua50::PushString(L,"MOVE_PAUSE_FAILED");return 2;}
+        g_movementHeldMask=held;
+        g_movementPaused=true;
+        Lua50::PushBool(L,true);Lua50::PushString(L,"WASD_PAUSED");return 2;
+    }
+    return -1;
+}
+
 static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
     if(!ev)return;
+    if(eq(ev,"PLAYER_LEAVING_WORLD") || eq(ev,"PLAYER_DEAD"))movementRelease(L);
     if(eq(ev,"PLAYER_LEAVING_WORLD")){
         if(InterlockedCompareExchange(&g_worldPhase,2,2)==2)return;
         InterlockedExchange(&g_worldPhase,2);
@@ -933,6 +1001,7 @@ static int __fastcall scriptMain(Lua50::State _L){
         }
         return pushError(L,"API_NOT_FOUND");
     }
+    if(eq(cmd,"Movement.Pause")||eq(cmd,"Movement.Resume")||eq(cmd,"Movement.IsPaused"))return doMovement(L,cmd);
     if(eq(cmd,"MoonMarker.Runtime.Status"))return doMoonMarkerRuntimeStatus(L);
     if(isMoonMarkerGuardedCommand(cmd)&&!TysMoonRuntimeGuard::enabled())return pushMoonMarkerGuardFailure(L);
     if(eq(cmd,"facing"))return doFacing(L); if(eq(cmd,"speed"))return doSpeed(L);
