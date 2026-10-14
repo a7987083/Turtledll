@@ -1,7 +1,7 @@
 -- WoW 1.12.1 / Lua 5.0. Bootstrap and public API.
 TaiYangDrinkWalk = TaiYangDrinkWalk or {}
 local DW = TaiYangDrinkWalk
-DW.version = "0.5.0-native-action"
+DW.version = "0.5.1-macro-native"
 DW.modules = {}
 DW.ready = false
 DW.uiError = nil
@@ -71,19 +71,20 @@ local events = CreateFrame("Frame", "TaiYangDrinkWalkEvents")
 events:RegisterEvent("VARIABLES_LOADED")
 events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("BAG_UPDATE")
+events:RegisterEvent("PLAYER_AURAS_CHANGED")
 events:RegisterEvent("UNIT_MANA")
 events:RegisterEvent("UNIT_ENERGY")
 events:RegisterEvent("PLAYER_ENTERING_WORLD")
 events:SetScript("OnEvent", function()
     if event == "VARIABLES_LOADED" then
         if type(TaiYangDrinkWalkDB) ~= "table" then TaiYangDrinkWalkDB = {} end
-        if TaiYangDrinkWalkDB.mode ~= "WATCH" and TaiYangDrinkWalkDB.mode ~= "SPAM" then
-            TaiYangDrinkWalkDB.mode = "WATCH"
-        end
+        TaiYangDrinkWalkDB.mode = nil
     elseif event == "PLAYER_ENTERING_WORLD" then
         DW.lastMana=nil;DW.lastEnergy=nil
         if DW.ManaTick then DW.ManaTick.Reset() end
         if DW.EnergyTick then DW.EnergyTick.Reset() end
+    elseif event == "PLAYER_AURAS_CHANGED" then
+        if DW.Action then DW.Action.ObserveAura() end
     elseif event == "BAG_UPDATE" then
         if DW.Action then DW.Action.ObserveBag() end
     elseif event == "UNIT_MANA" and arg1 == "player" then
