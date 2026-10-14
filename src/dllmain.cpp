@@ -992,6 +992,70 @@ static int doUnitStateByGuid(Lua50::State L){
     return 1;
 }
 
+// M4 one-shot observation journal. No new hooks, threads, or global scanning.
+// Querying Boss.State drives transitions; absence of observation NEVER implies kill/reset.
+struct BossTrack { unsigned long long guid; char state[16]; };
+struct BossEvt { unsigned long seq; unsigned long time; unsigned long long guid; unsigned long entry; bool candidate; char state[16]; char previous[16]; char evidence[48]; };
+static BossTrack g_bossTracks[64]={};
+static BossEvt g_bossEvents[64]={};
+static unsigned long g_bossSeq=0,g_bossWrites=0,g_bossDropped=0;
+static unsigned g_bossTrackCursor=0;
+static void bossObserve(unsigned long long guid,unsigned long entry,bool candidate,const char* state,const char* evidence){
+    if(!guid || eq(state,"UNKNOWN"))return;
+    BossTrack* track=0;
+    for(unsigned i=0;i<64;++i)if(g_bossTracks[i].guid==guid){track=&g_bossTracks[i];break;}
+    if(!track){track=&g_bossTracks[g_bossTrackCursor++%64];track->guid=guid;track->state[0]=0;}
+    if(eq(track->state,state))return;
+    BossEvt& ev=g_bossEvents[g_bossWrites%64];
+    if(g_bossWrites>=64)++g_bossDropped;
+    ev.seq=++g_bossSeq;ev.time=GetTickCount();ev.guid=guid;ev.entry=entry;ev.candidate=candidate;
+    cpy(ev.previous,sizeof(ev.previous),track->state[0]?track->state:"NONE");
+    cpy(ev.state,sizeof(ev.state),state);cpy(ev.evidence,sizeof(ev.evidence),evidence);
+    cpy(track->state,sizeof(track->state),state);++g_bossWrites;
+}
+static int doBossStatus(Lua50::State L){
+    Lua50::NewTable(L);
+    tableSetBool(L,"ok",true);tableSetString(L,"code","OK");tableSetNumber(L,"schemaVersion",1);
+    tableSetNumber(L,"latestSeq",(double)g_bossSeq);
+    tableSetNumber(L,"oldestSeq",g_bossWrites?(double)(g_bossSeq-(g_bossWrites<64?g_bossWrites:64)+1):0);
+    tableSetNumber(L,"bufferCapacity",64);tableSetNumber(L,"bufferCount",(double)(g_bossWrites<64?g_bossWrites:64));
+    tableSetNumber(L,"overwritten",(double)g_bossDropped);
+    tableSetString(L,"source","BOSS_STATE_QUERIES");
+    tableSetBool(L,"hookInstalled",false);
+    tableSetBool(L,"encounterVictorySupported",false);
+    return 1;
+}
+static int doBossEventsAfter(Lua50::State L){
+    unsigned long cursor=0;
+    if(Lua50::GetTop(L)>=2){
+        if(!Lua50::IsNumber(L,2))return pushError(L,"BAD_ARGUMENT");
+        double v=Lua50::ToNumber(L,2);
+        if(!(v==v)||v<0||v>4294967295.0)return pushError(L,"BAD_ARGUMENT");
+        cursor=(unsigned long)v;
+    }
+    unsigned long count=g_bossWrites<64?g_bossWrites:64;
+    unsigned long oldest=count?g_bossSeq-count+1:0;
+    bool lost=count && cursor<oldest-1;
+    Lua50::NewTable(L);
+    tableSetBool(L,"ok",true);tableSetString(L,"code",lost?"EVENTS_LOST":"OK");
+    tableSetNumber(L,"schemaVersion",1);tableSetNumber(L,"latestSeq",(double)g_bossSeq);
+    tableSetNumber(L,"oldestSeq",(double)oldest);tableSetBool(L,"lost",lost);
+    Lua50::PushString(L,"events");Lua50::NewTable(L);unsigned n=0;
+    for(unsigned long seq=oldest;count&&seq<=g_bossSeq;++seq){
+        if(seq<=cursor)continue;
+        const BossEvt& ev=g_bossEvents[(seq-1)%64];
+        if(ev.seq!=seq)continue;
+        Lua50::PushNumber(L,(double)++n);Lua50::NewTable(L);
+        tableSetNumber(L,"seq",(double)ev.seq);tableSetNumber(L,"timestampMS",(double)ev.time);
+        char h[17]={0};hex64(h,sizeof(h),ev.guid);tableSetString(L,"guid",h);
+        tableSetNumber(L,"entry",(double)ev.entry);tableSetBool(L,"bossCandidate",ev.candidate);
+        tableSetString(L,"state",ev.state);tableSetString(L,"previous",ev.previous);
+        tableSetString(L,"evidence",ev.evidence);tableSetString(L,"encounterResult","UNCONFIRMED");
+        Lua50::SetTable(L,-3);
+    }
+    Lua50::SetTable(L,-3);tableSetNumber(L,"count",(double)n);return 1;
+}
+
 // M3: explicit-call-only Boss.State. Observed unit state is NOT raid encounter victory.
 static int doBossState(Lua50::State L){
     const char* code="OK";const char* state="UNKNOWN";const char* evidence="NONE";
@@ -1030,6 +1094,7 @@ static int doBossState(Lua50::State L){
             }
         }
     }
+    if(eq(code,"OK"))bossObserve(guid,entryKnown?entry:0,(clsKnown&&ieq(cls,"worldboss"))||(levelKnown&&level==-1),state,evidence);
     Lua50::NewTable(L);
     tableSetBool(L,"ok",eq(code,"OK"));tableSetString(L,"code",code);
     tableSetNumber(L,"schemaVersion",1);
@@ -1231,7 +1296,7 @@ static int __fastcall scriptMain(Lua50::State _L){
     if(eq(cmd,"MoonMarker.Runtime.Status"))return doMoonMarkerRuntimeStatus(L);
     if(isMoonMarkerGuardedCommand(cmd)&&!TysMoonRuntimeGuard::enabled())return pushMoonMarkerGuardFailure(L);
     if(eq(cmd,"facing"))return doFacing(L); if(eq(cmd,"speed"))return doSpeed(L);
-    if(eq(cmd,"Boss.State"))return doBossState(L); if(eq(cmd,"Unit.Identity"))return doUnitIdentity(L); if(eq(cmd,"Unit.Guid"))return doUnitGuid(L); if(eq(cmd,"Unit.InSight"))return doUnitInSight(L);
+    if(eq(cmd,"Boss.Event.GetAfter"))return doBossEventsAfter(L); if(eq(cmd,"Boss.Status"))return doBossStatus(L); if(eq(cmd,"Boss.State"))return doBossState(L); if(eq(cmd,"Unit.Identity"))return doUnitIdentity(L); if(eq(cmd,"Unit.Guid"))return doUnitGuid(L); if(eq(cmd,"Unit.InSight"))return doUnitInSight(L);
     if(eq(cmd,"GroundProbe.Status"))return doGroundStatus(L); if(eq(cmd,"GroundProbe.PlayerPosition"))return doPlayerPosition(L); if(eq(cmd,"GroundProbe.Snapshot"))return doSnapshot(L); if(eq(cmd,"GroundProbe.UnitByGuid"))return doUnitByGuid(L); if(eq(cmd,"GroundProbe.UnitStateByGuid"))return doUnitStateByGuid(L); if(eq(cmd,"GroundProbe.DynamicByGuid"))return doDynamicByGuid(L); if(eq(cmd,"GroundProbe.ScopeByGuid"))return doScopeByGuid(L); if(eq(cmd,"GroundProbe.TotemSnapshot"))return doTotemSnapshot(L);
     if(eq(cmd,"AutoRange.RelationByUnit"))return doRelationByUnit(L); if(eq(cmd,"AutoRange.RelationByGuid"))return doRelationByGuid(L);
     // V1.3-DW5: authorization is classified by command type, not by the
