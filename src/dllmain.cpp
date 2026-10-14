@@ -608,6 +608,7 @@ static bool commandNeedsVisualRuntime(const char* cmd){
     return false;
 }
 
+static void pushBoolCode(Lua50::State L,bool ok,const char* code);
 // MOV1: WoW 1.12.1 build 5875 native WASD pause. No protected Lua movement calls.
 // The detour only rejects forward/backward/left/right movement *starts*.
 // Stop events and all other flags are forwarded to the original engine routine.
