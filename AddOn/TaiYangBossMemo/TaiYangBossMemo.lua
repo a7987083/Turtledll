@@ -13,7 +13,7 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function()
     end
 end
 local function TaiYangBossMemoInitialize()
--- TaiYangBossMemo 1.1.0 | WoW 1.12.1 / Lua 5.0
+-- TaiYangBossMemo 1.1.2 | WoW 1.12.1 / Lua 5.0
 -- Shared account boss catalog + character-specific notes; old account DB is migration-only.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
 local db,shown=nil,{}
@@ -1318,6 +1318,11 @@ local function observe()
     end
     -- Both hostile and friendly NPCs are eligible; never wait until engage.
     trigger(guid,key)
+end
+-- Maintenance is independent of target matching: an empty/invalid target must
+-- not prevent stale track eviction. Keep shown[] until a world-session reset,
+-- otherwise evicting a track could cause duplicate pre-fight reminders.
+local function maintainTracks()
     local now=milliseconds()
     for g,t in pairs(tracks) do
         if now-t.lastSeen>TRACK_TTL_MS then tracks[g]=nil end
@@ -1330,15 +1335,33 @@ driver:RegisterEvent("PLAYER_ENTERING_WORLD")
 driver:RegisterEvent("PLAYER_LEAVING_WORLD")
 driver:RegisterEvent("PLAYER_LOGOUT")
 driver:RegisterEvent("PLAYER_TARGET_CHANGED")
+-- BAG_UPDATE can fire several times for one inventory action. Merge these
+-- bursts into one redraw without delaying the target-change reminder.
+local bagRefreshPending=false
+local bagRefreshElapsed=0
+local BAG_REFRESH_DELAY=0.15
+local maintenanceElapsed=0
+local MAINTENANCE_INTERVAL=10
+local function clearPendingBagRefresh()
+    bagRefreshPending=false
+    bagRefreshElapsed=0
+end
 driver:SetScript("OnEvent",function()
-    if event=="BAG_UPDATE" then if activeAlert then refreshActiveStock() end return end
+    if event=="BAG_UPDATE" then
+        if activeAlert then bagRefreshPending=true;bagRefreshElapsed=0 end
+        return
+    end
     if event=="VARIABLES_LOADED" then
         getDB()
         resetSession()
+        clearPendingBagRefresh()
+        maintenanceElapsed=0
     elseif event=="PLAYER_ENTERING_WORLD" or event=="PLAYER_LEAVING_WORLD" then
         -- PLAYER_ENTERING_WORLD runs after map/instance loading on WoW 1.12.
         -- The leaving event also prevents a previous map's alert from lingering.
         resetSession()
+        clearPendingBagRefresh()
+        maintenanceElapsed=0
     elseif event=="PLAYER_TARGET_CHANGED" then
         pendingNewSelection=true
         -- Act on target selection promptly; do not wait for the next polling tick.
@@ -1346,12 +1369,35 @@ driver:SetScript("OnEvent",function()
     elseif event=="PLAYER_LOGOUT" then
         -- Never persist GUIDs, timestamps or pop-up dedup state.
         resetSession()
+        clearPendingBagRefresh()
     end
 end)
 driver:SetScript("OnUpdate",function()
-    if not getDB().enabled then return end
+    -- Keep maintenance independent from the active target and the global
+    -- reminder toggle; saved notes and gear are never touched here.
+    maintenanceElapsed=maintenanceElapsed+arg1
+    if maintenanceElapsed>=MAINTENANCE_INTERVAL then
+        maintenanceElapsed=maintenanceElapsed-MAINTENANCE_INTERVAL
+        maintainTracks()
+    end
+    if bagRefreshPending then
+        if not activeAlert then clearPendingBagRefresh()
+        else
+            bagRefreshElapsed=bagRefreshElapsed+arg1
+            if bagRefreshElapsed>=BAG_REFRESH_DELAY then
+                clearPendingBagRefresh()
+                refreshActiveStock()
+            end
+        end
+    end
+    local cfg=getDB()
+    if not cfg.enabled then return end
     timer=timer+arg1
-    if timer>=getDB().pollInterval then timer=0;observe() end
+    if timer>=cfg.pollInterval then
+        -- Preserve the remaining fraction instead of accumulating drift.
+        timer=timer-cfg.pollInterval
+        observe()
+    end
 end)
 -- All settings are in the Chinese UI; /bossmemo only opens the window.
 local settings=CreateFrame("Frame",nil,frame)
