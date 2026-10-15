@@ -1,5 +1,6 @@
 -- Register slash command before building UI; init failure remains diagnosable.
 local TaiYangBossMemoOpen = nil
+local TaiYangBossMemoClose = nil
 SLASH_TAIYANGBOSSMEMO1="/bossmemo"
 SlashCmdList["TAIYANGBOSSMEMO"]=function()
     if type(TaiYangBossMemoOpen)=="function" then
@@ -12,12 +13,13 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function()
     end
 end
 local function TaiYangBossMemoInitialize()
--- TaiYangBossMemo 0.7.0 | WoW 1.12.1 / Lua 5.0
+-- TaiYangBossMemo 0.9.1 | WoW 1.12.1 / Lua 5.0
 -- SavedVariables: legacy {notes={ [entry]={name,before,after} }} stays valid.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
 local db,shown=nil,{}
 local tracks,lastEntry={},nil
-local cursor,timer=0,0
+local timer=0
+local pendingNewSelection=false
 local function say(s) if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(PREFIX..s) end end
 local function trim(s) return string.gsub(s or "","^%s*(.-)%s*$","%1") end
 local function getDB()
@@ -26,7 +28,9 @@ local function getDB()
     if type(db.notes)~="table" then db.notes={} end
     if db.enabled==nil then db.enabled=true end
     if db.before==nil then db.before=true end
-    if db.after==nil then db.after=true end
+    if db.realertAfterReset==nil then db.realertAfterReset=false end
+    if db.alertSeconds~=0 and db.alertSeconds~=5 and db.alertSeconds~=10 and db.alertSeconds~=15 then db.alertSeconds=0 end
+    if type(db.alertPos)~="table" then db.alertPos=nil end
     if db.pollInterval~=0.2 and db.pollInterval~=0.5 and db.pollInterval~=1 and db.pollInterval~=2 then db.pollInterval=0.5 end
     return db
 end
@@ -96,6 +100,30 @@ label(manager,10,-7,"已保存的 Boss","GameFontNormalLarge")
 local searchBox=edit(manager,10,-38,198,22)
 local listRows={}
 local page,selectedEntry=1,nil
+local dirty=false
+local suppressDirty=false
+local savedSnapshot=nil
+-- Forward declarations must precede closures in Lua 5.0.
+local nameBox,entryBox,beforeBox,enabledCheck
+local dirtyLabel
+local function updateDirtyLabel()
+    if dirtyLabel then dirtyLabel:SetText(dirty and "● 未保存" or "已保存") end
+end
+local function editorSnapshot()
+    if not entryBox then return nil end
+    return {entry=entryBox:GetText() or "",name=nameBox:GetText() or "",before=beforeBox:GetText() or "",enabled=enabledCheck:GetChecked() and true or false}
+end
+local function captureSnapshot()
+    savedSnapshot=editorSnapshot();dirty=false;updateDirtyLabel()
+end
+local function recomputeDirty()
+    if suppressDirty or not savedSnapshot then return end
+    local current=editorSnapshot()
+    dirty=current.entry~=savedSnapshot.entry or current.name~=savedSnapshot.name or current.before~=savedSnapshot.before or current.enabled~=savedSnapshot.enabled
+    updateDirtyLabel()
+end
+local confirmModal=nil
+local function markDirty() recomputeDirty() end
 local PAGE_SIZE=7
 local function entryList()
     local entries={}
@@ -112,36 +140,43 @@ local function entryList()
     table.sort(entries,function(a,b) return a<b end)
     return entries
 end
-local nameBox,entryBox,beforeBox,afterBox,enabledCheck
 local status=label(frame,29,-460,"请选择 Boss，或读取当前目标添加。","GameFontHighlightSmall",690)
 local function setStatus(s) status:SetText(s) end
 local refreshList
+local pageInfo,prevButton,nextButton
+local function askDiscard(action)
+    if not dirty then action();return end
+    if confirmModal then confirmModal("未保存的修改", "当前 Boss 的备注尚未保存。放弃修改并继续吗？", action) end
+end
 local function loadEntry(n,name)
     if not n or n<1 then setStatus("请输入有效的 NPC Entry。");return end
+    suppressDirty=true
     selectedEntry=n
     local item=anyNote(n)
     entryBox:SetText(tostring(n))
     nameBox:SetText(item and item.name or name or "")
     beforeBox:SetText(item and item.before or "")
-    afterBox:SetText(item and item.after or "")
     enabledCheck:SetChecked(not item or item.enabled~=false)
     lastEntry=n
     setStatus("正在编辑 Entry "..n.."；修改后点击保存。")
     if refreshList then refreshList() end
+    suppressDirty=false;captureSnapshot()
 end
 for i=1,PAGE_SIZE do
     local n=i
     local b=button(manager,"",10,-74-(i-1)*36,200,31,function()
         local entries=entryList()
         local id=entries[(page-1)*PAGE_SIZE+n]
-        if id then loadEntry(id) end
+        if id then askDiscard(function() loadEntry(id) end) end
     end)
     listRows[i]=b
 end
 refreshList=function()
     local entries=entryList()
-    local total=math.max(1,math.ceil(table.getn(entries)/PAGE_SIZE))
+    local count=table.getn(entries)
+    local total=math.max(1,math.ceil(count/PAGE_SIZE))
     if page>total then page=total end
+    if page<1 then page=1 end
     for i=1,PAGE_SIZE do
         local n=entries[(page-1)*PAGE_SIZE+i]
         local b=listRows[i]
@@ -153,23 +188,30 @@ refreshList=function()
             b:Show()
         else b:Hide() end
     end
+    if pageInfo then pageInfo:SetText("第 "..page.." / "..total.." 页 · 共 "..count.." 个 Boss") end
+    if prevButton then if page<=1 then prevButton:Disable() else prevButton:Enable() end end
+    if nextButton then if page>=total then nextButton:Disable() else nextButton:Enable() end end
 end
 searchBox:SetScript("OnTextChanged",function() page=1;refreshList() end)
-button(manager,"上一页",10,-335,93,25,function() if page>1 then page=page-1;refreshList() end end)
-button(manager,"下一页",116,-335,93,25,function() page=page+1;refreshList() end)
-local pageInfo=label(manager,12,-369,"可通过名称或 Entry 搜索","GameFontHighlightSmall",200)
+prevButton=button(manager,"上一页",10,-335,93,25,function() if page>1 then page=page-1;refreshList() end end)
+nextButton=button(manager,"下一页",116,-335,93,25,function() page=page+1;refreshList() end)
+pageInfo=label(manager,12,-369,"第 1 / 1 页 · 共 0 个 Boss","GameFontHighlightSmall",200)
+refreshList()
 label(manager,235,-7,"Boss 详情 / 编辑","GameFontNormalLarge")
 label(manager,236,-40,"NPC Entry")
 entryBox=edit(manager,235,-61,120,22)
 label(manager,375,-40,"Boss 名称")
 nameBox=edit(manager,375,-61,325,22)
 label(manager,235,-106,"战前提醒")
-beforeBox=edit(manager,235,-130,465,70)
-label(manager,235,-215,"死亡后提醒")
-afterBox=edit(manager,235,-239,465,70)
+beforeBox=edit(manager,235,-130,465,150)
+for _,box in ipairs({entryBox,nameBox,beforeBox}) do
+    box:SetScript("OnTextChanged",markDirty)
+end
 enabledCheck=CreateFrame("CheckButton",nil,manager,"UICheckButtonTemplate")
 enabledCheck:SetPoint("TOPLEFT",manager,"TOPLEFT",234,-319)
 label(manager,269,-328,"启用此 Boss 的提醒","GameFontHighlight")
+enabledCheck:SetScript("OnClick",markDirty)
+dirtyLabel=label(manager,590,-328,"已保存","GameFontHighlightSmall",114)
 local function entryNumber()
     local value=trim(entryBox:GetText())
     if not string.find(value,"^%d+$") then return nil end
@@ -179,82 +221,188 @@ local function entryNumber()
 end
 local function target()
     local id=api("Unit.Identity","target")
-    if id and id.ok and id.data and id.data.entry then loadEntry(id.data.entry,id.data.name)
+    if id and id.ok and id.data and id.data.entry then askDiscard(function() loadEntry(id.data.entry,id.data.name) end)
     else setStatus("当前没有可读取的目标，可手动输入 NPC Entry。") end
 end
 local function save()
     local n=entryNumber()
     if not n then setStatus("保存失败：NPC Entry 必须是正整数。");return end
     local oldItem=anyNote(n)
-    local item={name=trim(nameBox:GetText()),before=trim(beforeBox:GetText()),after=trim(afterBox:GetText()),enabled=enabledCheck:GetChecked() and true or false}
+    -- Preserve legacy after text in SavedVariables for backward compatibility; never display or trigger it.
+    local item={name=trim(nameBox:GetText()),before=trim(beforeBox:GetText()),after=oldItem and oldItem.after or "",enabled=enabledCheck:GetChecked() and true or false}
     getDB().notes[tostring(n)]=item
     -- Editing Entry is treated as add/save-as; never silently delete prior ID.
     loadEntry(n)
     setStatus("保存成功：Entry "..n..(item.enabled and "（已启用）" or "（已停用）"))
     refreshList()
 end
-local confirmEntry,confirmUntil=nil,0
 local function deleteEntry()
     local n=entryNumber()
     if not n or not anyNote(n) then setStatus("当前 Entry 尚未保存，无法删除。");return end
-    if confirmEntry~=n or GetTime()>confirmUntil then
-        confirmEntry=n;confirmUntil=GetTime()+5
-        setStatus("确认删除 Entry "..n.."？5 秒内再次点击「删除」确认。")
-        return
-    end
-    getDB().notes[tostring(n)]=nil
-    confirmEntry=nil;selectedEntry=nil;lastEntry=nil
-    entryBox:SetText("");nameBox:SetText("");beforeBox:SetText("");afterBox:SetText("")
+    if confirmModal then
+        local item=anyNote(n)
+        local displayName=(item and item.name and item.name~="") and item.name or ("Entry "..n)
+        confirmModal("确认删除 Boss", "删除「"..displayName.."」(Entry "..n..")？此操作无法撤销。",function()
+            getDB().notes[tostring(n)]=nil
+            suppressDirty=true
+            selectedEntry=nil;lastEntry=nil
+    entryBox:SetText("");nameBox:SetText("");beforeBox:SetText("")
     enabledCheck:SetChecked(true);refreshList()
-    setStatus("已删除 Boss Entry "..n.."，不影响其他记录。")
+            suppressDirty=false;captureSnapshot()
+            setStatus("已删除 Boss Entry "..n.."，不影响其他记录。")
+        end)
+    end
 end
 button(manager,"读取当前目标",235,-365,112,25,target)
 button(manager,"保存 Boss",354,-365,100,25,save)
 button(manager,"删除",462,-365,80,25,deleteEntry)
 button(manager,"新建",548,-365,80,25,function()
+    askDiscard(function()
+    suppressDirty=true
     selectedEntry=nil;entryBox:SetText("");nameBox:SetText("")
-    beforeBox:SetText("");afterBox:SetText("");enabledCheck:SetChecked(true)
+    beforeBox:SetText("");enabledCheck:SetChecked(true)
     setStatus("新建 Boss：输入 Entry、名称和提醒后保存。");refreshList()
+    suppressDirty=false;captureSnapshot()
+    end)
 end)
 refreshList()
+-- Shared confirmation window for delete, unsaved navigation and closing.
+local modal=CreateFrame("Frame",nil,UIParent)
+modal:SetWidth(420);modal:SetHeight(185)
+modal:SetPoint("CENTER",UIParent,"CENTER",0,100)
+modal:SetFrameStrata("FULLSCREEN_DIALOG")
+modal:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=11,top=12,bottom=11}})
+local modalTitle=modal:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
+modalTitle:SetPoint("TOP",modal,"TOP",0,-24)
+local modalBody=modal:CreateFontString(nil,"OVERLAY","GameFontHighlight")
+modalBody:SetPoint("TOP",modal,"TOP",0,-70);modalBody:SetWidth(360);modalBody:SetJustifyH("CENTER")
+local modalAction=nil
+local yes=CreateFrame("Button",nil,modal,"UIPanelButtonTemplate")
+yes:SetPoint("BOTTOMRIGHT",modal,"BOTTOM",-8,25);yes:SetWidth(100);yes:SetHeight(27);yes:SetText("确认")
+yes:SetScript("OnClick",function() local action=modalAction;modalAction=nil;modal:Hide();if action then action() end end)
+local no=CreateFrame("Button",nil,modal,"UIPanelButtonTemplate")
+no:SetPoint("BOTTOMLEFT",modal,"BOTTOM",8,25);no:SetWidth(100);no:SetHeight(27);no:SetText("取消")
+no:SetScript("OnClick",function() modalAction=nil;modal:Hide() end)
+modal:Hide()
+confirmModal=function(titleText,bodyText,fn)
+    modalTitle:SetText(titleText);modalBody:SetText(bodyText)
+    modalAction=fn;modal:Show()
+end
+local function safeClose()
+    if modal:IsShown() then modal:Hide();modalAction=nil;return end
+    askDiscard(function() frame:Hide() end)
+end
+TaiYangBossMemoClose=safeClose
+local closeButton=CreateFrame("Button",nil,frame,"UIPanelCloseButton")
+closeButton:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-5,-5)
+closeButton:SetScript("OnClick",safeClose)
+-- WoW 1.12 Escape handling is left to the default UI; the X button checks unsaved data.
 local popup=CreateFrame("Frame","TaiYangBossMemoAlert",UIParent)
-popup:SetWidth(440);popup:SetHeight(245)
-popup:SetPoint("CENTER",UIParent,"CENTER",0,125)
+popup:SetWidth(328);popup:SetHeight(176)
+local function restoreAlertPosition()
+    popup:ClearAllPoints()
+    local p=getDB().alertPos
+    if p and type(p.x)=="number" and type(p.y)=="number" and math.abs(p.x)<5000 and math.abs(p.y)<5000 then
+        popup:SetPoint("CENTER",UIParent,"CENTER",p.x,p.y)
+    else popup:SetPoint("CENTER",UIParent,"CENTER",0,150) end
+end
+restoreAlertPosition()
 popup:SetFrameStrata("FULLSCREEN_DIALOG")
 popup:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=11,top=12,bottom=11}})
 popup:SetMovable(true);popup:EnableMouse(true);popup:RegisterForDrag("LeftButton")
 popup:SetScript("OnDragStart",function() this:StartMoving() end)
-popup:SetScript("OnDragStop",function() this:StopMovingOrSizing() end)
+popup:SetScript("OnDragStop",function()
+    this:StopMovingOrSizing()
+    local cx,cy=this:GetCenter()
+    local ux,uy=UIParent:GetCenter()
+    if cx and cy and ux and uy then
+        local scale=this:GetEffectiveScale()/UIParent:GetEffectiveScale()
+        getDB().alertPos={x=cx*scale-ux,y=cy*scale-uy}
+    end
+end)
 local pTitle=popup:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
 pTitle:SetPoint("TOP",popup,"TOP",0,-25)
 local pBody=popup:CreateFontString(nil,"OVERLAY","GameFontHighlight")
-pBody:SetPoint("TOPLEFT",popup,"TOPLEFT",30,-72);pBody:SetWidth(380);pBody:SetHeight(120)
-pBody:SetJustifyH("LEFT");pBody:SetJustifyV("TOP")
+pBody:SetPoint("CENTER",popup,"CENTER",0,-3);pBody:SetWidth(282);pBody:SetHeight(90)
+pBody:SetJustifyH("CENTER");pBody:SetJustifyV("MIDDLE")
 local pClose=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
-pClose:SetWidth(110);pClose:SetHeight(25)
-pClose:SetPoint("BOTTOM",popup,"BOTTOM",0,23);pClose:SetText("知道了")
-pClose:SetScript("OnClick",function() popup:Hide() end)
-popup:Hide()
-local function alert(entry,phase)
-    local d=getDB()
-    if not d.enabled then return end
-    if phase=="before" and not d.before then return end
-    if phase=="after" and not d.after then return end
-    local item=note(entry)
-    if not item then return end
-    local content=trim(item[phase])
-    if content=="" then return end
-    pTitle:SetText((phase=="before" and "战前提醒" or "检测到单位死亡").." · "..(item.name~="" and item.name or "Entry "..entry))
-    pBody:SetText(content)
+pClose:SetWidth(92);pClose:SetHeight(22)
+pClose:SetPoint("BOTTOM",popup,"BOTTOM",0,16);pClose:SetText("知道了")
+local queue={}
+local activeAlert=nil
+local alertRemaining=0
+local QUEUE_LIMIT=20
+local alertClose=CreateFrame("Button",nil,popup,"UIPanelCloseButton")
+alertClose:SetPoint("TOPRIGHT",popup,"TOPRIGHT",-4,-4)
+local queueKeys={}
+local function playerIsDead()
+    -- Vanilla WoW 1.12 native API; do not consume a reminder when dead/ghost.
+    return type(UnitIsDeadOrGhost)=="function" and not not UnitIsDeadOrGhost("player")
+end
+local function displayNext()
+    -- Queued reminders must still refer to enabled, existing notes when shown.
+    while table.getn(queue)>0 do
+        local first=queue[1]
+        local current=note(first.entry)
+        if getDB().enabled and getDB().before and current and trim(current.before)~="" then break end
+        table.remove(queue,1)
+        queueKeys[first.key]=nil
+        if shown[first.guid] then shown[first.guid].before=nil end
+    end
+    if table.getn(queue)==0 then activeAlert=nil;popup:Hide();return end
+    -- Do not display a stale reminder while the player is dead.
+    -- Dropped pending reminders are NOT marked as delivered.
+    while table.getn(queue)>0 and playerIsDead() do
+        local discarded=table.remove(queue,1)
+        queueKeys[discarded.key]=nil
+        if shown[discarded.guid] then shown[discarded.guid].before=nil end
+    end
+    if table.getn(queue)==0 then activeAlert=nil;popup:Hide();return end
+    activeAlert=table.remove(queue,1)
+    alertRemaining=getDB().alertSeconds
+    queueKeys[activeAlert.key]=nil
+    pTitle:SetText(activeAlert.title..(table.getn(queue)>0 and " (待处理 "..table.getn(queue)..")" or ""))
+    pBody:SetText(activeAlert.body)
     popup:Show()
-    say((phase=="before" and "战前：" or "死亡后：")..(item.name or tostring(entry)))
+end
+pClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
+alertClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
+local alertTicker=CreateFrame("Frame",nil,popup)
+alertTicker:SetScript("OnUpdate",function()
+    if activeAlert and getDB().alertSeconds>0 then
+        alertRemaining=alertRemaining-arg1
+        if alertRemaining<=0 then activeAlert=nil;displayNext() end
+    end
+end)
+popup:Hide()
+local function alert(entry,guid)
+    local d=getDB()
+    if not d.enabled then return false end
+    if not d.before or playerIsDead() then return false end
+    local item=note(entry)
+    if not item then return false end
+    local content=trim(item.before)
+    if content=="" then return false end
+    local track=tracks[guid]
+    local cycle=track and track.attempt or 1
+    local key=tostring(guid)..":"..tostring(cycle)..":before"
+    if queueKeys[key] or (activeAlert and activeAlert.key==key) then return true end
+    if table.getn(queue)>=QUEUE_LIMIT then
+        say("提醒队列已满（20 条），跳过最新提醒。")
+        return false
+    end
+    local name=(item.name and item.name~="") and item.name or "Entry "..entry
+    local itemToShow={key=key,guid=guid,entry=entry,phase="before",title="战前提醒 · "..name,body=content}
+    table.insert(queue,itemToShow);queueKeys[key]=true
+    if not activeAlert then displayNext() end
+    say("战前："..name)
+    return true
 end
 
 -- V0.6.0-A: only session-local GUID tracking. SavedVariables hold notes/settings.
--- GUID snapshots need the object to remain visible; invisibility is never interpreted as death.
+-- Track observed Boss combat state only; no background death polling.
 local MAX_TRACKS=16
 local TRACK_TTL_MS=300000
-local TRACK_INVISIBLE_MS=60000
 local function milliseconds() return math.floor(GetTime()*1000) end
 local function countTracks()
     local n=0
@@ -262,9 +410,14 @@ local function countTracks()
     return n
 end
 local function resetSession()
-    tracks={};shown={};cursor=0;timer=0
-    local st=api("Boss.Status")
-    if st and type(st.latestSeq)=="number" then cursor=st.latestSeq end
+    -- A map load starts a new local observation session. GUIDs may be reused
+    -- by MaNGOS after an instance reset; never carry dedup across world loads.
+    tracks={};shown={};timer=0
+    pendingNewSelection=false
+    -- Invalidate queued and currently displayed reminders from the old map.
+    queue={};queueKeys={};activeAlert=nil;alertRemaining=0
+    popup:Hide()
+
 end
 local function removeOldest()
     local oldestGuid,oldestTime=nil,nil
@@ -281,96 +434,114 @@ local function addTrack(guid,entry)
     if t then t.lastSeen=milliseconds();t.invisibleSince=nil;return end
     if countTracks()>=MAX_TRACKS then removeOldest() end
     local now=milliseconds()
-    tracks[guid]={entry=entry,firstSeen=now,lastSeen=now,invisibleSince=nil}
+    tracks[guid]={entry=entry,firstSeen=now,lastSeen=now,invisibleSince=nil,attempt=1,wasCombat=false,offCount=0,onCount=0,resetReady=false}
 end
-local function trigger(guid,entry,phase)
+local function trigger(guid,entry)
     if not note(entry) then return end
+    -- A confirmed reset must not be mistaken for a new pull by stale M4 events.
+    local track=tracks[guid]
+    -- resetReady is consumed ONLY on a fresh, living target selection.
+    if track and track.resetReady then return end
+    if playerIsDead() then return end
     if not shown[guid] then shown[guid]={} end
-    if shown[guid][phase] then return end
-    shown[guid][phase]=true
-    alert(entry,phase)
+    if shown[guid].before then return end
+    if alert(entry,guid) then shown[guid].before=true end
+end
+-- Re-arm only from confirmed matched-target combat observations. Guid-only probes
+-- generally have inCombatKnown=false, which must never count as a reset.
+local function observeCombat(guid,entry,boss)
+    local t=tracks[guid]
+    local data=boss and boss.data
+    if not t or not boss or not boss.ok or type(data)~="table" or data.inCombatKnown~=true or data.deadKnown~=true or data.dead~=false then return end
+    if data.inCombat==true then
+        t.offCount=0
+        t.onCount=t.onCount+1
+        -- Re-entering combat does not generate a pre-fight reminder: too late.
+        -- A confirmed reset waits for a fresh PLAYER_TARGET_CHANGED selection.
+        if t.onCount>=1 then t.wasCombat=true end
+    elseif data.inCombat==false then
+        t.onCount=0
+        if t.wasCombat and getDB().realertAfterReset then
+            t.offCount=t.offCount+1
+            if t.offCount>=2 then t.resetReady=true end
+        end
+    end
 end
 local function observe()
     if not getDB().enabled then return end
+    local newSelection=pendingNewSelection
+    pendingNewSelection=false
     local id=api("Unit.Identity","target")
     local targetGuid=nil
     if id and id.ok and id.data and id.data.guid and id.data.entry and note(id.data.entry) then
         targetGuid=id.data.guid
         addTrack(targetGuid,id.data.entry)
-        -- Boss.State generates M4 journal entries; call once while target is available.
+        -- Current-target state is needed for alive validation and wipe/re-pull detection.
         local boss=api("Boss.State","target")
-        if boss and boss.ok then
+        if boss and boss.ok and type(boss.data)=="table"
+            and boss.data.guid==targetGuid and boss.data.entry==id.data.entry then
+            observeCombat(targetGuid,id.data.entry,boss)
+            local tracked=tracks[targetGuid]
+            if newSelection and tracked and tracked.resetReady and getDB().realertAfterReset
+                and boss.data and boss.data.deadKnown==true and boss.data.dead==false
+                and boss.data.inCombatKnown==true and boss.data.inCombat==false
+                and not playerIsDead() then
+                tracked.attempt=tracked.attempt+1
+                tracked.resetReady=false
+                tracked.wasCombat=false
+                tracked.offCount=0
+                tracked.onCount=0
+                if shown[targetGuid] then shown[targetGuid].before=nil end
+                say("Boss 已重置，重新选中：Entry "..id.data.entry.."，第 "..tracked.attempt.." 轮。")
+                trigger(targetGuid,id.data.entry)
+            end
             if boss.state=="DETECTED" or boss.state=="ENGAGED" then
-                trigger(targetGuid,id.data.entry,"before")
-            elseif boss.state=="DEAD" then
-                trigger(targetGuid,id.data.entry,"after")
+                trigger(targetGuid,id.data.entry)
             end
         end
     end
-    -- Once a GUID was seen, check its exact object even when target switches.
-    -- Query limits: 16 tracked GUIDs, once per configured interval.
+    -- Session-local eviction only. No GUID death probes or Boss event journal.
     local now=milliseconds()
     for guid,t in pairs(tracks) do
-        if now-t.firstSeen>TRACK_TTL_MS then
-            tracks[guid]=nil
-        else
-            local state=api("GroundProbe.UnitStateByGuid",guid)
-            if state and state.visible and state.deadKnown then
-                t.lastSeen=now;t.invisibleSince=nil
-                if state.dead then trigger(guid,t.entry,"after") end
-            elseif not state or not state.visible then
-                if not t.invisibleSince then t.invisibleSince=now end
-                if now-t.invisibleSince>TRACK_INVISIBLE_MS then tracks[guid]=nil end
-            end
-        end
+        -- Idle entries expire, but a continuously observed target stays tracked.
+        -- Keep shown[guid] for the entire map session to prevent duplicate alerts.
+        if now-t.lastSeen>TRACK_TTL_MS then tracks[guid]=nil end
     end
-    -- Read any M4 transitions produced by Boss.State or other API clients.
-    local ev=api("Boss.Event.GetAfter",cursor)
-    if not ev then return end
-    if ev.lost then
-        cursor=ev.latestSeq or cursor
-        return
-    end
-    local items=ev.events or {}
-    for i=1,table.getn(items) do
-        local v=items[i]
-        if v and type(v.seq)=="number" and v.seq>cursor then
-            cursor=v.seq
-            if v.guid and v.entry and note(v.entry) then
-                if v.state=="DETECTED" or v.state=="ENGAGED" then
-                    trigger(v.guid,v.entry,"before")
-                elseif v.state=="DEAD" then
-                    trigger(v.guid,v.entry,"after")
-                end
-            end
-        end
-    end
-    if type(ev.latestSeq)=="number" and ev.latestSeq>cursor then cursor=ev.latestSeq end
 end
 local driver=CreateFrame("Frame")
 driver:RegisterEvent("VARIABLES_LOADED")
+driver:RegisterEvent("PLAYER_ENTERING_WORLD")
+driver:RegisterEvent("PLAYER_LEAVING_WORLD")
 driver:RegisterEvent("PLAYER_LOGOUT")
+driver:RegisterEvent("PLAYER_TARGET_CHANGED")
 driver:SetScript("OnEvent",function()
     if event=="VARIABLES_LOADED" then
         getDB()
         resetSession()
+    elseif event=="PLAYER_ENTERING_WORLD" or event=="PLAYER_LEAVING_WORLD" then
+        -- PLAYER_ENTERING_WORLD runs after map/instance loading on WoW 1.12.
+        -- The leaving event also prevents a previous map's alert from lingering.
+        resetSession()
+    elseif event=="PLAYER_TARGET_CHANGED" then
+        pendingNewSelection=true
+        -- Act on target selection promptly; do not wait for the next polling tick.
+        observe()
     elseif event=="PLAYER_LOGOUT" then
-        -- Never persist GUIDs, timestamps, pop-up dedup state or event cursors.
+        -- Never persist GUIDs, timestamps or pop-up dedup state.
         resetSession()
     end
 end)
 driver:SetScript("OnUpdate",function()
-    local d=getDB()
-    if not d.enabled then return end
+    if not getDB().enabled then return end
     timer=timer+arg1
-    if timer>=d.pollInterval then timer=0;observe() end
+    if timer>=getDB().pollInterval then timer=0;observe() end
 end)
 -- All settings are in the Chinese UI; /bossmemo only opens the window.
 local settings=CreateFrame("Frame",nil,frame)
-settings:SetPoint("TOPLEFT",frame,"TOPLEFT",27,-79)
+settings:SetPoint("TOPLEFT",frame,"TOPLEFT",27,-68)
 settings:SetWidth(700);settings:SetHeight(368)
 settings:Hide()
-label(settings,5,-8,"全局提醒设置","GameFontNormalLarge")
+label(settings,5,-8,"① 提醒控制","GameFontNormalLarge")
 local function toggle(y,text,key)
     local c=CreateFrame("CheckButton",nil,settings,"UICheckButtonTemplate")
     c:SetPoint("TOPLEFT",settings,"TOPLEFT",8,y)
@@ -380,8 +551,8 @@ local function toggle(y,text,key)
 end
 local enabledAll=toggle(-49,"开启自动提醒","enabled")
 local beforeAll=toggle(-90,"开启战前提醒","before")
-local afterAll=toggle(-131,"开启死亡后提醒","after")
-label(settings,10,-190,"GUID 检测间隔（秒）")
+local resetAll=toggle(-134,"Boss 重置后重新选中即可提醒（需确认脱战）","realertAfterReset")
+label(settings,10,-185,"② Boss 状态检测间隔（秒）","GameFontNormalLarge")
 local rates={0.2,0.5,1,2}
 local rateButtons={}
 local function updateRate()
@@ -392,20 +563,40 @@ local function updateRate()
 end
 for i=1,4 do
     local n=rates[i]
-    rateButtons[i]=button(settings,"",10+(i-1)*112,-214,103,27,function()
+    rateButtons[i]=button(settings,"",10+(i-1)*112,-210,103,27,function()
         getDB().pollInterval=n;timer=0;updateRate()
     end)
 end
-local trackerInfo=label(settings,10,-270,"","GameFontHighlight",600)
-label(settings,10,-312,"最多追踪 16 个 GUID；不可见不会判定死亡。退出游戏清空临时状态，保留配置。","GameFontHighlightSmall",650)
+label(settings,10,-260,"③ 提醒自动关闭","GameFontNormalLarge")
+local durationButtons={}
+local durations={0,5,10,15}
+local function updateDuration()
+    local current=getDB().alertSeconds
+    for i=1,4 do
+        durationButtons[i]:SetText((current==durations[i] and "● " or "○ ")..(durations[i]==0 and "不自动关闭" or durations[i].." 秒"))
+    end
+end
+for i=1,4 do
+    local n=durations[i]
+    durationButtons[i]=button(settings,"",10+(i-1)*112,-284,103,25,function()
+        getDB().alertSeconds=n;updateDuration()
+    end)
+end
+label(settings,10,-320,"④ 运行状态（拖动提醒卡片会自动保存位置）","GameFontNormalLarge")
+local trackerInfo=label(settings,10,-344,"","GameFontHighlight",600)
+
 local function syncSettings()
     local d=getDB()
     enabledAll:SetChecked(d.enabled)
     beforeAll:SetChecked(d.before)
-    afterAll:SetChecked(d.after)
+    resetAll:SetChecked(d.realertAfterReset)
     updateRate()
-    trackerInfo:SetText("当前正在追踪 "..countTracks().."/16 个 Boss    ·    每 "..d.pollInterval.." 秒查询")
+    updateDuration()
+    trackerInfo:SetText("DLL："..(type(TaiYangShenDian)=="function" and "已检测" or "未检测到").."   战斗状态缓存 "..countTracks().." 个 Boss")
 end
+local settingsTicker=CreateFrame("Frame",nil,settings)
+local settingsElapsed=0
+settingsTicker:SetScript("OnUpdate",function() settingsElapsed=settingsElapsed+arg1;if settingsElapsed>=1 then settingsElapsed=0;syncSettings() end end)
 local openSettings=false
 local tab=button(frame,"提醒设置",610,-48,116,27,function()
     openSettings=not openSettings
