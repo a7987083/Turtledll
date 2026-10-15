@@ -1,3 +1,17 @@
+-- Register slash command before building UI; init failure remains diagnosable.
+local TaiYangBossMemoOpen = nil
+SLASH_TAIYANGBOSSMEMO1="/bossmemo"
+SlashCmdList["TAIYANGBOSSMEMO"]=function()
+    if type(TaiYangBossMemoOpen)=="function" then
+        local ok,err=pcall(TaiYangBossMemoOpen)
+        if not ok and DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff5555[BossMemo] 界面错误: "..tostring(err).."|r")
+        end
+    elseif DEFAULT_CHAT_FRAME then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff5555[BossMemo] 界面尚未初始化；请检查加载错误。|r")
+    end
+end
+local function TaiYangBossMemoInitialize()
 -- TaiYangBossMemo 0.7.0 | WoW 1.12.1 / Lua 5.0
 -- SavedVariables: legacy {notes={ [entry]={name,before,after} }} stays valid.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
@@ -399,8 +413,12 @@ local tab=button(frame,"提醒设置",610,-48,116,27,function()
     else settings:Hide();manager:Show();status:Show();refreshList();this:SetText("提醒设置") end
 end)
 frame:Hide()
-SLASH_TAIYANGBOSSMEMO1="/bossmemo"
-SlashCmdList["TAIYANGBOSSMEMO"]=function()
+TaiYangBossMemoOpen=function()
     frame:Show()
     if openSettings then syncSettings() else refreshList() end
+end
+end
+local initOK,initErr=pcall(TaiYangBossMemoInitialize)
+if not initOK and DEFAULT_CHAT_FRAME then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffff5555[BossMemo] 初始化失败: "..tostring(initErr).."|r")
 end
