@@ -282,6 +282,8 @@ local suppressDirty=false
 local savedSnapshot=nil
 -- Forward declarations must precede closures in Lua 5.0.
 local nameBox,entryBox,zoneBox,beforeBox,enabledCheck
+local zoneManual=false
+local zoneProgrammatic=false
 local dirtyLabel
 local function updateDirtyLabel()
     if dirtyLabel then dirtyLabel:SetText(dirty and "● 未保存" or "已保存") end
@@ -333,15 +335,96 @@ local function currentZoneName()
     if type(GetZoneText)=="function" then return trim(GetZoneText() or "") end
     return ""
 end
+-- Compact built-in map/Boss reference. Names are hints, not authoritative NPC Entry IDs.
+-- The user's saved mapping always takes precedence over this directory.
+local ZONE_BOSSES={
+    ["熔火之心"]="加尔|Garr|拉格纳罗斯|Ragnaros|迦顿男爵|Baron Geddon|玛格曼达|Magmadar|鲁西弗隆|Lucifron|基赫纳斯|Gehennas|沙斯拉尔|Shazzrah|焚化者古雷曼格|Golemagg the Incinerator|萨弗隆先驱者|Sulfuron Harbinger|管理者埃克索图斯|Majordomo Executus",
+    ["黑翼之巢"]="狂野的拉佐格尔|Razorgore the Untamed|堕落的瓦拉斯塔兹|Vaelastrasz the Corrupt|勒什雷尔|Broodlord Lashlayer|费尔默|Firemaw|埃博诺克|Ebonroc|弗莱格尔|Flamegor|克洛玛古斯|Chromaggus|奈法利安|Nefarian",
+    ["安其拉神殿"]="预言者斯克拉姆|The Prophet Skeram|克里勋爵|Lord Kri|亚尔基公主|Princess Yauj|维姆|Vem|沙尔图拉|Battleguard Sartura|顽强的范克瑞斯|Fankriss the Unyielding|维希度斯|Viscidus|哈霍兰公主|Princess Huhuran|双子皇帝|Twin Emperors|维克尼拉斯大帝|Emperor Vek'nilash|维克洛尔大帝|Emperor Vek'lor|奥罗|Ouro|克苏恩|C'Thun|克苏恩之眼|Eye of C'Thun",
+    ["安其拉废墟"]="库林纳克斯|Kurinnaxx|拉贾克斯将军|General Rajaxx|莫阿姆|Moam|吞咽者布鲁|Buru the Gorger|狩猎者阿亚米斯|Ayamiss the Hunter|无疤者奥斯里安|Ossirian the Unscarred",
+    ["祖尔格拉布"]="高阶祭司耶克里克|High Priestess Jeklik|高阶祭司温诺希斯|High Priest Venoxis|高阶祭司玛尔里|High Priestess Mar'li|血领主曼多基尔|Bloodlord Mandokir|疯狂之缘|Edge of Madness|高阶祭司塞卡尔|High Priest Thekal|高阶祭司娅尔罗|High Priestess Arlokk|妖术师金度|Jin'do the Hexxer|哈卡|Hakkar|加兹兰卡|Gahz'ranka",
+    ["纳克萨玛斯"]="阿努布雷坎|Anub'Rekhan|黑女巫法琳娜|Grand Widow Faerlina|迈克斯纳|Maexxna|瘟疫使者诺斯|Noth the Plaguebringer|肮脏的希尔盖|Heigan the Unclean|洛欧塞布|Loatheb|教官拉苏维奥斯|Instructor Razuvious|收割者戈提克|Gothik the Harvester|四骑士|The Four Horsemen|帕奇维克|Patchwerk|格罗布鲁斯|Grobbulus|格拉斯|Gluth|塔迪乌斯|Thaddius|萨菲隆|Sapphiron|克尔苏加德|Kel'Thuzad",
+    ["奥妮克希亚的巢穴"]="奥妮克希亚|Onyxia",
+    ["黑石塔"]="达基萨斯将军|General Drakkisath|雷德·黑手|Warchief Rend Blackhand|比斯巨兽|The Beast|烈焰卫士艾博希尔|Pyroguard Emberseer|索拉卡·火冠|Solakar Flamewreath",
+    ["斯坦索姆"]="瑞文戴尔男爵|Baron Rivendare|巴纳扎尔|Balnazzar|吞咽者拉姆斯登|Ramstein the Gorger|奈鲁布恩坎|Nerub'enkan|安娜丝塔丽男爵夫人|Baroness Anastari|苍白的玛勒基|Maleki the Pallid",
+    ["通灵学院"]="黑暗院长加丁|Darkmaster Gandling|詹迪斯·巴罗夫|Jandice Barov|莱斯·霜语|Ras Frostwhisper|讲师玛丽希亚|Instructor Malicia|伊露希亚·巴罗夫|Ilucia Barov|血骨傀儡|Rattlegore",
+    ["厄运之槌"]="戈多克大王|King Gordok|伊莫塔尔|Immol'thar|托塞德林王子|Prince Tortheldrin|蕾瑟塔蒂丝|Lethtendris|奥兹恩|Alzzin the Wildshaper",
+    ["玛拉顿"]="瑟莱德丝公主|Princess Theradras|诺克赛恩|Noxxion|锐刺鞭笞者|Razorlash",
+    ["祖尔法拉克"]="加兹瑞拉|Gahz'rilla|乌克兹·沙顶|Chief Ukorz Sandscalp|安图苏尔|Antu'sul",
+    ["沉没的神庙"]="伊兰尼库斯的阴影|Shade of Eranikus|哈卡的化身|Avatar of Hakkar|德拉维沃尔|Dreamscythe",
+    ["血色修道院"]="血色十字军指挥官莫格莱尼|Scarlet Commander Mograine|大检察官怀特迈恩|High Inquisitor Whitemane|赫洛德|Herod|奥法师杜安|Arcanist Doan",
+    ["影牙城堡"]="阿鲁高|Archmage Arugal",
+    ["死亡矿井"]="艾德温·范克里夫|Edwin VanCleef",
+    ["哀嚎洞穴"]="吞噬者穆坦努斯|Mutanus the Devourer",
+}
+local function normalizeBossName(value)
+    return string.lower(trim(value or ""))
+end
+local function inferZone(entry,name)
+    -- 1. Exact saved Entry match.
+    local saved=entry and bossInfo(entry)
+    if saved and trim(saved.zone or "")~="" then return trim(saved.zone),"entry" end
+    local normalized=normalizeBossName(name)
+    if normalized=="" then return nil,nil end
+    -- 2. Saved name match (only if unambiguous).
+    local unique=nil
+    for _,boss in pairs(getAccount().bosses) do
+        if type(boss)=="table" and normalizeBossName(boss.name)==normalized and trim(boss.zone or "")~="" then
+            if unique and unique~=boss.zone then return nil,"ambiguous" end
+            unique=boss.zone
+        end
+    end
+    if unique then return unique,"saved-name" end
+    -- 3. Built-in directory. Do not guess when a name maps to multiple zones.
+    for zone,joined in pairs(ZONE_BOSSES) do
+        for token in string.gfind(joined,"[^|]+") do
+            if normalizeBossName(token)==normalized then
+                if unique and unique~=zone then return nil,"ambiguous" end
+                unique=zone
+            end
+        end
+    end
+    if unique then return unique,"built-in" end
+    -- 4. Optional Atlas-CFM catalog when installed, no hard dependency.
+    if type(AtlasCFM)=="table" and type(AtlasCFM.InstanceData)=="table" then
+        for _,instance in pairs(AtlasCFM.InstanceData) do
+            if type(instance)=="table" and type(instance.Bosses)=="table" then
+                for _,boss in ipairs(instance.Bosses) do
+                    if type(boss)=="table" and normalizeBossName(boss.name)==normalized and trim(instance.Name or "")~="" then
+                        if unique and unique~=instance.Name then return nil,"ambiguous" end
+                        unique=instance.Name
+                    end
+                end
+            end
+        end
+    end
+    if unique then return unique,"atlas" end
+    return nil,nil
+end
+local function setZoneAutomatically(value)
+    zoneProgrammatic=true
+    zoneBox:SetText(value or "")
+    zoneProgrammatic=false
+end
+local function autoFillZone()
+    if suppressDirty or zoneManual then return end
+    local entry=tonumber(trim(entryBox:GetText() or ""))
+    local matched,source=inferZone(entry,nameBox:GetText())
+    if matched then setZoneAutomatically(matched)
+    elseif source~="ambiguous" then setZoneAutomatically(currentZoneName()) end
+end
 local function loadEntry(n,name,detectedZone)
     if not n or n<1 then setStatus("请输入有效的 NPC Entry。");return end
     suppressDirty=true
     selectedEntry=n
+    zoneManual=false
     local item=anyNote(n)
     local boss=bossInfo(n)
     entryBox:SetText(tostring(n))
     nameBox:SetText(boss and boss.name or name or "")
-    zoneBox:SetText(boss and boss.zone or detectedZone or "")
+    local zone=(boss and boss.zone and boss.zone~="") and boss.zone or nil
+    if not zone then zone=inferZone(n,boss and boss.name or name) end
+    setZoneAutomatically(zone or detectedZone or currentZoneName())
     beforeBox:SetText(item and item.before or "")
     enabledCheck:SetChecked(not item or item.enabled~=false)
     lastEntry=n
@@ -391,13 +474,16 @@ entryBox=edit(manager,235,-61,120,22)
 label(manager,375,-40,"Boss 名称")
 nameBox=edit(manager,375,-61,325,22)
 label(manager,235,-102,"所在地图")
-zoneBox=edit(manager,235,-121,358,22)
-button(manager,"读取当前地图",603,-121,100,24,function() zoneBox:SetText(currentZoneName()) end)
+zoneBox=edit(manager,235,-121,465,22)
 label(manager,235,-156,"战前提醒")
 beforeBox=edit(manager,235,-177,465,96)
-for _,box in ipairs({entryBox,nameBox,zoneBox,beforeBox}) do
-    box:SetScript("OnTextChanged",markDirty)
-end
+entryBox:SetScript("OnTextChanged",function() autoFillZone();markDirty() end)
+nameBox:SetScript("OnTextChanged",function() autoFillZone();markDirty() end)
+zoneBox:SetScript("OnTextChanged",function()
+    if not suppressDirty and not zoneProgrammatic then zoneManual=true end
+    markDirty()
+end)
+beforeBox:SetScript("OnTextChanged",markDirty)
 enabledCheck=CreateFrame("CheckButton",nil,manager,"UICheckButtonTemplate")
 enabledCheck:SetPoint("TOPLEFT",manager,"TOPLEFT",234,-285)
 label(manager,269,-294,"启用此 Boss 的提醒","GameFontHighlight")
@@ -462,7 +548,7 @@ button(manager,"删除",473,-363,107,27,deleteEntry)
 button(manager,"新建",593,-363,110,27,function()
     askDiscard(function()
     suppressDirty=true
-    selectedEntry=nil;entryBox:SetText("");nameBox:SetText("");zoneBox:SetText("")
+    selectedEntry=nil;zoneManual=false;entryBox:SetText("");nameBox:SetText("");setZoneAutomatically(currentZoneName())
     beforeBox:SetText("");enabledCheck:SetChecked(true)
     setStatus("新建 Boss：输入 Entry、名称和提醒后保存。");refreshList()
     suppressDirty=false;captureSnapshot()
