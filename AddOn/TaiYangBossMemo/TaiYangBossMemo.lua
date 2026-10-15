@@ -1,12 +1,11 @@
--- TaiYangBossMemo 0.6.0-A | WoW 1.12 / Lua 5.0 | No external DLL dependencies.
--- Observational only: DEAD means unit death, not authoritative encounter victory.
+-- TaiYangBossMemo 0.7.0 | WoW 1.12.1 / Lua 5.0
+-- SavedVariables: legacy {notes={ [entry]={name,before,after} }} stays valid.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
-local db,shown = nil,{}
+local db,shown=nil,{}
 local tracks,lastEntry={},nil
-local cursor=0
-local timer=0
+local cursor,timer=0,0
 local function say(s) if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(PREFIX..s) end end
-local function trim(s) return string.gsub(s or "^","^%s*(.-)%s*$","%1") end
+local function trim(s) return string.gsub(s or "","^%s*(.-)%s*$","%1") end
 local function getDB()
     if type(TaiYangBossMemoDB)~="table" then TaiYangBossMemoDB={} end
     db=TaiYangBossMemoDB
@@ -26,103 +25,184 @@ local function api(cmd,a,b)
     if ok and type(val)=="table" then return val end
 end
 local function note(entry)
-    local d=getDB()
-    return d.notes[tostring(entry)]
+    local item=getDB().notes[tostring(entry)]
+    if type(item)~="table" or item.enabled==false then return nil end
+    return item
 end
-
+local function anyNote(entry)
+    local item=getDB().notes[tostring(entry)]
+    if type(item)=="table" then return item end
+end
 local frame=CreateFrame("Frame","TaiYangBossMemoWindow",UIParent)
-frame:SetWidth(510);frame:SetHeight(490)
-frame:SetPoint("CENTER",UIParent,"CENTER",0,35)
+frame:SetWidth(755);frame:SetHeight(510)
+frame:SetPoint("CENTER",UIParent,"CENTER",0,30)
 frame:SetFrameStrata("DIALOG")
 frame:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=11,top=12,bottom=11}})
 frame:SetMovable(true);frame:EnableMouse(true);frame:RegisterForDrag("LeftButton")
 frame:SetScript("OnDragStart",function() this:StartMoving() end)
 frame:SetScript("OnDragStop",function() this:StopMovingOrSizing() end)
 local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
-title:SetPoint("TOP",frame,"TOP",0,-21);title:SetText("太阳神殿 · Boss 战斗备忘录")
+title:SetPoint("TOP",frame,"TOP",0,-20);title:SetText("太阳神殿 · Boss 备忘录")
 local subtitle=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-subtitle:SetPoint("TOP",title,"BOTTOM",0,-8)
-subtitle:SetText("Boss 备忘编辑与提醒设置｜使用 /bossmemo 呼出")
-local editorLabels={}
-local function textAt(y,text)
-    local x=frame:CreateFontString(nil,"OVERLAY","GameFontNormal")
-    x:SetPoint("TOPLEFT",frame,"TOPLEFT",28,y);x:SetText(text)
-    table.insert(editorLabels,x)
-    return x
+subtitle:SetPoint("TOP",title,"BOTTOM",0,-7)
+subtitle:SetText("Boss 管理 / 提醒设置    ·    仅 /bossmemo 用于呼出")
+
+local manager=CreateFrame("Frame",nil,frame)
+manager:SetPoint("TOPLEFT",frame,"TOPLEFT",20,-69)
+manager:SetWidth(714);manager:SetHeight(396)
+local function label(parent,x,y,value,font,width)
+    local l=parent:CreateFontString(nil,"OVERLAY",font or "GameFontNormal")
+    l:SetPoint("TOPLEFT",parent,"TOPLEFT",x,y)
+    if width then l:SetWidth(width);l:SetJustifyH("LEFT") end
+    l:SetText(value)
+    return l
 end
-textAt(-73,"NPC Entry（数字）")
-textAt(-122,"Boss 名称（备注用）")
-textAt(-170,"战前提醒内容")
-textAt(-263,"死亡后提醒内容")
-local editorBackdrops={}
-local function edit(y,h)
-    local box=CreateFrame("EditBox",nil,frame)
-    box:SetWidth(448);box:SetHeight(h)
-    box:SetPoint("TOPLEFT",frame,"TOPLEFT",29,y)
-    box:SetFontObject(GameFontHighlight)
-    box:SetMultiLine(h>35);box:SetAutoFocus(false)
-    local backdrop=CreateFrame("Frame",nil,frame)
-    backdrop:SetFrameLevel(box:GetFrameLevel()-1)
-    backdrop:SetPoint("TOPLEFT",box,"TOPLEFT",-5,6)
-    backdrop:SetPoint("BOTTOMRIGHT",box,"BOTTOMRIGHT",5,-5)
-    backdrop:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=13,insets={left=3,right=3,top=3,bottom=3}})
-    backdrop:SetBackdropColor(0.07,0.07,0.09,0.95)
-    table.insert(editorBackdrops,backdrop)
-    box:SetScript("OnEscapePressed",function() this:ClearFocus() end)
-    return box
+local function button(parent,caption,x,y,w,h,fn)
+    local b=CreateFrame("Button",nil,parent,"UIPanelButtonTemplate")
+    b:SetPoint("TOPLEFT",parent,"TOPLEFT",x,y);b:SetWidth(w);b:SetHeight(h or 25)
+    b:SetText(caption);b:SetScript("OnClick",fn)
+    return b
 end
-local entryBox=edit(-92,22)
-local nameBox=edit(-140,22)
-local beforeBox=edit(-190,64)
-local afterBox=edit(-283,64)
-local status=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-status:SetPoint("BOTTOMLEFT",frame,"BOTTOMLEFT",27,60)
-status:SetWidth(445);status:SetJustifyH("LEFT")
-status:SetText("选中 Boss 后点击读取目标，或输入 Entry 并加载。")
+local function edit(parent,x,y,w,h)
+    local b=CreateFrame("EditBox",nil,parent)
+    b:SetPoint("TOPLEFT",parent,"TOPLEFT",x,y)
+    b:SetWidth(w);b:SetHeight(h)
+    b:SetFontObject(GameFontHighlight)
+    b:SetMultiLine(h>28);b:SetAutoFocus(false)
+    local bg=CreateFrame("Frame",nil,parent)
+    bg:SetFrameLevel(b:GetFrameLevel()-1)
+    bg:SetPoint("TOPLEFT",b,"TOPLEFT",-4,5)
+    bg:SetPoint("BOTTOMRIGHT",b,"BOTTOMRIGHT",4,-4)
+    bg:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=12,insets={left=3,right=3,top=3,bottom=3}})
+    bg:SetBackdropColor(0.07,0.07,0.09,0.96)
+    b:SetScript("OnEscapePressed",function() this:ClearFocus() end)
+    return b
+end
+label(manager,10,-7,"已保存的 Boss","GameFontNormalLarge")
+local searchBox=edit(manager,10,-38,198,22)
+local listRows={}
+local page,selectedEntry=1,nil
+local PAGE_SIZE=7
+local function entryList()
+    local entries={}
+    local filter=string.lower(trim(searchBox:GetText() or ""))
+    for key,item in pairs(getDB().notes) do
+        if type(item)=="table" then
+            local n=tonumber(key)
+            local name=item.name or ""
+            if n and (filter=="" or string.find(string.lower(name),filter,1,true) or string.find(key,filter,1,true)) then
+                table.insert(entries,n)
+            end
+        end
+    end
+    table.sort(entries,function(a,b) return a<b end)
+    return entries
+end
+local nameBox,entryBox,beforeBox,afterBox,enabledCheck
+local status=label(frame,29,-460,"请选择 Boss，或读取当前目标添加。","GameFontHighlightSmall",690)
 local function setStatus(s) status:SetText(s) end
+local refreshList
+local function loadEntry(n,name)
+    if not n or n<1 then setStatus("请输入有效的 NPC Entry。");return end
+    selectedEntry=n
+    local item=anyNote(n)
+    entryBox:SetText(tostring(n))
+    nameBox:SetText(item and item.name or name or "")
+    beforeBox:SetText(item and item.before or "")
+    afterBox:SetText(item and item.after or "")
+    enabledCheck:SetChecked(not item or item.enabled~=false)
+    lastEntry=n
+    setStatus("正在编辑 Entry "..n.."；修改后点击保存。")
+    if refreshList then refreshList() end
+end
+for i=1,PAGE_SIZE do
+    local n=i
+    local b=button(manager,"",10,-74-(i-1)*36,200,31,function()
+        local entries=entryList()
+        local id=entries[(page-1)*PAGE_SIZE+n]
+        if id then loadEntry(id) end
+    end)
+    listRows[i]=b
+end
+refreshList=function()
+    local entries=entryList()
+    local total=math.max(1,math.ceil(table.getn(entries)/PAGE_SIZE))
+    if page>total then page=total end
+    for i=1,PAGE_SIZE do
+        local n=entries[(page-1)*PAGE_SIZE+i]
+        local b=listRows[i]
+        if n then
+            local item=anyNote(n)
+            local tag=(item and item.enabled==false) and "[停用] " or ""
+            local name=(item and item.name and item.name~="") and item.name or ("Entry "..n)
+            b:SetText((selectedEntry==n and "▶ " or "")..tag..name)
+            b:Show()
+        else b:Hide() end
+    end
+end
+searchBox:SetScript("OnTextChanged",function() page=1;refreshList() end)
+button(manager,"上一页",10,-335,93,25,function() if page>1 then page=page-1;refreshList() end end)
+button(manager,"下一页",116,-335,93,25,function() page=page+1;refreshList() end end)
+local pageInfo=label(manager,12,-369,"可通过名称或 Entry 搜索","GameFontHighlightSmall",200)
+label(manager,235,-7,"Boss 详情 / 编辑","GameFontNormalLarge")
+label(manager,236,-40,"NPC Entry")
+entryBox=edit(manager,235,-61,120,22)
+label(manager,375,-40,"Boss 名称")
+nameBox=edit(manager,375,-61,325,22)
+label(manager,235,-106,"战前提醒")
+beforeBox=edit(manager,235,-130,465,70)
+label(manager,235,-215,"死亡后提醒")
+afterBox=edit(manager,235,-239,465,70)
+enabledCheck=CreateFrame("CheckButton",nil,manager,"UICheckButtonTemplate")
+enabledCheck:SetPoint("TOPLEFT",manager,"TOPLEFT",234,-319)
+label(manager,269,-328,"启用此 Boss 的提醒","GameFontHighlight")
 local function entryNumber()
-    local str=trim(entryBox:GetText())
-    if not string.find(str,"^%d+$") then return nil end
-    local n=tonumber(str)
+    local value=trim(entryBox:GetText())
+    if not string.find(value,"^%d+$") then return nil end
+    local n=tonumber(value)
     if not n or n<1 or n>4294967295 then return nil end
     return n
 end
-local function loadEntry(n,label)
-    if not n then setStatus("请输入有效的 NPC Entry 数字。");return end
-    entryBox:SetText(tostring(n))
-    local item=note(n)
-    nameBox:SetText(item and item.name or label or "")
-    beforeBox:SetText(item and item.before or "")
-    afterBox:SetText(item and item.after or "")
-    setStatus("已加载 Entry "..n.."。编辑完成后点击保存。")
-    lastEntry=n
-end
-local function currentTarget()
+local function target()
     local id=api("Unit.Identity","target")
-    if not id or not id.ok or not id.data or not id.data.entry then
-        setStatus("当前目标不可用；也可以手动输入 Entry。");return
-    end
-    loadEntry(id.data.entry,id.data.name)
+    if id and id.ok and id.data and id.data.entry then loadEntry(id.data.entry,id.data.name)
+    else setStatus("当前没有可读取的目标，可手动输入 NPC Entry。") end
 end
 local function save()
     local n=entryNumber()
-    if not n then setStatus("保存失败：Entry 必须为正整数。");return end
-    local d=getDB()
-    d.notes[tostring(n)]={name=trim(nameBox:GetText()),before=trim(beforeBox:GetText()),after=trim(afterBox:GetText())}
-    lastEntry=n
-    setStatus("已保存 Entry "..n.."。同一 Entry 的实例会共用备注。")
+    if not n then setStatus("保存失败：NPC Entry 必须是正整数。");return end
+    local oldItem=anyNote(n)
+    local item={name=trim(nameBox:GetText()),before=trim(beforeBox:GetText()),after=trim(afterBox:GetText()),enabled=enabledCheck:GetChecked() and true or false}
+    getDB().notes[tostring(n)]=item
+    -- Editing Entry is treated as add/save-as; never silently delete prior ID.
+    loadEntry(n)
+    setStatus("保存成功：Entry "..n..(item.enabled and "（已启用）" or "（已停用）"))
+    refreshList()
 end
-local editorButtons={}
-local function button(label,x,fn)
-    local b=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
-    b:SetWidth(109);b:SetHeight(25);b:SetPoint("BOTTOMLEFT",frame,"BOTTOMLEFT",x,22)
-    b:SetText(label);b:SetScript("OnClick",fn);table.insert(editorButtons,b);return b
+local confirmEntry,confirmUntil=nil,0
+local function deleteEntry()
+    local n=entryNumber()
+    if not n or not anyNote(n) then setStatus("当前 Entry 尚未保存，无法删除。");return end
+    if confirmEntry~=n or GetTime()>confirmUntil then
+        confirmEntry=n;confirmUntil=GetTime()+5
+        setStatus("确认删除 Entry "..n.."？5 秒内再次点击「删除」确认。")
+        return
+    end
+    getDB().notes[tostring(n)]=nil
+    confirmEntry=nil;selectedEntry=nil;lastEntry=nil
+    entryBox:SetText("");nameBox:SetText("");beforeBox:SetText("");afterBox:SetText("")
+    enabledCheck:SetChecked(true);refreshList()
+    setStatus("已删除 Boss Entry "..n.."，不影响其他记录。")
 end
-button("读取当前目标",25,currentTarget)
-button("加载 Entry",140,function() loadEntry(entryNumber()) end)
-button("保存备注",255,save)
-button("关闭",370,function() frame:Hide() end)
-
+button(manager,"读取当前目标",235,-365,112,25,target)
+button(manager,"保存 Boss",354,-365,100,25,save)
+button(manager,"删除",462,-365,80,25,deleteEntry)
+button(manager,"新建",548,-365,80,25,function()
+    selectedEntry=nil;entryBox:SetText("");nameBox:SetText("")
+    beforeBox:SetText("");afterBox:SetText("");enabledCheck:SetChecked(true)
+    setStatus("新建 Boss：输入 Entry、名称和提醒后保存。");refreshList()
+end)
+refreshList()
 local popup=CreateFrame("Frame","TaiYangBossMemoAlert",UIParent)
 popup:SetWidth(440);popup:SetHeight(245)
 popup:SetPoint("CENTER",UIParent,"CENTER",0,125)
@@ -271,93 +351,56 @@ driver:SetScript("OnUpdate",function()
     timer=timer+arg1
     if timer>=d.pollInterval then timer=0;observe() end
 end)
--- All configuration is managed from the GUI; the slash command only opens it.
+-- All settings are in the Chinese UI; /bossmemo only opens the window.
 local settings=CreateFrame("Frame",nil,frame)
-settings:SetPoint("TOPLEFT",frame,"TOPLEFT",18,-64)
-settings:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",-18,57)
+settings:SetPoint("TOPLEFT",frame,"TOPLEFT",27,-79)
+settings:SetWidth(700);settings:SetHeight(368)
 settings:Hide()
-local settingsTitle=settings:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
-settingsTitle:SetPoint("TOPLEFT",settings,"TOPLEFT",14,-12)
-settingsTitle:SetText("提醒设置")
-local function toggle(y,label,key)
+label(settings,5,-8,"全局提醒设置","GameFontNormalLarge")
+local function toggle(y,text,key)
     local c=CreateFrame("CheckButton",nil,settings,"UICheckButtonTemplate")
     c:SetPoint("TOPLEFT",settings,"TOPLEFT",8,y)
-    local t=settings:CreateFontString(nil,"OVERLAY","GameFontHighlight")
-    t:SetPoint("LEFT",c,"RIGHT",4,0);t:SetText(label)
+    label(settings,45,y-10,text,"GameFontHighlight")
     c:SetScript("OnClick",function() getDB()[key]=this:GetChecked() and true or false end)
     return c
 end
-local enableCheck=toggle(-48,"开启自动提醒","enabled")
-local beforeCheck=toggle(-86,"开启战前提醒","before")
-local afterCheck=toggle(-124,"开启死亡后提醒","after")
-local rateTitle=settings:CreateFontString(nil,"OVERLAY","GameFontNormal")
-rateTitle:SetPoint("TOPLEFT",settings,"TOPLEFT",15,-177)
-rateTitle:SetText("GUID 查询间隔（秒）")
+local enabledAll=toggle(-49,"开启自动提醒","enabled")
+local beforeAll=toggle(-90,"开启战前提醒","before")
+local afterAll=toggle(-131,"开启死亡后提醒","after")
+label(settings,10,-190,"GUID 检测间隔（秒）")
 local rates={0.2,0.5,1,2}
-local rateBtns={}
-local function syncRateButtons()
+local rateButtons={}
+local function updateRate()
+    local d=getDB()
     for i=1,4 do
-        local b=rateBtns[i]
-        if b then b:SetText((getDB().pollInterval==rates[i] and "● " or "○ ")..tostring(rates[i]).." 秒") end
+        rateButtons[i]:SetText((d.pollInterval==rates[i] and "● " or "○ ")..tostring(rates[i]).." 秒")
     end
 end
 for i=1,4 do
     local n=rates[i]
-    local b=CreateFrame("Button",nil,settings,"UIPanelButtonTemplate")
-    b:SetWidth(96);b:SetHeight(26);b:SetPoint("TOPLEFT",settings,"TOPLEFT",13+(i-1)*108,-201)
-    b:SetScript("OnClick",function() getDB().pollInterval=n;timer=0;syncRateButtons() end)
-    rateBtns[i]=b
+    rateButtons[i]=button(settings,"",10+(i-1)*112,-214,103,27,function()
+        getDB().pollInterval=n;timer=0;updateRate()
+    end)
 end
-local info=settings:CreateFontString(nil,"OVERLAY","GameFontHighlight")
-info:SetPoint("TOPLEFT",settings,"TOPLEFT",15,-260)
-info:SetWidth(440);info:SetJustifyH("LEFT")
-local detail=settings:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-detail:SetPoint("TOPLEFT",info,"BOTTOMLEFT",0,-14)
-detail:SetWidth(440);detail:SetJustifyH("LEFT")
-detail:SetText("最多追踪 16 个 GUID；不可见不等于死亡。关闭客户端后清空临时追踪，备忘录与设置保留。")
+local trackerInfo=label(settings,10,-270,"","GameFontHighlight",600)
+label(settings,10,-312,"最多追踪 16 个 GUID；不可见不会判定死亡。退出游戏清空临时状态，保留配置。","GameFontHighlightSmall",650)
 local function syncSettings()
     local d=getDB()
-    enableCheck:SetChecked(d.enabled)
-    beforeCheck:SetChecked(d.before)
-    afterCheck:SetChecked(d.after)
-    syncRateButtons()
-    info:SetText("当前追踪："..countTracks().."/"..MAX_TRACKS.."    查询间隔："..d.pollInterval.." 秒")
+    enabledAll:SetChecked(d.enabled)
+    beforeAll:SetChecked(d.before)
+    afterAll:SetChecked(d.after)
+    updateRate()
+    trackerInfo:SetText("当前正在追踪 "..countTracks().."/16 个 Boss    ·    每 "..d.pollInterval.." 秒查询")
 end
-local editorWidgets={entryBox,nameBox,beforeBox,afterBox}
-local settingsOpen=false
-local function showSettings(open)
-    settingsOpen=open
-    if open then
-        syncSettings()
-        settings:Show()
-        for i=1,table.getn(editorWidgets) do editorWidgets[i]:Hide() end
-        for i=1,table.getn(editorLabels) do editorLabels[i]:Hide() end
-        for i=1,table.getn(editorBackdrops) do editorBackdrops[i]:Hide() end
-        for i=1,table.getn(editorButtons) do editorButtons[i]:Hide() end
-        status:Hide()
-    else
-        settings:Hide()
-        for i=1,table.getn(editorWidgets) do editorWidgets[i]:Show() end
-        for i=1,table.getn(editorLabels) do editorLabels[i]:Show() end
-        for i=1,table.getn(editorBackdrops) do editorBackdrops[i]:Show() end
-        for i=1,table.getn(editorButtons) do editorButtons[i]:Show() end
-        status:Show()
-    end
-end
-local tabButton=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
-tabButton:SetWidth(110);tabButton:SetHeight(25)
-tabButton:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-24,-53)
-tabButton:SetText("提醒设置")
-tabButton:SetScript("OnClick",function()
-    showSettings(not settingsOpen)
-    if settingsOpen then this:SetText("返回编辑") else this:SetText("提醒设置") end
+local openSettings=false
+local tab=button(frame,"提醒设置",610,-48,116,27,function()
+    openSettings=not openSettings
+    if openSettings then manager:Hide();settings:Show();status:Hide();syncSettings();this:SetText("返回 Boss 管理")
+    else settings:Hide();manager:Show();status:Show();refreshList();this:SetText("提醒设置") end
 end)
-frame:SetScript("OnShow",function() if settingsOpen then syncSettings() end end)
 frame:Hide()
 SLASH_TAIYANGBOSSMEMO1="/bossmemo"
 SlashCmdList["TAIYANGBOSSMEMO"]=function()
     frame:Show()
-    if settingsOpen then syncSettings()
-    elseif lastEntry then loadEntry(lastEntry)
-    else currentTarget() end
+    if openSettings then syncSettings() else refreshList() end
 end
