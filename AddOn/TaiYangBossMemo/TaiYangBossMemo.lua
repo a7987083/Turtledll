@@ -149,16 +149,66 @@ local function equipSnapshot()
     end
     return outfit
 end
-local function equipOutfit(entry)
+-- Migrate the former unnamed outfit once per character/Boss without erasing it.
+local function outfitSets(entry)
     local d=prepData(entry)
-    if not d or type(d.gear)~="table" then return false,"此 Boss 尚未保存装备方案" end
+    if not d then return nil end
+    if type(d.gearSets)~="table" then d.gearSets={} end
+    if type(d.gear)=="table" and next(d.gear) and not d.gearMigrated then
+        local found=false
+        for _,set in pairs(d.gearSets) do if type(set)=="table" then found=true;break end end
+        if not found then
+            d.gearSets["旧版 Boss 套装"]={name="旧版 Boss 套装",slots=d.gear}
+        else
+            -- Preserve old data if named outfits already exist, using a distinct migration name.
+            if not d.gearSets["旧版 Boss 套装"] then d.gearSets["旧版 Boss 套装"]={name="旧版 Boss 套装",slots=d.gear} end
+        end
+        d.gearMigrated=true
+    end
+    return d.gearSets
+end
+local function sortedSetNames(entry)
+    local names={}
+    local sets=outfitSets(entry)
+    if sets then for key,val in pairs(sets) do
+        if type(key)=="string" and type(val)=="table" and type(val.slots)=="table" then table.insert(names,key) end
+    end end
+    table.sort(names)
+    return names
+end
+local function setMissing(slots)
+    local missing=0
+    if type(slots)~="table" then return 0 end
+    local available={}
+    -- Count *instances*, not merely ItemID, and never read the bank.
+    for i=1,table.getn(EQUIP_SLOTS) do
+        local link=GetInventoryItemLink("player",EQUIP_SLOTS[i])
+        if link then available[link]=(available[link] or 0)+1 end
+    end
+    for bag=0,4 do for slot=1,(GetContainerNumSlots(bag) or 0) do
+        local link=GetContainerItemLink(bag,slot)
+        if link then available[link]=(available[link] or 0)+1 end
+    end end
+    for i=1,table.getn(EQUIP_SLOTS) do
+        local wanted=slots[tostring(EQUIP_SLOTS[i])]
+        if wanted then
+            if (available[wanted] or 0)>0 then available[wanted]=available[wanted]-1
+            else missing=missing+1 end
+        end
+    end
+    return missing
+end
+local function equipOutfit(entry,setName)
+    local sets=outfitSets(entry)
+    local saved=sets and sets[setName]
+    if type(saved)~="table" or type(saved.slots)~="table" then return false,"装备方案不存在或已删除" end
     if type(UnitAffectingCombat)=="function" and UnitAffectingCombat("player") then return false,"战斗中禁止执行整套换装" end
     if type(CursorHasItem)=="function" and CursorHasItem() then return false,"请先清空鼠标上的物品" end
     if type(PickupContainerItem)~="function" or type(PickupInventoryItem)~="function" then return false,"当前客户端缺少换装接口" end
     local changed,missing=0,0
     for i=1,table.getn(EQUIP_SLOTS) do
         local slot=EQUIP_SLOTS[i]
-        local wanted=d.gear[tostring(slot)]
+        local wanted=saved.slots[tostring(slot)]
         if wanted and GetInventoryItemLink("player",slot)~=wanted then
             local location=nil
             for bag=0,4 do
@@ -170,16 +220,14 @@ local function equipOutfit(entry)
             if location then
                 PickupContainerItem(location[1],location[2])
                 PickupInventoryItem(slot)
-                -- Inventory swaps should return the replaced item into the source slot.
-                if type(CursorHasItem)=="function" and CursorHasItem() then
-                    PickupContainerItem(location[1],location[2])
-                end
+                if type(CursorHasItem)=="function" and CursorHasItem() then PickupContainerItem(location[1],location[2]) end
                 if GetInventoryItemLink("player",slot)==wanted then changed=changed+1 else missing=missing+1 end
             else missing=missing+1 end
         end
     end
-    return true,"换装检查：已完成 "..changed.." 槽，未完成 "..missing.." 槽（缺少装备或受槽位限制）"
+    return missing==0,"「"..setName.."」换装：成功 "..changed.." 槽，未完成 "..missing.." 槽"
 end
+
 local frame=CreateFrame("Frame","TaiYangBossMemoWindow",UIParent)
 frame:SetWidth(755);frame:SetHeight(510)
 frame:SetPoint("CENTER",UIParent,"CENTER",0,30)
@@ -360,7 +408,7 @@ local function save()
     if not n then setStatus("保存失败：NPC Entry 必须是正整数。");return end
     local oldItem=anyNote(n)
     -- Preserve legacy after text in SavedVariables for backward compatibility; never display or trigger it.
-    local item={before=trim(beforeBox:GetText()),after=oldItem and oldItem.after or "",enabled=enabledCheck:GetChecked() and true or false,consumables=oldItem and oldItem.consumables or {},gear=oldItem and oldItem.gear or nil}
+    local item={before=trim(beforeBox:GetText()),after=oldItem and oldItem.after or "",enabled=enabledCheck:GetChecked() and true or false,consumables=oldItem and oldItem.consumables or {},gear=oldItem and oldItem.gear or nil,gearSets=oldItem and oldItem.gearSets or nil,gearMigrated=oldItem and oldItem.gearMigrated or nil}
     getAccount().bosses[tostring(n)]={name=trim(nameBox:GetText())}
     getDB().notes[tostring(n)]=item
     -- Editing Entry is treated as add/save-as; never silently delete prior ID.
@@ -564,27 +612,83 @@ button(prep,"上一页",8,-321,82,23,function() prepPage=math.max(1,prepPage-1);
 button(prep,"下一页",98,-321,82,23,function() prepPage=prepPage+1;prepRefresh() end)
 -- A single search/result list is the sole place for editing/removing configured items.
 -- Gear configuration has a distinct section, not a shared consumable action.
-label(prep,10,-381,"装备方案：仅当前角色，保存不会立即换装", "GameFontHighlightSmall",385)
-button(prep,"保存穿戴为 Boss 套装",470,-417,192,24,function()
-    local e=currentPrepEntry();if not e then prepStatus:SetText("请先保存 Boss") return end
-    local d=prepData(e)
-    if type(d.gear)=="table" and next(d.gear) and confirmModal then
-        confirmModal("覆盖装备方案","确定用当前穿戴覆盖此 Boss 原有装备方案？",function()
-            d.gear=equipSnapshot();prepStatus:SetText("装备方案已覆盖，战前卡片可手动换装。")
-        end)
-    else d.gear=equipSnapshot();prepStatus:SetText("已保存当前穿戴装备；战前卡片可手动换装。") end
+label(prep,10,-375,"装备方案：仅当前角色 · 保存不会立即换装", "GameFontHighlightSmall",460)
+local outfitPage=1
+local outfitLabels={}
+local refreshOutfits
+local outfitNameModal=CreateFrame("Frame",nil,UIParent)
+outfitNameModal:SetWidth(410);outfitNameModal:SetHeight(200)
+outfitNameModal:SetPoint("CENTER",UIParent,"CENTER",0,100)
+outfitNameModal:SetFrameStrata("FULLSCREEN_DIALOG")
+outfitNameModal:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=11,top=12,bottom=11}})
+label(outfitNameModal,24,-22,"保存当前穿戴为 Boss 套装","GameFontNormalLarge",360)
+label(outfitNameModal,24,-61,"方案名称（最多 30 个字符）","GameFontHighlightSmall",360)
+local outfitNameInput=edit(outfitNameModal,28,-90,345,25)
+button(outfitNameModal,"保存",55,-142,125,25,function()
+    local e=currentPrepEntry()
+    if not e then outfitNameModal:Hide();return end
+    local name=trim(outfitNameInput:GetText() or "")
+    if name=="" or string.len(name)>90 then prepStatus:SetText("请填写不超过 30 个汉字的方案名称");return end
+    local slots=equipSnapshot()
+    if not next(slots) then prepStatus:SetText("当前未读取到已穿戴装备，不能保存");return end
+    local sets=outfitSets(e)
+    local function commit()
+        sets[name]={name=name,slots=slots}
+        outfitNameModal:Hide()
+        prepStatus:SetText("已保存装备方案："..name)
+        outfitPage=1;refreshOutfits()
+    end
+    if sets[name] and confirmModal then
+        outfitNameModal:Hide()
+        confirmModal("覆盖装备方案","确定覆盖「"..name.."」吗？",commit)
+    else commit() end
 end)
-button(prep,"清除装备方案",330,-417,125,24,function()
-    local e=currentPrepEntry();if not e then return end
-    if confirmModal then confirmModal("清除装备方案","只清除此角色此 Boss 的装备方案？",function()
-        prepData(e).gear=nil;prepStatus:SetText("已清除装备方案。")
-    end) end
+button(outfitNameModal,"取消",233,-142,125,25,function() outfitNameModal:Hide() end)
+outfitNameModal:Hide()
+button(prep,"保存穿戴为 Boss 套装",466,-372,197,25,function()
+    local e=currentPrepEntry();if not e then prepStatus:SetText("请先保存 Boss");return end
+    outfitNameInput:SetText("");outfitNameModal:Show();outfitNameInput:SetFocus()
 end)
+for i=1,3 do
+    local index=i
+    local lbl=label(prep,13,-414-(i-1)*35,"", "GameFontHighlightSmall",410)
+    local del=button(prep,"移除",553,-408-(i-1)*35,105,25,function()
+        local e=currentPrepEntry();if not e then return end
+        local names=sortedSetNames(e)
+        local name=names[(outfitPage-1)*3+index]
+        if name and confirmModal then confirmModal("移除装备方案","只删除「"..name.."」的保存记录，不改变人物装备？",function()
+            local d=prepData(e)
+            local sets=outfitSets(e);sets[name]=nil
+            -- The old snapshot has already migrated; never recreate a removed legacy set.
+            d.gearMigrated=true;d.gear=nil
+            refreshOutfits()
+        end) end
+    end)
+    outfitLabels[i]={text=lbl,remove=del}
+end
+local outfitPager=label(prep,300,-528,"","GameFontHighlightSmall",120)
+button(prep,"上一组",12,-523,90,24,function() outfitPage=math.max(1,outfitPage-1);refreshOutfits() end)
+button(prep,"下一组",116,-523,90,24,function() outfitPage=outfitPage+1;refreshOutfits() end)
+refreshOutfits=function()
+    local e=currentPrepEntry()
+    local names=e and sortedSetNames(e) or {}
+    local total=math.max(1,math.ceil(table.getn(names)/3))
+    if outfitPage>total then outfitPage=total end
+    outfitPager:SetText(outfitPage.." / "..total.." 页")
+    for i=1,3 do
+        local name=names[(outfitPage-1)*3+i]
+        if name then
+            outfitLabels[i].text:SetText(name)
+            outfitLabels[i].remove:Show()
+        else outfitLabels[i].text:SetText("");outfitLabels[i].remove:Hide() end
+    end
+end
+
 local prepOpen=false
 local function togglePrep()
     prepOpen=not prepOpen
     if prepOpen then
-        frame:SetHeight(640);manager:Hide();status:Hide();prep:Show();prepRefresh()
+        frame:SetHeight(715);manager:Hide();status:Hide();prep:Show();prepRefresh();refreshOutfits()
     else prep:Hide();frame:SetHeight(510);manager:Show();status:Show();refreshList() end
 end
 button(manager,"药剂与装备",235,-363,225,27,function() togglePrep() end)
@@ -754,10 +858,60 @@ popup:SetScript("OnMouseWheel",function()
     redrawStock()
 end)
 local refreshActiveStock
-local gearButton=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
-gearButton:SetWidth(170);gearButton:SetHeight(24);gearButton:SetPoint("BOTTOM",popup,"BOTTOM",0,45)
-gearButton:SetText("一键换装")
-gearButton:SetScript("OnClick",function() if activeAlert then local ok,message=equipOutfit(activeAlert.entry);say(message);end end)
+local outfitHeading=popup:CreateFontString(nil,"OVERLAY","GameFontNormal")
+outfitHeading:SetText("一键换装")
+outfitHeading:SetPoint("BOTTOMLEFT",popup,"BOTTOMLEFT",25,146)
+local alertSetPage=1
+local alertSetButtons={}
+local alertSetPager=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+alertSetPager:SetPoint("BOTTOM",popup,"BOTTOM",0,64)
+local function refreshAlertOutfits()
+    local names=activeAlert and sortedSetNames(activeAlert.entry) or {}
+    local total=math.max(1,math.ceil(table.getn(names)/4))
+    if alertSetPage>total then alertSetPage=total end
+    for i=1,4 do
+        local name=names[(alertSetPage-1)*4+i]
+        local b=alertSetButtons[i]
+        if name then
+            local sets=outfitSets(activeAlert.entry)
+            local missing=setMissing(sets[name].slots)
+            b:SetText(name..(missing==0 and "（装备齐全）" or "（缺失"..missing.."件）"))
+            b.setName=name
+            b:Show()
+        else b.setName=nil;b:Hide() end
+    end
+    alertSetPager:SetText(table.getn(names)>4 and (alertSetPage.." / "..total) or "")
+    if table.getn(names)>0 then outfitHeading:Show() else outfitHeading:Hide() end
+end
+for i=1,4 do
+    local n=i
+    local b=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
+    b:SetWidth(243);b:SetHeight(25)
+    b:SetPoint("BOTTOMLEFT",popup,"BOTTOMLEFT",(i%2==1) and 25 or 281,(i<=2) and 111 or 78)
+    b:SetScript("OnClick",function()
+        if activeAlert and this.setName then
+            local _,message=equipOutfit(activeAlert.entry,this.setName)
+            say(message);refreshAlertOutfits()
+        end
+    end)
+    alertSetButtons[n]=b
+end
+local alertPrev=button(popup,"<",26,-999,30,21,function() alertSetPage=math.max(1,alertSetPage-1);refreshAlertOutfits() end)
+local alertNext=button(popup,">",487,-999,30,21,function() alertSetPage=alertSetPage+1;refreshAlertOutfits() end)
+alertPrev:ClearAllPoints();alertPrev:SetPoint("BOTTOMLEFT",popup,"BOTTOMLEFT",22,62)
+alertNext:ClearAllPoints();alertNext:SetPoint("BOTTOMRIGHT",popup,"BOTTOMRIGHT",-22,62)
+local function updateAlertGear()
+    local names=activeAlert and sortedSetNames(activeAlert.entry) or {}
+    if table.getn(names)>0 then
+        popup:SetHeight(activeAlert and trim(activeAlert.body or "")~="" and 522 or 466)
+    end
+    refreshAlertOutfits()
+    if table.getn(names)>4 then alertPrev:Show();alertNext:Show() else alertPrev:Hide();alertNext:Hide() end
+    if table.getn(names)==0 then
+        popup:SetHeight(activeAlert and trim(activeAlert.body or "")~="" and 400 or 344)
+    end
+end
+
 local queue={}
 local alertRemaining=0
 local QUEUE_LIMIT=20
@@ -773,7 +927,7 @@ local function displayNext()
     while table.getn(queue)>0 do
         local first=queue[1]
         local current=note(first.entry)
-        if getDB().enabled and getDB().before and current and (trim(current.before)~="" or (prepData(first.entry) and next(prepData(first.entry).consumables)) or (prepData(first.entry) and type(prepData(first.entry).gear)=="table")) then break end
+        if getDB().enabled and getDB().before and current and (trim(current.before)~="" or (prepData(first.entry) and next(prepData(first.entry).consumables)) or (prepData(first.entry) and table.getn(sortedSetNames(first.entry))>0)) then break end
         table.remove(queue,1)
         queueKeys[first.key]=nil
         if shown[first.guid] then shown[first.guid].before=nil end
@@ -805,7 +959,7 @@ local function displayNext()
     local d=prepData(activeAlert.entry)
     groupOffsets[1]=0;groupOffsets[2]=0
     refreshActiveStock()
-    if d and type(d.gear)=="table" and next(d.gear) then gearButton:Show() else gearButton:Hide() end
+    alertSetPage=1;updateAlertGear()
     popup:Show()
 end
 refreshActiveStock=function()
@@ -830,6 +984,7 @@ refreshActiveStock=function()
     end)
     table.sort(groupLists[2],function(a,b) return a.id<b.id end)
     redrawStock()
+    if activeAlert then refreshAlertOutfits() end
 end
 pClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
 alertClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
@@ -848,7 +1003,7 @@ local function alert(entry,guid)
     local item=note(entry)
     if not item then return false end
     local content=trim(item.before)
-    if content=="" and not (prepData(entry) and (next(prepData(entry).consumables) or type(prepData(entry).gear)=="table")) then return false end
+    if content=="" and not (prepData(entry) and (next(prepData(entry).consumables) or table.getn(sortedSetNames(entry))>0)) then return false end
     local track=tracks[guid]
     local cycle=track and track.attempt or 1
     local key=tostring(guid)..":"..tostring(cycle)..":before"
