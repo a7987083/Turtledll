@@ -621,7 +621,7 @@ closeButton:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-5,-5)
 closeButton:SetScript("OnClick",safeClose)
 -- WoW 1.12 Escape handling is left to the default UI; the X button checks unsaved data.
 local popup=CreateFrame("Frame","TaiYangBossMemoAlert",UIParent)
-popup:SetWidth(390);popup:SetHeight(404)
+popup:SetWidth(548);popup:SetHeight(410)
 local function restoreAlertPosition()
     popup:ClearAllPoints()
     local p=getDB().alertPos
@@ -646,33 +646,38 @@ end)
 local pTitle=popup:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
 pTitle:SetPoint("TOP",popup,"TOP",0,-25)
 local pBody=popup:CreateFontString(nil,"OVERLAY","GameFontHighlight")
-pBody:SetPoint("TOP",popup,"TOP",0,-57);pBody:SetWidth(348);pBody:SetHeight(53)
+pBody:SetPoint("TOP",popup,"TOP",0,-57);pBody:SetWidth(498);pBody:SetHeight(53)
 pBody:SetJustifyH("CENTER");pBody:SetJustifyV("MIDDLE")
 local pClose=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
 pClose:SetWidth(92);pClose:SetHeight(22)
 pClose:SetPoint("BOTTOM",popup,"BOTTOM",0,14);pClose:SetText("知道了")
 local activeAlert=nil
 local pStock=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-pStock:SetPoint("TOP",popup,"TOP",0,-113);pStock:SetWidth(345);pStock:SetJustifyH("LEFT")
+pStock:SetPoint("TOPLEFT",popup,"TOPLEFT",25,-113);pStock:SetWidth(490);pStock:SetJustifyH("LEFT")
 local stockRows={}
 local stockItems={}
 local stockProductCount=0
 local stockOffset=0
 local redrawStock
-for i=1,7 do
+local prevStock,nextStock
+-- Two compact columns, four rows each; the footer is outside this bounded region.
+local STOCK_PAGE_SIZE=8
+for i=1,STOCK_PAGE_SIZE do
+    local col=math.floor((i-1)/4)
+    local line=(i-1)%4
     local row=CreateFrame("Frame",nil,popup)
-    row:SetPoint("TOPLEFT",popup,"TOPLEFT",19,-146-(i-1)*27)
-    row:SetWidth(352);row:SetHeight(26)
+    row:SetPoint("TOPLEFT",popup,"TOPLEFT",25+col*257,-151-line*35)
+    row:SetWidth(242);row:SetHeight(29)
     local icon=row:CreateTexture(nil,"ARTWORK")
-    icon:SetPoint("LEFT",row,"LEFT",0,0);icon:SetWidth(22);icon:SetHeight(22)
+    icon:SetPoint("LEFT",row,"LEFT",0,0);icon:SetWidth(23);icon:SetHeight(23)
     local name=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    name:SetPoint("LEFT",row,"LEFT",27,0);name:SetWidth(215);name:SetJustifyH("LEFT")
+    name:SetPoint("LEFT",row,"LEFT",29,0);name:SetWidth(148);name:SetJustifyH("LEFT")
     local number=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    number:SetPoint("RIGHT",row,"RIGHT",0,0);number:SetWidth(78);number:SetJustifyH("RIGHT")
+    number:SetPoint("RIGHT",row,"RIGHT",0,0);number:SetWidth(65);number:SetJustifyH("RIGHT")
     stockRows[i]={frame=row,icon=icon,name=name,count=number}
 end
 local stockPage=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-stockPage:SetPoint("BOTTOM",popup,"BOTTOM",0,77)
+stockPage:SetPoint("BOTTOM",popup,"BOTTOM",0,88)
 local function itemTexture(id,stock)
     if stock[id] and stock[id].bag and type(GetContainerItemInfo)=="function" then
         local texture=GetContainerItemInfo(stock[id].bag,stock[id].slot)
@@ -683,8 +688,8 @@ local function itemTexture(id,stock)
 end
 redrawStock=function()
     local n=table.getn(stockItems)
-    if stockOffset>math.max(0,n-7) then stockOffset=math.max(0,n-7) end
-    for i=1,7 do
+    if stockOffset>math.max(0,n-STOCK_PAGE_SIZE) then stockOffset=math.max(0,n-STOCK_PAGE_SIZE) end
+    for i=1,STOCK_PAGE_SIZE do
         local r=stockRows[i]
         local item=stockItems[i+stockOffset]
         if item then
@@ -704,17 +709,23 @@ redrawStock=function()
             r.frame:Show()
         else r.frame:Hide() end
     end
-    if n>7 then stockPage:SetText("物品 "..(stockOffset+1).." - "..math.min(n,stockOffset+7).." / "..n.." · 滚轮或下方翻页")
-    else stockPage:SetText("共 "..stockProductCount.." 种物品") end
+    if n>STOCK_PAGE_SIZE then
+        stockPage:SetText("显示 "..(stockOffset+1).."-"..math.min(n,stockOffset+STOCK_PAGE_SIZE).." / "..n.." 行")
+        stockPage:Show()
+        prevStock:Show();nextStock:Show()
+    else
+        stockPage:Hide()
+        prevStock:Hide();nextStock:Hide()
+    end
 end
 popup:EnableMouseWheel(true)
-popup:SetScript("OnMouseWheel",function() stockOffset=math.max(0,math.min(math.max(0,table.getn(stockItems)-7),stockOffset-arg1));redrawStock() end)
-local prevStock=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
+popup:SetScript("OnMouseWheel",function() stockOffset=math.max(0,math.min(math.max(0,table.getn(stockItems)-STOCK_PAGE_SIZE),stockOffset-arg1));redrawStock() end)
+prevStock=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
 prevStock:SetWidth(58);prevStock:SetHeight(21);prevStock:SetPoint("BOTTOMLEFT",popup,"BOTTOMLEFT",15,71);prevStock:SetText("上翻")
-prevStock:SetScript("OnClick",function() stockOffset=math.max(0,stockOffset-7);redrawStock() end)
-local nextStock=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
+prevStock:SetScript("OnClick",function() stockOffset=math.max(0,stockOffset-STOCK_PAGE_SIZE);redrawStock() end)
+nextStock=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
 nextStock:SetWidth(58);nextStock:SetHeight(21);nextStock:SetPoint("BOTTOMRIGHT",popup,"BOTTOMRIGHT",-15,71);nextStock:SetText("下翻")
-nextStock:SetScript("OnClick",function() stockOffset=math.min(math.max(0,table.getn(stockItems)-7),stockOffset+7);redrawStock() end)
+nextStock:SetScript("OnClick",function() stockOffset=math.min(math.max(0,table.getn(stockItems)-STOCK_PAGE_SIZE),stockOffset+STOCK_PAGE_SIZE);redrawStock() end)
 local refreshActiveStock
 local gearButton=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
 gearButton:SetWidth(170);gearButton:SetHeight(24);gearButton:SetPoint("BOTTOM",popup,"BOTTOM",0,45)
