@@ -13,7 +13,7 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function()
     end
 end
 local function TaiYangBossMemoInitialize()
--- TaiYangBossMemo 1.0.9 | WoW 1.12.1 / Lua 5.0
+-- TaiYangBossMemo 1.1.0 | WoW 1.12.1 / Lua 5.0
 -- Shared account boss catalog + character-specific notes; old account DB is migration-only.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
 local db,shown=nil,{}
@@ -69,6 +69,34 @@ local function getDB()
         end
         db.migratedFromAccount=true
     end
+    -- v1.1: stable IDs. Keep legacy snapshots intact and migrate both stores once.
+    if not account.bossIdMigrated then
+        local changes={}
+        for key,boss in pairs(account.bosses) do
+            if type(boss)=="table" and tonumber(key) then
+                local newKey="boss_"..key
+                if not account.bosses[newKey] then
+                    boss.entry=tonumber(key)
+                    changes[newKey]=boss
+                end
+                account.bosses[key]=nil
+            end
+        end
+        for key,boss in pairs(changes) do account.bosses[key]=boss end
+        account.bossIdMigrated=true
+    end
+    if not db.bossIdMigrated then
+        local moves={}
+        for key,item in pairs(db.notes) do
+            if tonumber(key) then
+                local dest="boss_"..key
+                if not db.notes[dest] then moves[dest]=item end
+                db.notes[key]=nil
+            end
+        end
+        for key,item in pairs(moves) do db.notes[key]=item end
+        db.bossIdMigrated=true
+    end
     if db.enabled==nil then db.enabled=true end
     if db.before==nil then db.before=true end
     if db.realertAfterReset==nil then db.realertAfterReset=false end
@@ -77,9 +105,24 @@ local function getDB()
     if db.pollInterval~=0.2 and db.pollInterval~=0.5 and db.pollInterval~=1 and db.pollInterval~=2 then db.pollInterval=0.5 end
     return db
 end
-local function bossInfo(entry)
-    local boss=getAccount().bosses[tostring(entry)]
+local function bossInfo(key)
+    local boss=getAccount().bosses[tostring(key)]
     if type(boss)=="table" then return boss end
+end
+local function idByEntry(entry)
+    local n=tonumber(entry)
+    if not n then return nil end
+    for key,boss in pairs(getAccount().bosses) do
+        if type(boss)=="table" and tonumber(boss.entry)==n then return key end
+    end
+end
+local function newBossKey()
+    local a=getAccount()
+    a.nextBossId=tonumber(a.nextBossId) or 0
+    local key
+    repeat a.nextBossId=a.nextBossId+1;key="boss_new_"..a.nextBossId
+    until a.bosses[key]==nil
+    return key
 end
 local function api(cmd,a,b)
     if type(TaiYangShenDian)~="function" then return nil end
@@ -99,6 +142,8 @@ local function note(entry)
     if not boss or not item or item.enabled==false then return nil end
     return {name=boss.name,before=item.before,after=item.after,enabled=item.enabled}
 end
+-- Run account/character migration before the editor builds its first Boss list.
+getDB()
 -- Inventory helpers: scan backpack and four bags only; bank is intentionally excluded.
 local function itemID(link)
     if type(link)~="string" then return nil end
@@ -308,15 +353,13 @@ local function entryList()
     local entries={}
     local filter=string.lower(trim(searchBox:GetText() or ""))
     for key,item in pairs(getAccount().bosses) do
-        if type(item)=="table" then
-            local n=tonumber(key)
-            local name=item.name or ""
-            if n and (filter=="" or string.find(string.lower(name),filter,1,true) or string.find(string.lower(item.zone or ""),filter,1,true) or string.find(key,filter,1,true)) then
-                table.insert(entries,n)
-            end
+        if type(item)=="table" and (filter=="" or string.find(string.lower(item.name or ""),filter,1,true)
+            or string.find(string.lower(item.zone or ""),filter,1,true)
+            or string.find(tostring(item.entry or ""),filter,1,true)) then
+            table.insert(entries,key)
         end
     end
-    table.sort(entries,function(a,b) return a<b end)
+    table.sort(entries,function(a,b) return tostring(a)<tostring(b) end)
     return entries
 end
 local status=label(frame,29,-460,"请选择 Boss，或读取当前目标添加。","GameFontHighlightSmall",690)
@@ -359,7 +402,7 @@ local function inferZone(entry,name,preferName)
         if unique then return unique,"saved-name" end
         return nil,nil
     end
-    local saved=entry and bossInfo(entry)
+    local saved=entry and bossInfo(idByEntry(entry))
     if saved and trim(saved.zone or "")~="" then return trim(saved.zone),"entry" end
     if normalized=="" then return nil,nil end
     if type(TaiYangBossZoneDB)=="table" and type(TaiYangBossZoneDB.FindByBossName)=="function" then
@@ -384,22 +427,21 @@ local function autoFillZone(nameChanged)
     elseif source=="ambiguous" then setZoneAutomatically("")
     else setZoneAutomatically(currentZoneName()) end
 end
-local function loadEntry(n,name,detectedZone)
-    if not n or n<1 then setStatus("请输入有效的 NPC Entry。");return end
+local function loadEntry(key,name,detectedZone)
+    local boss=key and bossInfo(key)
     suppressDirty=true
-    selectedEntry=n
+    selectedEntry=key
     zoneManual=false
-    local item=anyNote(n)
-    local boss=bossInfo(n)
-    entryBox:SetText(tostring(n))
+    local item=key and anyNote(key)
+    entryBox:SetText(boss and boss.entry and tostring(boss.entry) or "")
     nameBox:SetText(boss and boss.name or name or "")
-    local zone=(boss and boss.zone and boss.zone~="") and boss.zone or nil
-    if not zone then zone=inferZone(n,boss and boss.name or name) end
+    local zone=boss and boss.zone and boss.zone~="" and boss.zone or nil
+    if not zone then zone=inferZone(boss and boss.entry,name or (boss and boss.name)) end
     setZoneAutomatically(zone or detectedZone or currentZoneName())
     beforeBox:SetText(item and item.before or "")
     enabledCheck:SetChecked(not item or item.enabled~=false)
-    lastEntry=n
-    setStatus("正在编辑 Entry "..n.."；修改后点击保存。")
+    lastEntry=key
+    setStatus(key and ("正在编辑 Boss "..(boss and boss.name or key)) or "新建 Boss")
     if refreshList then refreshList() end
     suppressDirty=false;captureSnapshot()
 end
@@ -425,7 +467,7 @@ refreshList=function()
             local item=anyNote(n)
             local boss=bossInfo(n)
             local tag=(item and item.enabled==false) and "[停用] " or ""
-            local name=(boss and boss.name and boss.name~="") and boss.name or ("Entry "..n)
+            local name=(boss and boss.name and boss.name~="") and boss.name or ("Boss "..tostring(n))
             b:SetText((selectedEntry==n and "▶ " or "")..tag..name)
             b:Show()
         else b:Hide() end
@@ -469,46 +511,71 @@ local function entryNumber()
 end
 local function target()
     local id=api("Unit.Identity","target")
-    if id and id.ok and id.data and id.data.entry then askDiscard(function() loadEntry(id.data.entry,id.data.name,currentZoneName()) end)
-    else setStatus("当前没有可读取的目标，可手动输入 NPC Entry。") end
+    local detectedName=(id and id.ok and id.data and id.data.name) or (type(UnitName)=="function" and UnitName("target"))
+    local detectedEntry=id and id.ok and id.data and tonumber(id.data.entry)
+    if type(UnitExists)=="function" and UnitExists("target") and detectedName and detectedName~="" then
+        if (type(UnitIsPlayer)=="function" and UnitIsPlayer("target")) or
+           (type(UnitPlayerControlled)=="function" and UnitPlayerControlled("target")) then
+            setStatus("当前目标为玩家或玩家控制单位，不能作为 Boss。");return
+        end
+        local key=detectedEntry and idByEntry(detectedEntry)
+        askDiscard(function()
+            loadEntry(key,detectedName,currentZoneName())
+            if not key then
+                suppressDirty=true
+                entryBox:SetText(detectedEntry and tostring(detectedEntry) or "")
+                nameBox:SetText(detectedName)
+                setZoneAutomatically(inferZone(detectedEntry,detectedName,true) or currentZoneName())
+                suppressDirty=false;recomputeDirty()
+            end
+        end)
+    else setStatus("当前没有可读取的 NPC 目标；可以手动填写名称和地图。") end
 end
 local function save()
+    local entryRaw=trim(entryBox:GetText() or "")
     local n=entryNumber()
-    if not n then setStatus("保存失败：NPC Entry 必须是正整数。");return end
-    local oldItem=anyNote(n)
-    -- Preserve legacy after text in SavedVariables for backward compatibility; never display or trigger it.
+    if entryRaw~="" and not n then setStatus("保存失败：Entry 必须为空或有效正整数。");return end
+    local name=trim(nameBox:GetText())
+    local zone=trim(zoneBox:GetText())
+    if name=="" or zone=="" then setStatus("保存失败：Boss 名称与所在地图必填。");return end
+    local key=selectedEntry or newBossKey()
+    if n then
+        local conflict=idByEntry(n)
+        if conflict and conflict~=key then setStatus("保存失败：Entry 已属于其他 Boss，请先核实。");return end
+    end
+    local oldItem=anyNote(key)
     local item={before=trim(beforeBox:GetText()),after=oldItem and oldItem.after or "",enabled=enabledCheck:GetChecked() and true or false,consumables=oldItem and oldItem.consumables or {},gear=oldItem and oldItem.gear or nil,gearSets=oldItem and oldItem.gearSets or nil,gearMigrated=oldItem and oldItem.gearMigrated or nil}
-    getAccount().bosses[tostring(n)]={name=trim(nameBox:GetText()),zone=trim(zoneBox:GetText())}
-    getDB().notes[tostring(n)]=item
-    -- Editing Entry is treated as add/save-as; never silently delete prior ID.
-    loadEntry(n)
-    setStatus("保存成功：Entry "..n..(item.enabled and "（已启用）" or "（已停用）"))
+    getAccount().bosses[key]={name=name,zone=zone,entry=n}
+    getDB().notes[key]=item
+    loadEntry(key)
+    setStatus("保存成功："..name..(item.enabled and "（已启用）" or "（已停用）"))
     refreshList()
 end
 local function deleteEntry()
-    local n=entryNumber()
-    if not n or not bossInfo(n) then setStatus("当前 Entry 尚未保存，无法删除。");return end
+    local key=selectedEntry
+    if not key or not bossInfo(key) then setStatus("请先选择已保存的 Boss。");return end
     if confirmModal then
-        local item=bossInfo(n)
-        local displayName=(item and item.name and item.name~="") and item.name or ("Entry "..n)
-        confirmModal("确认删除 Boss", "删除「"..displayName.."」(Entry "..n..")？此操作无法撤销。",function()
-            getAccount().bosses[tostring(n)]=nil
-            getDB().notes[tostring(n)]=nil
+        local item=bossInfo(key)
+        local displayName=(item and item.name and item.name~="") and item.name or tostring(key)
+        confirmModal("确认删除 Boss", "删除「"..displayName.."」？此操作无法撤销。",function()
+            getAccount().bosses[key]=nil
+            getDB().notes[key]=nil
             suppressDirty=true
             selectedEntry=nil;lastEntry=nil
-    entryBox:SetText("");nameBox:SetText("");zoneBox:SetText("");beforeBox:SetText("")
-    enabledCheck:SetChecked(true);refreshList()
+            entryBox:SetText("");nameBox:SetText("");zoneBox:SetText("");beforeBox:SetText("")
+            enabledCheck:SetChecked(true);refreshList()
             suppressDirty=false;captureSnapshot()
-            setStatus("已删除 Boss Entry "..n.."，不影响其他记录。")
+            setStatus("已删除 Boss 「"..displayName.."」。")
         end)
     end
 end
 button(manager,"读取当前目标",235,-325,147,27,target)
 button(manager,"保存 Boss",395,-325,145,27,save)
 button(manager,"启用/停用",553,-325,150,27,function()
-    local e=entryNumber();if not e or not bossInfo(e) then setStatus("请先选择已保存的 Boss") return end
-    local data=getDB().notes[tostring(e)]
-    if type(data)~="table" then data={before="",enabled=true};getDB().notes[tostring(e)]=data end
+    local key=selectedEntry
+    if not key or not bossInfo(key) then setStatus("请先选择已保存的 Boss") return end
+    local data=getDB().notes[key]
+    if type(data)~="table" then data={before="",enabled=true};getDB().notes[key]=data end
     data.enabled=not (data.enabled~=false)
     enabledCheck:SetChecked(data.enabled)
     suppressDirty=true;captureSnapshot();suppressDirty=false
@@ -531,7 +598,7 @@ local prep=CreateFrame("Frame",nil,frame)
 prep:SetPoint("TOPLEFT",frame,"TOPLEFT",27,-72)
 prep:SetWidth(700);prep:SetHeight(590);prep:Hide()
 local prepTitle=label(prep,8,-5,"药剂与装备 · 当前角色","GameFontNormalLarge",620)
-local prepHint=label(prep,8,-29,"先在 Boss 管理中保存 Entry，再配置药剂和装备。","GameFontHighlightSmall",670)
+local prepHint=label(prep,8,-29,"先在 Boss 管理中保存名称与地图，再配置药剂和装备。","GameFontHighlightSmall",670)
 local prepStock=label(prep,8,-52,"","GameFontHighlightSmall",680)
 local prepRows={}
 local prepTab="bag"
@@ -543,8 +610,8 @@ local prepModeLabel=label(prep,240,-79,"","GameFontHighlightSmall",435)
 local prepStatus=label(prep,10,-476,"","GameFontHighlightSmall",670)
 local prepRefresh
 local function currentPrepEntry()
-    local id=tonumber(trim(entryBox:GetText() or ""))
-    if id and bossInfo(id) then return id end
+    local key=selectedEntry
+    if key and bossInfo(key) then return key end
 end
 local function validNeed(raw)
     raw=trim(raw)
@@ -1110,7 +1177,7 @@ local function alert(entry,guid)
         say("提醒队列已满（20 条），跳过最新提醒。")
         return false
     end
-    local name=(item.name and item.name~="") and item.name or "Entry "..entry
+    local name=(item.name and item.name~="") and item.name or "Boss "..tostring(entry)
     local itemToShow={key=key,guid=guid,entry=entry,phase="before",title="战前提醒 · "..name,body=content}
     table.insert(queue,itemToShow);queueKeys[key]=true
     if not activeAlert then displayNext() end
@@ -1186,45 +1253,65 @@ local function observeCombat(guid,entry,boss)
         end
     end
 end
+local function matchingBossKey(name,zone,entry)
+    local match=nil
+    for key,boss in pairs(getAccount().bosses) do
+        if type(boss)=="table" and normalizeBossName(boss.name)==normalizeBossName(name)
+            and trim(boss.zone or "")==zone and note(key) then
+            -- Entry helps resolve duplicate records, but is not mandatory.
+            if entry and boss.entry and tonumber(boss.entry)==tonumber(entry) then return key end
+            if match then return nil end
+            match=key
+        end
+    end
+    return match
+end
 local function observe()
     if not getDB().enabled then return end
     local newSelection=pendingNewSelection
     pendingNewSelection=false
-    local id=api("Unit.Identity","target")
-    local targetGuid=nil
-    if id and id.ok and id.data and id.data.guid and id.data.entry and note(id.data.entry) then
-        targetGuid=id.data.guid
-        addTrack(targetGuid,id.data.entry)
-        -- Current-target state is needed for alive validation and wipe/re-pull detection.
-        local boss=api("Boss.State","target")
-        if boss and boss.ok and type(boss.data)=="table"
-            and boss.data.guid==targetGuid and boss.data.entry==id.data.entry then
-            observeCombat(targetGuid,id.data.entry,boss)
-            local tracked=tracks[targetGuid]
-            if newSelection and tracked and tracked.resetReady and getDB().realertAfterReset
-                and boss.data and boss.data.deadKnown==true and boss.data.dead==false
-                and boss.data.inCombatKnown==true and boss.data.inCombat==false
-                and not playerIsDead() then
-                tracked.attempt=tracked.attempt+1
-                tracked.resetReady=false
-                tracked.wasCombat=false
-                tracked.offCount=0
-                tracked.onCount=0
-                if shown[targetGuid] then shown[targetGuid].before=nil end
-                say("Boss 已重置，重新选中：Entry "..id.data.entry.."，第 "..tracked.attempt.." 轮。")
-                trigger(targetGuid,id.data.entry)
-            end
-            if boss.state=="DETECTED" or boss.state=="ENGAGED" then
-                trigger(targetGuid,id.data.entry)
-            end
+    if type(UnitExists)~="function" or not UnitExists("target") then return end
+    if type(UnitIsPlayer)~="function" or type(UnitPlayerControlled)~="function" then return end
+    if UnitIsPlayer("target") or UnitPlayerControlled("target") then return end
+    if type(UnitName)~="function" then return end
+    local name=UnitName("target")
+    if not name or name=="" then return end
+    local identity=api("Unit.Identity","target")
+    local data=identity and identity.ok and identity.data or nil
+    local entry=data and data.entry
+    local key=matchingBossKey(name,currentZoneName(),entry)
+    if not key then return end
+    local state=api("Boss.State","target")
+    local st=state and state.ok and type(state.data)=="table" and state.data or nil
+    -- Fail closed when the unit's alive/combat state cannot be determined.
+    local isDead,combat
+    if st and st.deadKnown==true then isDead=st.dead end
+    if st and st.inCombatKnown==true then combat=st.inCombat end
+    if isDead==nil and type(UnitIsDeadOrGhost)=="function" then isDead=not not UnitIsDeadOrGhost("target") end
+    if combat==nil and type(UnitAffectingCombat)=="function" then combat=not not UnitAffectingCombat("target") end
+    if isDead~=false or combat~=false or playerIsDead() then return end
+    local guid=data and data.guid
+    if type(guid)~="string" or guid=="" then
+        -- In clients lacking GUID data, scope the fallback to the current map
+        -- and target name; never use the numeric NPC Entry as a fake GUID.
+        guid="name:"..currentZoneName()..":"..name
+    end
+    addTrack(guid,key)
+    if st and st.guid==guid and st.deadKnown==true and st.inCombatKnown==true then
+        observeCombat(guid,key,state)
+        local tracked=tracks[guid]
+        if newSelection and tracked and tracked.resetReady and getDB().realertAfterReset then
+            tracked.attempt=tracked.attempt+1
+            tracked.resetReady=false;tracked.wasCombat=false;tracked.offCount=0;tracked.onCount=0
+            if shown[guid] then shown[guid].before=nil end
+            trigger(guid,key)
         end
     end
-    -- Session-local eviction only. No GUID death probes or Boss event journal.
+    -- Both hostile and friendly NPCs are eligible; never wait until engage.
+    trigger(guid,key)
     local now=milliseconds()
-    for guid,t in pairs(tracks) do
-        -- Idle entries expire, but a continuously observed target stays tracked.
-        -- Keep shown[guid] for the entire map session to prevent duplicate alerts.
-        if now-t.lastSeen>TRACK_TTL_MS then tracks[guid]=nil end
+    for g,t in pairs(tracks) do
+        if now-t.lastSeen>TRACK_TTL_MS then tracks[g]=nil end
     end
 end
 local driver=CreateFrame("Frame")
