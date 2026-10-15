@@ -622,20 +622,49 @@ outfitNameModal:SetPoint("CENTER",UIParent,"CENTER",0,100)
 outfitNameModal:SetFrameStrata("FULLSCREEN_DIALOG")
 outfitNameModal:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=11,top=12,bottom=11}})
 label(outfitNameModal,24,-22,"保存当前穿戴为 Boss 套装","GameFontNormalLarge",360)
-label(outfitNameModal,24,-61,"方案名称（最多 30 个字符）","GameFontHighlightSmall",360)
+label(outfitNameModal,24,-61,"方案名称（最多 12 个字）","GameFontHighlightSmall",360)
 local outfitNameInput=edit(outfitNameModal,28,-90,345,25)
+outfitNameInput:SetMaxLetters(48)
+-- Lua 5.0 has no built-in UTF-8 length function. Count characters, not bytes.
+local function gearNameLength(value)
+    local count=0
+    local i=1
+    local bytes=string.len(value)
+    while i<=bytes do
+        local b=string.byte(value,i)
+        local width=1
+        if b>=240 and b<=247 then width=4
+        elseif b>=224 and b<=239 then width=3
+        elseif b>=192 and b<=223 then width=2 end
+        if i+width-1>bytes then return nil end
+        if width>1 then
+            for j=i+1,i+width-1 do
+                local c=string.byte(value,j)
+                if c<128 or c>191 then return nil end
+            end
+        elseif b>=128 then return nil end
+        count=count+1
+        i=i+width
+    end
+    return count
+end
+local outfitNameError=label(outfitNameModal,28,-122,"","GameFontHighlightSmall",345)
 button(outfitNameModal,"保存",55,-142,125,25,function()
     local e=currentPrepEntry()
     if not e then outfitNameModal:Hide();return end
     local name=trim(outfitNameInput:GetText() or "")
-    if name=="" or string.len(name)>90 then prepStatus:SetText("请填写不超过 30 个汉字的方案名称");return end
+    local length=gearNameLength(name)
+    if not length or length<1 or length>12 then
+        outfitNameError:SetText("|cffff5555请输入 1–12 个字的套装名称|r")
+        return
+    end
+    outfitNameError:SetText("")
     local slots=equipSnapshot()
     if not next(slots) then prepStatus:SetText("当前未读取到已穿戴装备，不能保存");return end
     local sets=outfitSets(e)
     local function commit()
         sets[name]={name=name,slots=slots}
         outfitNameModal:Hide()
-        prepStatus:SetText("已保存装备方案："..name)
         outfitPage=1;refreshOutfits()
     end
     if sets[name] and confirmModal then
@@ -647,7 +676,7 @@ button(outfitNameModal,"取消",233,-142,125,25,function() outfitNameModal:Hide(
 outfitNameModal:Hide()
 button(prep,"保存穿戴为 Boss 套装",466,-372,197,25,function()
     local e=currentPrepEntry();if not e then prepStatus:SetText("请先保存 Boss");return end
-    outfitNameInput:SetText("");outfitNameModal:Show();outfitNameInput:SetFocus()
+    outfitNameInput:SetText("");outfitNameError:SetText("");outfitNameModal:Show();outfitNameInput:SetFocus()
 end)
 for i=1,3 do
     local index=i
