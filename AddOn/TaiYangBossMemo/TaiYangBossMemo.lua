@@ -43,15 +43,18 @@ title:SetPoint("TOP",frame,"TOP",0,-21);title:SetText("太阳神殿 · Boss 战�
 local subtitle=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
 subtitle:SetPoint("TOP",title,"BOTTOM",0,-8)
 subtitle:SetText("Boss 备忘编辑与提醒设置｜使用 /bossmemo 呼出")
+local editorLabels={}
 local function textAt(y,text)
     local x=frame:CreateFontString(nil,"OVERLAY","GameFontNormal")
     x:SetPoint("TOPLEFT",frame,"TOPLEFT",28,y);x:SetText(text)
+    table.insert(editorLabels,x)
     return x
 end
 textAt(-73,"NPC Entry（数字）")
 textAt(-122,"Boss 名称（备注用）")
 textAt(-170,"战前提醒内容")
 textAt(-263,"死亡后提醒内容")
+local editorBackdrops={}
 local function edit(y,h)
     local box=CreateFrame("EditBox",nil,frame)
     box:SetWidth(448);box:SetHeight(h)
@@ -64,6 +67,7 @@ local function edit(y,h)
     backdrop:SetPoint("BOTTOMRIGHT",box,"BOTTOMRIGHT",5,-5)
     backdrop:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=13,insets={left=3,right=3,top=3,bottom=3}})
     backdrop:SetBackdropColor(0.07,0.07,0.09,0.95)
+    table.insert(editorBackdrops,backdrop)
     box:SetScript("OnEscapePressed",function() this:ClearFocus() end)
     return box
 end
@@ -108,10 +112,11 @@ local function save()
     lastEntry=n
     setStatus("已保存 Entry "..n.."。同一 Entry 的实例会共用备注。")
 end
+local editorButtons={}
 local function button(label,x,fn)
     local b=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     b:SetWidth(109);b:SetHeight(25);b:SetPoint("BOTTOMLEFT",frame,"BOTTOMLEFT",x,22)
-    b:SetText(label);b:SetScript("OnClick",fn);return b
+    b:SetText(label);b:SetScript("OnClick",fn);table.insert(editorButtons,b);return b
 end
 button("读取当前目标",25,currentTarget)
 button("加载 Entry",140,function() loadEntry(entryNumber()) end)
@@ -319,17 +324,24 @@ local function syncSettings()
     info:SetText("当前追踪："..countTracks().."/"..MAX_TRACKS.."    查询间隔："..d.pollInterval.." 秒")
 end
 local editorWidgets={entryBox,nameBox,beforeBox,afterBox}
-local editorLabels={} -- editor is already created and remains unchanged
 local settingsOpen=false
 local function showSettings(open)
     settingsOpen=open
     if open then
         syncSettings()
         settings:Show()
-        entryBox:Hide();nameBox:Hide();beforeBox:Hide();afterBox:Hide()
+        for i=1,table.getn(editorWidgets) do editorWidgets[i]:Hide() end
+        for i=1,table.getn(editorLabels) do editorLabels[i]:Hide() end
+        for i=1,table.getn(editorBackdrops) do editorBackdrops[i]:Hide() end
+        for i=1,table.getn(editorButtons) do editorButtons[i]:Hide() end
+        status:Hide()
     else
         settings:Hide()
-        entryBox:Show();nameBox:Show();beforeBox:Show();afterBox:Show()
+        for i=1,table.getn(editorWidgets) do editorWidgets[i]:Show() end
+        for i=1,table.getn(editorLabels) do editorLabels[i]:Show() end
+        for i=1,table.getn(editorBackdrops) do editorBackdrops[i]:Show() end
+        for i=1,table.getn(editorButtons) do editorButtons[i]:Show() end
+        status:Show()
     end
 end
 local tabButton=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
