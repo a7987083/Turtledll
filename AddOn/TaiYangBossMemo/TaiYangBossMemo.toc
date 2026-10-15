@@ -1,6 +1,7 @@
 ## Interface: 11200
 ## Title: 太阳神殿 Boss 备忘录
-## Notes: 仅战前提醒（需要 TaiYangShenDian.dll M4）
-## Version: 0.9.1
-## SavedVariables: TaiYangBossMemoDB
+## Notes: 仅战前提醒；可选 FuBar 入口（需要 TaiYangShenDian.dll M4）
+## Version: 0.9.2
+## SavedVariables: TaiYangBossMemoDB, TaiYangBossMemoFuDB
 TaiYangBossMemo.lua
+TaiYangBossMemo_FuBar.lua
