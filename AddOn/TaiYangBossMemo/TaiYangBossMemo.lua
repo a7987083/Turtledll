@@ -13,7 +13,7 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function()
     end
 end
 local function TaiYangBossMemoInitialize()
--- TaiYangBossMemo 0.9.1 | WoW 1.12.1 / Lua 5.0
+-- TaiYangBossMemo 0.9.2 | WoW 1.12.1 / Lua 5.0
 -- SavedVariables: legacy {notes={ [entry]={name,before,after} }} stays valid.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
 local db,shown=nil,{}
@@ -604,6 +604,23 @@ local tab=button(frame,"提醒设置",610,-48,116,27,function()
     else settings:Hide();manager:Show();status:Show();refreshList();this:SetText("提醒设置") end
 end)
 frame:Hide()
+-- Optional FuBar bridge: exposed only after the main UI has initialized.
+TaiYangBossMemo_ToggleSettings=function()
+    if frame:IsShown() then TaiYangBossMemoClose() else TaiYangBossMemoOpen() end
+end
+TaiYangBossMemo_GetFuBarSummary=function()
+    local d=getDB()
+    local enabledCount, allCount=0,0
+    for _,n in pairs(d.notes) do
+        if type(n)=="table" then
+            allCount=allCount+1
+            if n.enabled~=false and trim(n.before)~="" then enabledCount=enabledCount+1 end
+        end
+    end
+    return d.enabled and "开启" or "关闭", enabledCount,allCount,
+        d.before==true,d.realertAfterReset==true,
+        type(TaiYangShenDian)=="function",d.pollInterval
+end
 TaiYangBossMemoOpen=function()
     frame:Show()
     if openSettings then syncSettings() else refreshList() end
