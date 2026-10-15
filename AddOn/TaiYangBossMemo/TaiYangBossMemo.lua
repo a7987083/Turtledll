@@ -998,3 +998,81 @@ local enabledAll=toggle(-49,"开启自动提醒","enabled")
 local beforeAll=toggle(-90,"开启战前提醒","before")
 local resetAll=toggle(-134,"Boss 重置后重新选中即可提醒（需确认脱战）","realertAfterReset")
 label(settings,10,-185,"② Boss 状态检测间隔（秒）","GameFontNormalLarge")
+local rates={0.2,0.5,1,2}
+local rateButtons={}
+local function updateRate()
+    local d=getDB()
+    for i=1,4 do
+        rateButtons[i]:SetText((d.pollInterval==rates[i] and "● " or "○ ")..tostring(rates[i]).." 秒")
+    end
+end
+for i=1,4 do
+    local n=rates[i]
+    rateButtons[i]=button(settings,"",10+(i-1)*112,-210,103,27,function()
+        getDB().pollInterval=n;timer=0;updateRate()
+    end)
+end
+label(settings,10,-260,"③ 提醒自动关闭","GameFontNormalLarge")
+local durationButtons={}
+local durations={0,5,10,15}
+local function updateDuration()
+    local current=getDB().alertSeconds
+    for i=1,4 do
+        durationButtons[i]:SetText((current==durations[i] and "● " or "○ ")..(durations[i]==0 and "不自动关闭" or durations[i].." 秒"))
+    end
+end
+for i=1,4 do
+    local n=durations[i]
+    durationButtons[i]=button(settings,"",10+(i-1)*112,-284,103,25,function()
+        getDB().alertSeconds=n;updateDuration()
+    end)
+end
+label(settings,10,-320,"④ 运行状态（拖动提醒卡片会自动保存位置）","GameFontNormalLarge")
+local trackerInfo=label(settings,10,-344,"","GameFontHighlight",600)
+
+local function syncSettings()
+    local d=getDB()
+    enabledAll:SetChecked(d.enabled)
+    beforeAll:SetChecked(d.before)
+    resetAll:SetChecked(d.realertAfterReset)
+    updateRate()
+    updateDuration()
+    trackerInfo:SetText("DLL："..(type(TaiYangShenDian)=="function" and "已检测" or "未检测到").."   战斗状态缓存 "..countTracks().." 个 Boss")
+end
+local settingsTicker=CreateFrame("Frame",nil,settings)
+local settingsElapsed=0
+settingsTicker:SetScript("OnUpdate",function() settingsElapsed=settingsElapsed+arg1;if settingsElapsed>=1 then settingsElapsed=0;syncSettings() end end)
+local openSettings=false
+local tab=button(frame,"提醒设置",610,-48,116,27,function()
+    openSettings=not openSettings
+    if openSettings then prepOpen=false;prep:Hide();frame:SetHeight(510);manager:Hide();settings:Show();status:Hide();syncSettings();this:SetText("返回 Boss 管理")
+    else settings:Hide();manager:Show();status:Show();refreshList();this:SetText("提醒设置") end
+end)
+frame:Hide()
+-- Optional FuBar bridge: exposed only after the main UI has initialized.
+TaiYangBossMemo_ToggleSettings=function()
+    if frame:IsShown() then TaiYangBossMemoClose() else TaiYangBossMemoOpen() end
+end
+TaiYangBossMemo_GetFuBarSummary=function()
+    local d=getDB()
+    local enabledCount, allCount=0,0
+    for key,boss in pairs(getAccount().bosses) do
+        if type(boss)=="table" then
+            allCount=allCount+1
+            local n=d.notes[key]
+            if type(n)=="table" and n.enabled~=false and trim(n.before)~="" then enabledCount=enabledCount+1 end
+        end
+    end
+    return d.enabled and "开启" or "关闭", enabledCount,allCount,
+        d.before==true,d.realertAfterReset==true,
+        type(TaiYangShenDian)=="function",d.pollInterval
+end
+TaiYangBossMemoOpen=function()
+    frame:Show()
+    if openSettings then syncSettings() else refreshList() end
+end
+end
+local initOK,initErr=pcall(TaiYangBossMemoInitialize)
+if not initOK and DEFAULT_CHAT_FRAME then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffff5555[BossMemo] 初始化失败: "..tostring(initErr).."|r")
+end
