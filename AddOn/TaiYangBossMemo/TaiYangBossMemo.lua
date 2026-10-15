@@ -13,7 +13,7 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function()
     end
 end
 local function TaiYangBossMemoInitialize()
--- TaiYangBossMemo 1.0.1 | WoW 1.12.1 / Lua 5.0
+-- TaiYangBossMemo 1.0.9 | WoW 1.12.1 / Lua 5.0
 -- Shared account boss catalog + character-specific notes; old account DB is migration-only.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
 local db,shown=nil,{}
@@ -281,14 +281,14 @@ local dirty=false
 local suppressDirty=false
 local savedSnapshot=nil
 -- Forward declarations must precede closures in Lua 5.0.
-local nameBox,entryBox,beforeBox,enabledCheck
+local nameBox,entryBox,zoneBox,beforeBox,enabledCheck
 local dirtyLabel
 local function updateDirtyLabel()
     if dirtyLabel then dirtyLabel:SetText(dirty and "● 未保存" or "已保存") end
 end
 local function editorSnapshot()
     if not entryBox then return nil end
-    return {entry=entryBox:GetText() or "",name=nameBox:GetText() or "",before=beforeBox:GetText() or "",enabled=enabledCheck:GetChecked() and true or false}
+    return {entry=entryBox:GetText() or "",name=nameBox:GetText() or "",zone=zoneBox:GetText() or "",before=beforeBox:GetText() or "",enabled=enabledCheck:GetChecked() and true or false}
 end
 local function captureSnapshot()
     savedSnapshot=editorSnapshot();dirty=false;updateDirtyLabel()
@@ -296,7 +296,7 @@ end
 local function recomputeDirty()
     if suppressDirty or not savedSnapshot then return end
     local current=editorSnapshot()
-    dirty=current.entry~=savedSnapshot.entry or current.name~=savedSnapshot.name or current.before~=savedSnapshot.before or current.enabled~=savedSnapshot.enabled
+    dirty=current.entry~=savedSnapshot.entry or current.name~=savedSnapshot.name or current.zone~=savedSnapshot.zone or current.before~=savedSnapshot.before or current.enabled~=savedSnapshot.enabled
     updateDirtyLabel()
 end
 local confirmModal=nil
@@ -309,7 +309,7 @@ local function entryList()
         if type(item)=="table" then
             local n=tonumber(key)
             local name=item.name or ""
-            if n and (filter=="" or string.find(string.lower(name),filter,1,true) or string.find(key,filter,1,true)) then
+            if n and (filter=="" or string.find(string.lower(name),filter,1,true) or string.find(string.lower(item.zone or ""),filter,1,true) or string.find(key,filter,1,true)) then
                 table.insert(entries,n)
             end
         end
@@ -325,7 +325,15 @@ local function askDiscard(action)
     if not dirty then action();return end
     if confirmModal then confirmModal("未保存的修改", "当前 Boss 的备注尚未保存。放弃修改并继续吗？", action) end
 end
-local function loadEntry(n,name)
+local function currentZoneName()
+    if type(GetRealZoneText)=="function" then
+        local zone=trim(GetRealZoneText() or "")
+        if zone~="" then return zone end
+    end
+    if type(GetZoneText)=="function" then return trim(GetZoneText() or "") end
+    return ""
+end
+local function loadEntry(n,name,detectedZone)
     if not n or n<1 then setStatus("请输入有效的 NPC Entry。");return end
     suppressDirty=true
     selectedEntry=n
@@ -333,6 +341,7 @@ local function loadEntry(n,name)
     local boss=bossInfo(n)
     entryBox:SetText(tostring(n))
     nameBox:SetText(boss and boss.name or name or "")
+    zoneBox:SetText(boss and boss.zone or detectedZone or "")
     beforeBox:SetText(item and item.before or "")
     enabledCheck:SetChecked(not item or item.enabled~=false)
     lastEntry=n
@@ -381,9 +390,12 @@ label(manager,236,-40,"NPC Entry")
 entryBox=edit(manager,235,-61,120,22)
 label(manager,375,-40,"Boss 名称")
 nameBox=edit(manager,375,-61,325,22)
-label(manager,235,-106,"战前提醒")
-beforeBox=edit(manager,235,-130,465,120)
-for _,box in ipairs({entryBox,nameBox,beforeBox}) do
+label(manager,235,-102,"所在地图")
+zoneBox=edit(manager,235,-121,358,22)
+button(manager,"读取当前地图",603,-121,100,24,function() zoneBox:SetText(currentZoneName()) end)
+label(manager,235,-156,"战前提醒")
+beforeBox=edit(manager,235,-177,465,96)
+for _,box in ipairs({entryBox,nameBox,zoneBox,beforeBox}) do
     box:SetScript("OnTextChanged",markDirty)
 end
 enabledCheck=CreateFrame("CheckButton",nil,manager,"UICheckButtonTemplate")
@@ -400,7 +412,7 @@ local function entryNumber()
 end
 local function target()
     local id=api("Unit.Identity","target")
-    if id and id.ok and id.data and id.data.entry then askDiscard(function() loadEntry(id.data.entry,id.data.name) end)
+    if id and id.ok and id.data and id.data.entry then askDiscard(function() loadEntry(id.data.entry,id.data.name,currentZoneName()) end)
     else setStatus("当前没有可读取的目标，可手动输入 NPC Entry。") end
 end
 local function save()
@@ -409,7 +421,7 @@ local function save()
     local oldItem=anyNote(n)
     -- Preserve legacy after text in SavedVariables for backward compatibility; never display or trigger it.
     local item={before=trim(beforeBox:GetText()),after=oldItem and oldItem.after or "",enabled=enabledCheck:GetChecked() and true or false,consumables=oldItem and oldItem.consumables or {},gear=oldItem and oldItem.gear or nil,gearSets=oldItem and oldItem.gearSets or nil,gearMigrated=oldItem and oldItem.gearMigrated or nil}
-    getAccount().bosses[tostring(n)]={name=trim(nameBox:GetText())}
+    getAccount().bosses[tostring(n)]={name=trim(nameBox:GetText()),zone=trim(zoneBox:GetText())}
     getDB().notes[tostring(n)]=item
     -- Editing Entry is treated as add/save-as; never silently delete prior ID.
     loadEntry(n)
@@ -427,7 +439,7 @@ local function deleteEntry()
             getDB().notes[tostring(n)]=nil
             suppressDirty=true
             selectedEntry=nil;lastEntry=nil
-    entryBox:SetText("");nameBox:SetText("");beforeBox:SetText("")
+    entryBox:SetText("");nameBox:SetText("");zoneBox:SetText("");beforeBox:SetText("")
     enabledCheck:SetChecked(true);refreshList()
             suppressDirty=false;captureSnapshot()
             setStatus("已删除 Boss Entry "..n.."，不影响其他记录。")
@@ -450,7 +462,7 @@ button(manager,"删除",473,-363,107,27,deleteEntry)
 button(manager,"新建",593,-363,110,27,function()
     askDiscard(function()
     suppressDirty=true
-    selectedEntry=nil;entryBox:SetText("");nameBox:SetText("")
+    selectedEntry=nil;entryBox:SetText("");nameBox:SetText("");zoneBox:SetText("")
     beforeBox:SetText("");enabledCheck:SetChecked(true)
     setStatus("新建 Boss：输入 Entry、名称和提醒后保存。");refreshList()
     suppressDirty=false;captureSnapshot()
