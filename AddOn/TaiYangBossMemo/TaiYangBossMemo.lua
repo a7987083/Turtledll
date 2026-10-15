@@ -13,7 +13,7 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function()
     end
 end
 local function TaiYangBossMemoInitialize()
--- TaiYangBossMemo 1.1.2 | WoW 1.12.1 / Lua 5.0
+-- TaiYangBossMemo 1.1.3 | WoW 1.12.1 / Lua 5.0
 -- Shared account boss catalog + character-specific notes; old account DB is migration-only.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
 local db,shown=nil,{}
@@ -150,23 +150,36 @@ local function itemID(link)
     local id=string.gsub(link,"^.-item:(%d+):?.*$","%1")
     return tonumber(id)
 end
-local function inventory()
+local EQUIP_SLOTS={1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19}
+-- One bag traversal produces consumable totals and optionally exact equipment links.
+-- Snapshot lifetime is one refresh only; a click-to-equip never uses stale bag slots.
+local function inventory(includeEquipment)
     local result={}
-    if type(GetContainerNumSlots)~="function" or type(GetContainerItemLink)~="function" then return result end
+    local available=includeEquipment and {} or nil
+    if includeEquipment and type(GetInventoryItemLink)=="function" then
+        for i=1,table.getn(EQUIP_SLOTS) do
+            local link=GetInventoryItemLink("player",EQUIP_SLOTS[i])
+            if link then available[link]=(available[link] or 0)+1 end
+        end
+    end
+    if type(GetContainerNumSlots)~="function" or type(GetContainerItemLink)~="function" then return result,available end
     for bag=0,4 do
         for slot=1,(GetContainerNumSlots(bag) or 0) do
             local link=GetContainerItemLink(bag,slot)
-            local id=itemID(link)
-            if id then
-                local _,count=nil,1
-                if type(GetContainerItemInfo)=="function" then _,count=GetContainerItemInfo(bag,slot) end
-                count=count or 1
-                if not result[id] then result[id]={id=id,count=0,link=link,bag=bag,slot=slot} end
-                result[id].count=result[id].count+count
+            if link then
+                if available then available[link]=(available[link] or 0)+1 end
+                local id=itemID(link)
+                if id then
+                    local _,count=nil,1
+                    if type(GetContainerItemInfo)=="function" then _,count=GetContainerItemInfo(bag,slot) end
+                    count=count or 1
+                    if not result[id] then result[id]={id=id,count=0,link=link,bag=bag,slot=slot} end
+                    result[id].count=result[id].count+count
+                end
             end
         end
     end
-    return result
+    return result,available
 end
 local function itemName(id)
     if type(GetItemInfo)=="function" then
@@ -183,7 +196,6 @@ local function prepData(entry)
 end
 -- Gear snapshots store exact inventory item links (enchant/instance identity) per slot.
 -- Never auto-equip on targeting; a physical user click is required.
-local EQUIP_SLOTS={1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19}
 local function equipSnapshot()
     local outfit={}
     if type(GetInventoryItemLink)~="function" then return outfit end
@@ -221,23 +233,20 @@ local function sortedSetNames(entry)
     table.sort(names)
     return names
 end
-local function setMissing(slots)
-    local missing=0
+-- Consume an equipment multiset per outfit without duplicating the entire bag snapshot.
+local function setMissing(slots,available)
     if type(slots)~="table" then return 0 end
-    local available={}
-    -- Count *instances*, not merely ItemID, and never read the bank.
-    for i=1,table.getn(EQUIP_SLOTS) do
-        local link=GetInventoryItemLink("player",EQUIP_SLOTS[i])
-        if link then available[link]=(available[link] or 0)+1 end
+    if not available then
+        local _,fresh=inventory(true)
+        available=fresh or {}
     end
-    for bag=0,4 do for slot=1,(GetContainerNumSlots(bag) or 0) do
-        local link=GetContainerItemLink(bag,slot)
-        if link then available[link]=(available[link] or 0)+1 end
-    end end
+    local used={}
+    local missing=0
     for i=1,table.getn(EQUIP_SLOTS) do
         local wanted=slots[tostring(EQUIP_SLOTS[i])]
         if wanted then
-            if (available[wanted] or 0)>0 then available[wanted]=available[wanted]-1
+            local taken=used[wanted] or 0
+            if taken<(available[wanted] or 0) then used[wanted]=taken+1
             else missing=missing+1 end
         end
     end
@@ -1039,16 +1048,20 @@ local alertSetPage=1
 local alertSetButtons={}
 local alertSetPager=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
 alertSetPager:SetPoint("BOTTOM",popup,"BOTTOM",0,64)
-local function refreshAlertOutfits()
+local function refreshAlertOutfits(available)
     local names=activeAlert and sortedSetNames(activeAlert.entry) or {}
+    if table.getn(names)>0 and not available then
+        local _,fresh=inventory(true)
+        available=fresh or {}
+    end
+    local sets=activeAlert and outfitSets(activeAlert.entry) or nil
     local total=math.max(1,math.ceil(table.getn(names)/4))
     if alertSetPage>total then alertSetPage=total end
     for i=1,4 do
         local name=names[(alertSetPage-1)*4+i]
         local b=alertSetButtons[i]
         if name then
-            local sets=outfitSets(activeAlert.entry)
-            local missing=setMissing(sets[name].slots)
+            local missing=setMissing(sets[name].slots,available)
             b:SetText(name..(missing==0 and "（装备齐全）" or "（缺失"..missing.."件）"))
             b.setName=name
             b:Show()
@@ -1140,7 +1153,7 @@ refreshActiveStock=function()
     groupLists[1]={};groupLists[2]={}
     if not activeAlert then return end
     local d=prepData(activeAlert.entry)
-    local stock=inventory()
+    local stock,available=inventory(true)
     if d then for key,need in pairs(d.consumables) do
         local id=tonumber(key)
         if id and type(need)=="number" then
@@ -1158,7 +1171,7 @@ refreshActiveStock=function()
     end)
     table.sort(groupLists[2],function(a,b) return a.id<b.id end)
     redrawStock()
-    if activeAlert then refreshAlertOutfits() end
+    if activeAlert then refreshAlertOutfits(available) end
 end
 pClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
 alertClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
