@@ -156,7 +156,7 @@ refreshList=function()
 end
 searchBox:SetScript("OnTextChanged",function() page=1;refreshList() end)
 button(manager,"上一页",10,-335,93,25,function() if page>1 then page=page-1;refreshList() end end)
-button(manager,"下一页",116,-335,93,25,function() page=page+1;refreshList() end end)
+button(manager,"下一页",116,-335,93,25,function() page=page+1;refreshList() end)
 local pageInfo=label(manager,12,-369,"可通过名称或 Entry 搜索","GameFontHighlightSmall",200)
 label(manager,235,-7,"Boss 详情 / 编辑","GameFontNormalLarge")
 label(manager,236,-40,"NPC Entry")
