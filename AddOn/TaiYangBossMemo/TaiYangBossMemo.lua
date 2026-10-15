@@ -13,8 +13,8 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function()
     end
 end
 local function TaiYangBossMemoInitialize()
--- TaiYangBossMemo 0.9.2 | WoW 1.12.1 / Lua 5.0
--- SavedVariables: legacy {notes={ [entry]={name,before,after} }} stays valid.
+-- TaiYangBossMemo 0.9.3 | WoW 1.12.1 / Lua 5.0
+-- Shared account boss catalog + character-specific notes; old account DB is migration-only.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
 local db,shown=nil,{}
 local tracks,lastEntry={},nil
@@ -22,10 +22,53 @@ local timer=0
 local pendingNewSelection=false
 local function say(s) if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(PREFIX..s) end end
 local function trim(s) return string.gsub(s or "","^%s*(.-)%s*$","%1") end
+-- The old account table remains read-only as a migration source.
+-- Shared boss directory is account-wide; reminders and preferences belong to each character.
+local function getAccount()
+    if type(TaiYangBossMemoAccountDB)~="table" then TaiYangBossMemoAccountDB={} end
+    local a=TaiYangBossMemoAccountDB
+    if type(a.bosses)~="table" then a.bosses={} end
+    return a
+end
 local function getDB()
-    if type(TaiYangBossMemoDB)~="table" then TaiYangBossMemoDB={} end
-    db=TaiYangBossMemoDB
+    local account=getAccount()
+    if type(TaiYangBossMemoCharDB)~="table" then TaiYangBossMemoCharDB={} end
+    db=TaiYangBossMemoCharDB
     if type(db.notes)~="table" then db.notes={} end
+    -- Migrate once for each character. Never remove or modify legacy account data.
+    -- Import catalog independently so newly created characters can see all bosses.
+    if not account.catalogMigrated then
+        local legacy=TaiYangBossMemoDB
+        if type(legacy)=="table" and type(legacy.notes)=="table" then
+            for key,item in pairs(legacy.notes) do
+                if tonumber(key) and type(item)=="table" and account.bosses[tostring(key)]==nil then
+                    account.bosses[tostring(key)]={name=item.name or ""}
+                end
+            end
+        end
+        account.catalogMigrated=true
+    end
+    if not db.migratedFromAccount then
+        local legacy=TaiYangBossMemoDB
+        if type(legacy)=="table" then
+            if type(legacy.notes)=="table" then
+                for key,item in pairs(legacy.notes) do
+                    if tonumber(key) and type(item)=="table" and db.notes[tostring(key)]==nil then
+                        db.notes[tostring(key)]={before=item.before or "",after=item.after or "",enabled=item.enabled~=false}
+                    end
+                end
+            end
+            local fields={"enabled","before","realertAfterReset","alertSeconds","pollInterval"}
+            for i=1,table.getn(fields) do
+                local f=fields[i]
+                if db[f]==nil then db[f]=legacy[f] end
+            end
+            if db.alertPos==nil and type(legacy.alertPos)=="table" then
+                db.alertPos={x=legacy.alertPos.x,y=legacy.alertPos.y}
+            end
+        end
+        db.migratedFromAccount=true
+    end
     if db.enabled==nil then db.enabled=true end
     if db.before==nil then db.before=true end
     if db.realertAfterReset==nil then db.realertAfterReset=false end
@@ -33,6 +76,10 @@ local function getDB()
     if type(db.alertPos)~="table" then db.alertPos=nil end
     if db.pollInterval~=0.2 and db.pollInterval~=0.5 and db.pollInterval~=1 and db.pollInterval~=2 then db.pollInterval=0.5 end
     return db
+end
+local function bossInfo(entry)
+    local boss=getAccount().bosses[tostring(entry)]
+    if type(boss)=="table" then return boss end
 end
 local function api(cmd,a,b)
     if type(TaiYangShenDian)~="function" then return nil end
@@ -42,14 +89,15 @@ local function api(cmd,a,b)
     else ok,val=pcall(TaiYangShenDian,cmd) end
     if ok and type(val)=="table" then return val end
 end
-local function note(entry)
-    local item=getDB().notes[tostring(entry)]
-    if type(item)~="table" or item.enabled==false then return nil end
-    return item
-end
 local function anyNote(entry)
     local item=getDB().notes[tostring(entry)]
     if type(item)=="table" then return item end
+end
+local function note(entry)
+    local boss=bossInfo(entry)
+    local item=anyNote(entry)
+    if not boss or not item or item.enabled==false then return nil end
+    return {name=boss.name,before=item.before,after=item.after,enabled=item.enabled}
 end
 local frame=CreateFrame("Frame","TaiYangBossMemoWindow",UIParent)
 frame:SetWidth(755);frame:SetHeight(510)
@@ -63,7 +111,7 @@ local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
 title:SetPoint("TOP",frame,"TOP",0,-20);title:SetText("太阳神殿 · Boss 备忘录")
 local subtitle=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
 subtitle:SetPoint("TOP",title,"BOTTOM",0,-7)
-subtitle:SetText("Boss 管理 / 提醒设置    ·    仅 /bossmemo 用于呼出")
+subtitle:SetText("Boss 名单账号共享 · 备注及提醒设置角色独立")
 
 local manager=CreateFrame("Frame",nil,frame)
 manager:SetPoint("TOPLEFT",frame,"TOPLEFT",20,-69)
@@ -128,7 +176,7 @@ local PAGE_SIZE=7
 local function entryList()
     local entries={}
     local filter=string.lower(trim(searchBox:GetText() or ""))
-    for key,item in pairs(getDB().notes) do
+    for key,item in pairs(getAccount().bosses) do
         if type(item)=="table" then
             local n=tonumber(key)
             local name=item.name or ""
@@ -153,8 +201,9 @@ local function loadEntry(n,name)
     suppressDirty=true
     selectedEntry=n
     local item=anyNote(n)
+    local boss=bossInfo(n)
     entryBox:SetText(tostring(n))
-    nameBox:SetText(item and item.name or name or "")
+    nameBox:SetText(boss and boss.name or name or "")
     beforeBox:SetText(item and item.before or "")
     enabledCheck:SetChecked(not item or item.enabled~=false)
     lastEntry=n
@@ -182,8 +231,9 @@ refreshList=function()
         local b=listRows[i]
         if n then
             local item=anyNote(n)
+            local boss=bossInfo(n)
             local tag=(item and item.enabled==false) and "[停用] " or ""
-            local name=(item and item.name and item.name~="") and item.name or ("Entry "..n)
+            local name=(boss and boss.name and boss.name~="") and boss.name or ("Entry "..n)
             b:SetText((selectedEntry==n and "▶ " or "")..tag..name)
             b:Show()
         else b:Hide() end
@@ -229,7 +279,8 @@ local function save()
     if not n then setStatus("保存失败：NPC Entry 必须是正整数。");return end
     local oldItem=anyNote(n)
     -- Preserve legacy after text in SavedVariables for backward compatibility; never display or trigger it.
-    local item={name=trim(nameBox:GetText()),before=trim(beforeBox:GetText()),after=oldItem and oldItem.after or "",enabled=enabledCheck:GetChecked() and true or false}
+    local item={before=trim(beforeBox:GetText()),after=oldItem and oldItem.after or "",enabled=enabledCheck:GetChecked() and true or false}
+    getAccount().bosses[tostring(n)]={name=trim(nameBox:GetText())}
     getDB().notes[tostring(n)]=item
     -- Editing Entry is treated as add/save-as; never silently delete prior ID.
     loadEntry(n)
@@ -238,11 +289,12 @@ local function save()
 end
 local function deleteEntry()
     local n=entryNumber()
-    if not n or not anyNote(n) then setStatus("当前 Entry 尚未保存，无法删除。");return end
+    if not n or not bossInfo(n) then setStatus("当前 Entry 尚未保存，无法删除。");return end
     if confirmModal then
-        local item=anyNote(n)
+        local item=bossInfo(n)
         local displayName=(item and item.name and item.name~="") and item.name or ("Entry "..n)
         confirmModal("确认删除 Boss", "删除「"..displayName.."」(Entry "..n..")？此操作无法撤销。",function()
+            getAccount().bosses[tostring(n)]=nil
             getDB().notes[tostring(n)]=nil
             suppressDirty=true
             selectedEntry=nil;lastEntry=nil
@@ -611,10 +663,11 @@ end
 TaiYangBossMemo_GetFuBarSummary=function()
     local d=getDB()
     local enabledCount, allCount=0,0
-    for _,n in pairs(d.notes) do
-        if type(n)=="table" then
+    for key,boss in pairs(getAccount().bosses) do
+        if type(boss)=="table" then
             allCount=allCount+1
-            if n.enabled~=false and trim(n.before)~="" then enabledCount=enabledCount+1 end
+            local n=d.notes[key]
+            if type(n)=="table" and n.enabled~=false and trim(n.before)~="" then enabledCount=enabledCount+1 end
         end
     end
     return d.enabled and "开启" or "关闭", enabledCount,allCount,
