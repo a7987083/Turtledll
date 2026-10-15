@@ -13,7 +13,7 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function()
     end
 end
 local function TaiYangBossMemoInitialize()
--- TaiYangBossMemo 0.9.3 | WoW 1.12.1 / Lua 5.0
+-- TaiYangBossMemo 1.0.0 | WoW 1.12.1 / Lua 5.0
 -- Shared account boss catalog + character-specific notes; old account DB is migration-only.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
 local db,shown=nil,{}
@@ -99,6 +99,87 @@ local function note(entry)
     if not boss or not item or item.enabled==false then return nil end
     return {name=boss.name,before=item.before,after=item.after,enabled=item.enabled}
 end
+-- Inventory helpers: scan backpack and four bags only; bank is intentionally excluded.
+local function itemID(link)
+    if type(link)~="string" then return nil end
+    local id=string.gsub(link,"^.-item:(%d+):?.*$","%1")
+    return tonumber(id)
+end
+local function inventory()
+    local result={}
+    if type(GetContainerNumSlots)~="function" or type(GetContainerItemLink)~="function" then return result end
+    for bag=0,4 do
+        for slot=1,(GetContainerNumSlots(bag) or 0) do
+            local link=GetContainerItemLink(bag,slot)
+            local id=itemID(link)
+            if id then
+                local _,count=nil,1
+                if type(GetContainerItemInfo)=="function" then _,count=GetContainerItemInfo(bag,slot) end
+                count=count or 1
+                if not result[id] then result[id]={id=id,count=0,link=link,bag=bag,slot=slot} end
+                result[id].count=result[id].count+count
+            end
+        end
+    end
+    return result
+end
+local function itemName(id)
+    if type(GetItemInfo)=="function" then
+        local name=GetItemInfo(id)
+        if type(name)=="string" then return name end
+    end
+    return "物品 #"..tostring(id)
+end
+local function prepData(entry)
+    local item=anyNote(entry)
+    if not item then return nil end
+    if type(item.consumables)~="table" then item.consumables={} end
+    return item
+end
+-- Gear snapshots store exact inventory item links (enchant/instance identity) per slot.
+-- Never auto-equip on targeting; a physical user click is required.
+local EQUIP_SLOTS={1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19}
+local function equipSnapshot()
+    local outfit={}
+    if type(GetInventoryItemLink)~="function" then return outfit end
+    for i=1,table.getn(EQUIP_SLOTS) do
+        local slot=EQUIP_SLOTS[i]
+        local link=GetInventoryItemLink("player",slot)
+        if link then outfit[tostring(slot)]=link end
+    end
+    return outfit
+end
+local function equipOutfit(entry)
+    local d=prepData(entry)
+    if not d or type(d.gear)~="table" then return false,"此 Boss 尚未保存装备方案" end
+    if type(UnitAffectingCombat)=="function" and UnitAffectingCombat("player") then return false,"战斗中禁止执行整套换装" end
+    if type(CursorHasItem)=="function" and CursorHasItem() then return false,"请先清空鼠标上的物品" end
+    if type(PickupContainerItem)~="function" or type(PickupInventoryItem)~="function" then return false,"当前客户端缺少换装接口" end
+    local changed,missing=0,0
+    for i=1,table.getn(EQUIP_SLOTS) do
+        local slot=EQUIP_SLOTS[i]
+        local wanted=d.gear[tostring(slot)]
+        if wanted and GetInventoryItemLink("player",slot)~=wanted then
+            local location=nil
+            for bag=0,4 do
+                for n=1,(GetContainerNumSlots(bag) or 0) do
+                    if GetContainerItemLink(bag,n)==wanted then location={bag,n};break end
+                end
+                if location then break end
+            end
+            if location then
+                PickupContainerItem(location[1],location[2])
+                PickupInventoryItem(slot)
+                -- Inventory swaps should return the replaced item into the source slot.
+                if type(CursorHasItem)=="function" and CursorHasItem() then
+                    PickupContainerItem(location[1],location[2])
+                end
+                if GetInventoryItemLink("player",slot)==wanted then changed=changed+1 else missing=missing+1 end
+            else missing=missing+1 end
+        end
+    end
+    return true,"换装检查：已完成 "..changed.." 槽，未完成 "..missing.." 槽（缺少装备或受槽位限制）"
+end
 local frame=CreateFrame("Frame","TaiYangBossMemoWindow",UIParent)
 frame:SetWidth(755);frame:SetHeight(510)
 frame:SetPoint("CENTER",UIParent,"CENTER",0,30)
@@ -108,7 +189,7 @@ frame:SetMovable(true);frame:EnableMouse(true);frame:RegisterForDrag("LeftButton
 frame:SetScript("OnDragStart",function() this:StartMoving() end)
 frame:SetScript("OnDragStop",function() this:StopMovingOrSizing() end)
 local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
-title:SetPoint("TOP",frame,"TOP",0,-20);title:SetText("太阳神殿 · Boss 备忘录")
+title:SetPoint("TOP",frame,"TOP",0,-20);title:SetText("太阳神殿 · Boss 战前准备")
 local subtitle=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
 subtitle:SetPoint("TOP",title,"BOTTOM",0,-7)
 subtitle:SetText("Boss 名单账号共享 · 备注及提醒设置角色独立")
@@ -279,7 +360,7 @@ local function save()
     if not n then setStatus("保存失败：NPC Entry 必须是正整数。");return end
     local oldItem=anyNote(n)
     -- Preserve legacy after text in SavedVariables for backward compatibility; never display or trigger it.
-    local item={before=trim(beforeBox:GetText()),after=oldItem and oldItem.after or "",enabled=enabledCheck:GetChecked() and true or false}
+    local item={before=trim(beforeBox:GetText()),after=oldItem and oldItem.after or "",enabled=enabledCheck:GetChecked() and true or false,consumables=oldItem and oldItem.consumables or {},gear=oldItem and oldItem.gear or nil}
     getAccount().bosses[tostring(n)]={name=trim(nameBox:GetText())}
     getDB().notes[tostring(n)]=item
     -- Editing Entry is treated as add/save-as; never silently delete prior ID.
@@ -318,6 +399,179 @@ button(manager,"新建",548,-365,80,25,function()
     end)
 end)
 refreshList()
+-- Preparation configuration page. Changes are character-local and saved immediately.
+local prep=CreateFrame("Frame",nil,frame)
+prep:SetPoint("TOPLEFT",frame,"TOPLEFT",27,-72)
+prep:SetWidth(700);prep:SetHeight(385);prep:Hide()
+local prepTitle=label(prep,8,-5,"战前准备 · 当前角色","GameFontNormalLarge",620)
+local prepHint=label(prep,8,-34,"先在 Boss 管理中保存 Entry，再配置药剂和装备。","GameFontHighlightSmall",670)
+local prepStock=label(prep,8,-65,"","GameFontHighlightSmall",680)
+local prepRows={}
+local prepTab="bag"
+local prepPage=1
+local prepFilter=""
+local prepSelected=nil
+local prepSelectCount=1
+local prepSearch=edit(prep,9,-93,230,22)
+local prepRefresh
+prepSearch:SetScript("OnTextChanged",function() prepFilter=trim(this:GetText() or "");prepPage=1;if prepRefresh then prepRefresh() end end)
+local prepModeLabel=label(prep,255,-97,"", "GameFontHighlightSmall",440)
+local prepStatus=label(prep,10,-344,"选择物品后按添加，修改数量会立即保存。","GameFontHighlightSmall",670)
+local function currentPrepEntry()
+    local id=tonumber(trim(entryBox:GetText() or ""))
+    if id and bossInfo(id) then return id end
+end
+local function appendConsumable(entry,id,quantity)
+    local d=prepData(entry)
+    if not d or not id or id<1 or id>4294967295 then return false end
+    local key=tostring(id)
+    d.consumables[key]=math.max(1,math.min(999,math.floor(quantity or 1)))
+    return true
+end
+local function sortedConsumables(entry)
+    local d=prepData(entry)
+    local arr={}
+    if d then for id,need in pairs(d.consumables) do if tonumber(id) then table.insert(arr,tonumber(id)) end end end
+    table.sort(arr)
+    return arr
+end
+prepRefresh=function()
+    local entry=currentPrepEntry()
+    local stock=inventory()
+    prepTitle:SetText("战前准备 · "..(entry and (bossInfo(entry).name or "Boss") or "未保存 Boss"))
+    if not entry then prepStock:SetText("请先保存 Boss，再返回配置战前准备。") else
+        local ids=sortedConsumables(entry)
+        local t={}
+        for i=1,math.min(4,table.getn(ids)) do
+            local id=ids[i];local need=prepData(entry).consumables[tostring(id)]
+            table.insert(t,itemName(id).." "..(stock[id] and stock[id].count or 0).."/"..need)
+        end
+        prepStock:SetText("当前药剂（前四项）："..(table.getn(t)>0 and table.concat(t,"  |  ") or "未配置"))
+    end
+    local candidates={}
+    if prepTab=="bag" then
+        for id,v in pairs(stock) do
+            local name=itemName(id)
+            -- Bag tab lists only usable consumables based on ItemType (fallback: named potions).
+            local usable=false
+            if type(GetItemInfo)=="function" then
+                local _,_,_,_,_,typ=GetItemInfo(id)
+                usable=(typ=="消耗品" or typ=="Consumable")
+            end
+            if usable and (prepFilter=="" or string.find(string.lower(name),string.lower(prepFilter),1,true) or string.find(tostring(id),prepFilter,1,true)) then table.insert(candidates,id) end
+        end
+    elseif prepTab=="favorite" then
+        local fav=getDB().favorites or {}
+        for id,v in pairs(fav) do if v then table.insert(candidates,tonumber(id)) end end
+    elseif prepTab=="copy" then
+        -- A Boss selection is represented by its entry; copy all configured consumables.
+        for key,b in pairs(getAccount().bosses) do
+            local n=tonumber(key)
+            if n and n~=entry and prepData(n) and next(prepData(n).consumables) then table.insert(candidates,n) end
+        end
+    else
+        if prepFilter~="" then
+            local id=tonumber(prepFilter)
+            if id and id>0 and id<=4294967295 then table.insert(candidates,id) end
+            -- Search cached inventory names without assuming a global item database.
+            for candidateId,v in pairs(stock) do
+                if candidateId~=id and string.find(string.lower(itemName(candidateId)),string.lower(prepFilter),1,true) then table.insert(candidates,candidateId) end
+            end
+        end
+    end
+    table.sort(candidates)
+    local total=table.getn(candidates)
+    if prepPage>math.max(1,math.ceil(total/5)) then prepPage=1 end
+    for i=1,5 do
+        local row=prepRows[i]
+        local id=candidates[(prepPage-1)*5+i]
+        if id then
+            row.id=id
+            row.text:SetText(prepTab=="copy" and ((bossInfo(id).name or "Boss").." ["..id.."]") or (itemName(id).." ["..id.."]  x"..(stock[id] and stock[id].count or 0)))
+            row.frame:Show()
+        else row.id=nil;row.frame:Hide() end
+    end
+    prepModeLabel:SetText("模式："..({bag="背包消耗品",search="搜索（物品名称/ItemID）",favorite="常用收藏",copy="复制其他 Boss 药剂"})[prepTab].." · "..total.." 项")
+end
+local function prepSetMode(mode)
+    prepTab=mode;prepPage=1;prepFilter="";prepSearch:SetText("")
+    prepRefresh()
+end
+local modeLabels={{"背包","bag"},{"搜索","search"},{"收藏","favorite"},{"复制","copy"}}
+for i=1,4 do
+    local m=modeLabels[i]
+    button(prep,m[1],9+(i-1)*103,-124,96,24,function() prepSetMode(m[2]) end)
+end
+for i=1,5 do
+    local y=-157-(i-1)*32
+    local rowFrame=CreateFrame("Frame",nil,prep)
+    rowFrame:SetPoint("TOPLEFT",prep,"TOPLEFT",8,y);rowFrame:SetWidth(670);rowFrame:SetHeight(29)
+    local txt=label(rowFrame,4,-6,"","GameFontHighlightSmall",420)
+    local ri={frame=rowFrame,text=txt,id=nil}
+    prepRows[i]=ri
+    button(rowFrame,"添加/复制",470,-1,99,24,function()
+        local entry=currentPrepEntry();local id=ri.id
+        if not entry or not id then prepStatus:SetText("请先保存 Boss");return end
+        if prepTab=="copy" then
+            local from=prepData(id)
+            if from then for k,qty in pairs(from.consumables) do appendConsumable(entry,tonumber(k),qty) end end
+        else appendConsumable(entry,id,prepSelectCount) end
+        prepStatus:SetText("药剂已保存到当前角色的 Boss 配置。")
+        prepRefresh()
+    end)
+    button(rowFrame,"★",581,-1,36,24,function()
+        if not ri.id or prepTab=="copy" then return end
+        local d=getDB();if type(d.favorites)~="table" then d.favorites={} end
+        local key=tostring(ri.id)
+        d.favorites[key]=not d.favorites[key]
+        prepRefresh()
+    end)
+end
+local qty=label(prep,423,-129,"添加数量：1","GameFontHighlightSmall",115)
+button(prep,"−",534,-124,28,24,function() prepSelectCount=math.max(1,prepSelectCount-1);qty:SetText("添加数量："..prepSelectCount) end)
+button(prep,"+",570,-124,28,24,function() prepSelectCount=math.min(99,prepSelectCount+1);qty:SetText("添加数量："..prepSelectCount) end)
+button(prep,"上页",8,-320,68,23,function() prepPage=math.max(1,prepPage-1);prepRefresh() end)
+button(prep,"下页",83,-320,68,23,function() prepPage=prepPage+1;prepRefresh() end)
+button(prep,"已配药剂",160,-320,92,23,function()
+    local e=currentPrepEntry();if not e then return end
+    local ids=sortedConsumables(e)
+    if table.getn(ids)==0 then prepStatus:SetText("此 Boss 尚未配置药剂");return end
+    -- Cycle through saved medicines and allow quantity adjustment/removal via prompt buttons.
+    prepSelected=(prepSelected or 0)+1;if prepSelected>table.getn(ids) then prepSelected=1 end
+    local id=ids[prepSelected];prepStatus:SetText("当前："..itemName(id).." · 需要 "..prepData(e).consumables[tostring(id)].."，用右侧 ± 或移除修改。")
+end)
+local function chosenDrug()
+    local e=currentPrepEntry();if not e then return end
+    local ids=sortedConsumables(e)
+    if not prepSelected or prepSelected>table.getn(ids) then return end
+    return e,ids[prepSelected]
+end
+button(prep,"需求−",263,-320,70,23,function()
+    local e,id=chosenDrug();if not id then return end
+    appendConsumable(e,id,math.max(1,prepData(e).consumables[tostring(id)]-1));prepRefresh()
+end)
+button(prep,"需求+",341,-320,70,23,function()
+    local e,id=chosenDrug();if not id then return end
+    appendConsumable(e,id,prepData(e).consumables[tostring(id)]+1);prepRefresh()
+end)
+button(prep,"移除药剂",419,-320,85,23,function()
+    local e,id=chosenDrug();if not id then return end
+    prepData(e).consumables[tostring(id)]=nil;prepSelected=nil;prepRefresh()
+end)
+button(prep,"保存当前装备",517,-320,122,23,function()
+    local e=currentPrepEntry();if not e then prepStatus:SetText("请先保存 Boss") return end
+    prepData(e).gear=equipSnapshot()
+    prepStatus:SetText("已为当前角色的这个 Boss 保存当前穿戴装备。")
+end)
+local prepOpen=false
+local function togglePrep()
+    prepOpen=not prepOpen
+    if prepOpen then
+        manager:Hide();status:Hide();prep:Show();prepRefresh()
+    else prep:Hide();manager:Show();status:Show();refreshList() end
+end
+button(manager,"准备",638,-365,65,25,function() togglePrep() end)
+button(prep,"返回管理",607,-5,90,25,function() togglePrep() end)
 -- Shared confirmation window for delete, unsaved navigation and closing.
 local modal=CreateFrame("Frame",nil,UIParent)
 modal:SetWidth(420);modal:SetHeight(185)
@@ -350,7 +604,7 @@ closeButton:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-5,-5)
 closeButton:SetScript("OnClick",safeClose)
 -- WoW 1.12 Escape handling is left to the default UI; the X button checks unsaved data.
 local popup=CreateFrame("Frame","TaiYangBossMemoAlert",UIParent)
-popup:SetWidth(328);popup:SetHeight(176)
+popup:SetWidth(360);popup:SetHeight(245)
 local function restoreAlertPosition()
     popup:ClearAllPoints()
     local p=getDB().alertPos
@@ -375,13 +629,19 @@ end)
 local pTitle=popup:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
 pTitle:SetPoint("TOP",popup,"TOP",0,-25)
 local pBody=popup:CreateFontString(nil,"OVERLAY","GameFontHighlight")
-pBody:SetPoint("CENTER",popup,"CENTER",0,-3);pBody:SetWidth(282);pBody:SetHeight(90)
+pBody:SetPoint("TOP",popup,"TOP",0,-52);pBody:SetWidth(315);pBody:SetHeight(58)
 pBody:SetJustifyH("CENTER");pBody:SetJustifyV("MIDDLE")
 local pClose=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
 pClose:SetWidth(92);pClose:SetHeight(22)
-pClose:SetPoint("BOTTOM",popup,"BOTTOM",0,16);pClose:SetText("知道了")
-local queue={}
+pClose:SetPoint("BOTTOM",popup,"BOTTOM",0,14);pClose:SetText("知道了")
 local activeAlert=nil
+local pStock=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+pStock:SetPoint("TOP",popup,"TOP",0,-120);pStock:SetWidth(330);pStock:SetJustifyH("CENTER")
+local gearButton=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
+gearButton:SetWidth(170);gearButton:SetHeight(24);gearButton:SetPoint("BOTTOM",popup,"BOTTOM",0,44)
+gearButton:SetText("一键换装")
+gearButton:SetScript("OnClick",function() if activeAlert then local ok,message=equipOutfit(activeAlert.entry);say(message);end end)
+local queue={}
 local alertRemaining=0
 local QUEUE_LIMIT=20
 local alertClose=CreateFrame("Button",nil,popup,"UIPanelCloseButton")
@@ -396,7 +656,7 @@ local function displayNext()
     while table.getn(queue)>0 do
         local first=queue[1]
         local current=note(first.entry)
-        if getDB().enabled and getDB().before and current and trim(current.before)~="" then break end
+        if getDB().enabled and getDB().before and current and (trim(current.before)~="" or (prepData(first.entry) and next(prepData(first.entry).consumables)) or (prepData(first.entry) and type(prepData(first.entry).gear)=="table")) then break end
         table.remove(queue,1)
         queueKeys[first.key]=nil
         if shown[first.guid] then shown[first.guid].before=nil end
@@ -415,6 +675,26 @@ local function displayNext()
     queueKeys[activeAlert.key]=nil
     pTitle:SetText(activeAlert.title..(table.getn(queue)>0 and " (待处理 "..table.getn(queue)..")" or ""))
     pBody:SetText(activeAlert.body)
+    local d=prepData(activeAlert.entry)
+    local medicines={};local stock=inventory()
+    if d then
+        for id,need in pairs(d.consumables) do
+            local number=tonumber(id)
+            if number then
+                local have=stock[number] and stock[number].count or 0
+                table.insert(medicines,itemName(number).." "..have.."/"..need..(have<need and " !" or ""))
+            end
+        end
+    end
+    table.sort(medicines)
+    local count=table.getn(medicines)
+    if count>3 then
+        local missing=count-3
+        while table.getn(medicines)>3 do table.remove(medicines) end
+        table.insert(medicines,"另有 "..missing.." 种药剂，请打开管理页查看")
+    end
+    pStock:SetText(table.concat(medicines,"\n"))
+    if d and type(d.gear)=="table" and next(d.gear) then gearButton:Show() else gearButton:Hide() end
     popup:Show()
 end
 pClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
@@ -434,7 +714,7 @@ local function alert(entry,guid)
     local item=note(entry)
     if not item then return false end
     local content=trim(item.before)
-    if content=="" then return false end
+    if content=="" and not (prepData(entry) and (next(prepData(entry).consumables) or type(prepData(entry).gear)=="table")) then return false end
     local track=tracks[guid]
     local cycle=track and track.attempt or 1
     local key=tostring(guid)..":"..tostring(cycle)..":before"
@@ -652,7 +932,7 @@ settingsTicker:SetScript("OnUpdate",function() settingsElapsed=settingsElapsed+a
 local openSettings=false
 local tab=button(frame,"提醒设置",610,-48,116,27,function()
     openSettings=not openSettings
-    if openSettings then manager:Hide();settings:Show();status:Hide();syncSettings();this:SetText("返回 Boss 管理")
+    if openSettings then prepOpen=false;prep:Hide();manager:Hide();settings:Show();status:Hide();syncSettings();this:SetText("返回 Boss 管理")
     else settings:Hide();manager:Show();status:Show();refreshList();this:SetText("提醒设置") end
 end)
 frame:Hide()
