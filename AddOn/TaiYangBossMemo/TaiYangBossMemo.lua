@@ -31,7 +31,7 @@ local function note(entry)
 end
 
 local frame=CreateFrame("Frame","TaiYangBossMemoWindow",UIParent)
-frame:SetWidth(510);frame:SetHeight(465)
+frame:SetWidth(510);frame:SetHeight(490)
 frame:SetPoint("CENTER",UIParent,"CENTER",0,35)
 frame:SetFrameStrata("DIALOG")
 frame:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=11,top=12,bottom=11}})
@@ -42,7 +42,7 @@ local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
 title:SetPoint("TOP",frame,"TOP",0,-21);title:SetText("太阳神殿 · Boss 战斗备忘录")
 local subtitle=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
 subtitle:SetPoint("TOP",title,"BOTTOM",0,-8)
-subtitle:SetText("以 NPC Entry 保存｜持续追踪 GUID｜间隔通过 /bossmemo interval 设置")
+subtitle:SetText("Boss 备忘编辑与提醒设置｜使用 /bossmemo 呼出")
 local function textAt(y,text)
     local x=frame:CreateFontString(nil,"OVERLAY","GameFontNormal")
     x:SetPoint("TOPLEFT",frame,"TOPLEFT",28,y);x:SetText(text)
@@ -266,22 +266,86 @@ driver:SetScript("OnUpdate",function()
     timer=timer+arg1
     if timer>=d.pollInterval then timer=0;observe() end
 end)
+-- All configuration is managed from the GUI; the slash command only opens it.
+local settings=CreateFrame("Frame",nil,frame)
+settings:SetPoint("TOPLEFT",frame,"TOPLEFT",18,-64)
+settings:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",-18,57)
+settings:Hide()
+local settingsTitle=settings:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
+settingsTitle:SetPoint("TOPLEFT",settings,"TOPLEFT",14,-12)
+settingsTitle:SetText("提醒设置")
+local function toggle(y,label,key)
+    local c=CreateFrame("CheckButton",nil,settings,"UICheckButtonTemplate")
+    c:SetPoint("TOPLEFT",settings,"TOPLEFT",8,y)
+    local t=settings:CreateFontString(nil,"OVERLAY","GameFontHighlight")
+    t:SetPoint("LEFT",c,"RIGHT",4,0);t:SetText(label)
+    c:SetScript("OnClick",function() getDB()[key]=this:GetChecked() and true or false end)
+    return c
+end
+local enableCheck=toggle(-48,"开启自动提醒","enabled")
+local beforeCheck=toggle(-86,"开启战前提醒","before")
+local afterCheck=toggle(-124,"开启死亡后提醒","after")
+local rateTitle=settings:CreateFontString(nil,"OVERLAY","GameFontNormal")
+rateTitle:SetPoint("TOPLEFT",settings,"TOPLEFT",15,-177)
+rateTitle:SetText("GUID 查询间隔（秒）")
+local rates={0.2,0.5,1,2}
+local rateBtns={}
+local function syncRateButtons()
+    for i=1,4 do
+        local b=rateBtns[i]
+        if b then b:SetText((getDB().pollInterval==rates[i] and "● " or "○ ")..tostring(rates[i]).." 秒") end
+    end
+end
+for i=1,4 do
+    local n=rates[i]
+    local b=CreateFrame("Button",nil,settings,"UIPanelButtonTemplate")
+    b:SetWidth(96);b:SetHeight(26);b:SetPoint("TOPLEFT",settings,"TOPLEFT",13+(i-1)*108,-201)
+    b:SetScript("OnClick",function() getDB().pollInterval=n;timer=0;syncRateButtons() end)
+    rateBtns[i]=b
+end
+local info=settings:CreateFontString(nil,"OVERLAY","GameFontHighlight")
+info:SetPoint("TOPLEFT",settings,"TOPLEFT",15,-260)
+info:SetWidth(440);info:SetJustifyH("LEFT")
+local detail=settings:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+detail:SetPoint("TOPLEFT",info,"BOTTOMLEFT",0,-14)
+detail:SetWidth(440);detail:SetJustifyH("LEFT")
+detail:SetText("最多追踪 16 个 GUID；不可见不等于死亡。关闭客户端后清空临时追踪，备忘录与设置保留。")
+local function syncSettings()
+    local d=getDB()
+    enableCheck:SetChecked(d.enabled)
+    beforeCheck:SetChecked(d.before)
+    afterCheck:SetChecked(d.after)
+    syncRateButtons()
+    info:SetText("当前追踪："..countTracks().."/"..MAX_TRACKS.."    查询间隔："..d.pollInterval.." 秒")
+end
+local editorWidgets={entryBox,nameBox,beforeBox,afterBox}
+local editorLabels={} -- editor is already created and remains unchanged
+local settingsOpen=false
+local function showSettings(open)
+    settingsOpen=open
+    if open then
+        syncSettings()
+        settings:Show()
+        entryBox:Hide();nameBox:Hide();beforeBox:Hide();afterBox:Hide()
+    else
+        settings:Hide()
+        entryBox:Show();nameBox:Show();beforeBox:Show();afterBox:Show()
+    end
+end
+local tabButton=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+tabButton:SetWidth(110);tabButton:SetHeight(25)
+tabButton:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-24,-53)
+tabButton:SetText("提醒设置")
+tabButton:SetScript("OnClick",function()
+    showSettings(not settingsOpen)
+    if settingsOpen then this:SetText("返回编辑") else this:SetText("提醒设置") end
+end)
+frame:SetScript("OnShow",function() if settingsOpen then syncSettings() end end)
 frame:Hide()
 SLASH_TAIYANGBOSSMEMO1="/bossmemo"
-SlashCmdList["TAIYANGBOSSMEMO"]=function(msg)
-    local cmd=trim(msg)
-    if cmd=="off" then getDB().enabled=false;say("自动提醒已关闭。");return end
-    if cmd=="status" then say("追踪 "..countTracks().."/"..MAX_TRACKS.." 个 Boss，查询间隔 "..getDB().pollInterval.." 秒。");return end
-    local newInterval=string.gsub(cmd,"^interval%s+(%S+)$","%1")
-    if newInterval~=cmd then
-        local n=tonumber(newInterval)
-        if n==0.2 or n==0.5 or n==1 or n==2 then
-            getDB().pollInterval=n;timer=0;say("查询间隔已设为 "..n.." 秒。")
-        else say("可设置的间隔：0.2、0.5、1、2 秒。例如 /bossmemo interval 1") end
-        return
-    end
-    if cmd=="on" then getDB().enabled=true;say("自动提醒已开启。");return end
-    if cmd=="target" then frame:Show();currentTarget();return end
+SlashCmdList["TAIYANGBOSSMEMO"]=function()
     frame:Show()
-    if lastEntry then loadEntry(lastEntry) else currentTarget() end
+    if settingsOpen then syncSettings()
+    elseif lastEntry then loadEntry(lastEntry)
+    else currentTarget() end
 end
