@@ -13,7 +13,7 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function()
     end
 end
 local function TaiYangBossMemoInitialize()
--- TaiYangBossMemo 1.0.0 | WoW 1.12.1 / Lua 5.0
+-- TaiYangBossMemo 1.0.1 | WoW 1.12.1 / Lua 5.0
 -- Shared account boss catalog + character-specific notes; old account DB is migration-only.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
 local db,shown=nil,{}
@@ -21,7 +21,7 @@ local tracks,lastEntry={},nil
 local timer=0
 local pendingNewSelection=false
 local function say(s) if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(PREFIX..s) end end
-local function trim(s) return string.gsub(s or "","^%s*(.-)%s*$","%1") end
+local function trim(s) local result=string.gsub(s or "","^%s*(.-)%s*$","%1");return result end
 -- The old account table remains read-only as a migration source.
 -- Shared boss directory is account-wide; reminders and preferences belong to each character.
 local function getAccount()
