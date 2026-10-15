@@ -334,15 +334,15 @@ entryBox=edit(manager,235,-61,120,22)
 label(manager,375,-40,"Boss 名称")
 nameBox=edit(manager,375,-61,325,22)
 label(manager,235,-106,"战前提醒")
-beforeBox=edit(manager,235,-130,465,150)
+beforeBox=edit(manager,235,-130,465,120)
 for _,box in ipairs({entryBox,nameBox,beforeBox}) do
     box:SetScript("OnTextChanged",markDirty)
 end
 enabledCheck=CreateFrame("CheckButton",nil,manager,"UICheckButtonTemplate")
-enabledCheck:SetPoint("TOPLEFT",manager,"TOPLEFT",234,-319)
-label(manager,269,-328,"启用此 Boss 的提醒","GameFontHighlight")
+enabledCheck:SetPoint("TOPLEFT",manager,"TOPLEFT",234,-285)
+label(manager,269,-294,"启用此 Boss 的提醒","GameFontHighlight")
 enabledCheck:SetScript("OnClick",markDirty)
-dirtyLabel=label(manager,590,-328,"已保存","GameFontHighlightSmall",114)
+dirtyLabel=label(manager,590,-294,"已保存","GameFontHighlightSmall",114)
 local function entryNumber()
     local value=trim(entryBox:GetText())
     if not string.find(value,"^%d+$") then return nil end
@@ -386,9 +386,9 @@ local function deleteEntry()
         end)
     end
 end
-button(manager,"读取当前目标",235,-365,112,25,target)
-button(manager,"保存 Boss",354,-365,100,25,save)
-button(manager,"启用/停用",460,-365,100,25,function()
+button(manager,"读取当前目标",235,-325,147,27,target)
+button(manager,"保存 Boss",395,-325,145,27,save)
+button(manager,"启用/停用",553,-325,150,27,function()
     local e=entryNumber();if not e or not bossInfo(e) then setStatus("请先选择已保存的 Boss") return end
     local data=getDB().notes[tostring(e)]
     if type(data)~="table" then data={before="",enabled=true};getDB().notes[tostring(e)]=data end
@@ -398,8 +398,8 @@ button(manager,"启用/停用",460,-365,100,25,function()
     setStatus(data.enabled and "此角色已启用该 Boss 提醒" or "此角色已停用该 Boss 提醒")
     refreshList()
 end)
-button(manager,"删除",462,-365,80,25,deleteEntry)
-button(manager,"新建",548,-365,80,25,function()
+button(manager,"删除",473,-363,107,27,deleteEntry)
+button(manager,"新建",593,-363,110,27,function()
     askDiscard(function()
     suppressDirty=true
     selectedEntry=nil;entryBox:SetText("");nameBox:SetText("")
@@ -423,7 +423,7 @@ local prepPage=1
 local prepFilter=""
 local prepSearch=edit(prep,9,-75,215,22)
 local prepModeLabel=label(prep,240,-79,"","GameFontHighlightSmall",435)
-local prepStatus=label(prep,10,-476,"填写每行需求数量后点添加/修改；数量为当前角色独立保存。","GameFontHighlightSmall",670)
+local prepStatus=label(prep,10,-476,"","GameFontHighlightSmall",670)
 local prepRefresh
 local function currentPrepEntry()
     local id=tonumber(trim(entryBox:GetText() or ""))
@@ -587,7 +587,7 @@ local function togglePrep()
         frame:SetHeight(640);manager:Hide();status:Hide();prep:Show();prepRefresh()
     else prep:Hide();frame:SetHeight(510);manager:Show();status:Show();refreshList() end
 end
-button(manager,"药剂与装备",610,-365,93,25,function() togglePrep() end)
+button(manager,"药剂与装备",235,-363,225,27,function() togglePrep() end)
 button(prep,"返回管理",607,-5,90,25,function() togglePrep() end)
 -- Shared confirmation window for delete, unsaved navigation and closing.
 local modal=CreateFrame("Frame",nil,UIParent)
@@ -656,6 +656,7 @@ local pStock=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
 pStock:SetPoint("TOP",popup,"TOP",0,-113);pStock:SetWidth(345);pStock:SetJustifyH("LEFT")
 local stockRows={}
 local stockItems={}
+local stockProductCount=0
 local stockOffset=0
 local redrawStock
 for i=1,7 do
@@ -665,7 +666,7 @@ for i=1,7 do
     local icon=row:CreateTexture(nil,"ARTWORK")
     icon:SetPoint("LEFT",row,"LEFT",0,0);icon:SetWidth(22);icon:SetHeight(22)
     local name=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    name:SetPoint("LEFT",row,"LEFT",27,0);name:SetWidth(225);name:SetJustifyH("LEFT")
+    name:SetPoint("LEFT",row,"LEFT",27,0);name:SetWidth(215);name:SetJustifyH("LEFT")
     local number=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     number:SetPoint("RIGHT",row,"RIGHT",0,0);number:SetWidth(78);number:SetJustifyH("RIGHT")
     stockRows[i]={frame=row,icon=icon,name=name,count=number}
@@ -687,15 +688,24 @@ redrawStock=function()
         local r=stockRows[i]
         local item=stockItems[i+stockOffset]
         if item then
-            r.name:SetText(item.name)
-            r.count:SetText(item.have.." / "..item.need)
-            if item.have>=item.need then r.count:SetTextColor(0.15,1,0.2) else r.count:SetTextColor(1,0.25,0.25) end
-            r.icon:SetTexture(item.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+            if item.header then
+                r.icon:SetTexture(nil)
+                r.name:SetText(item.title)
+                r.name:SetTextColor(item.short and 1 or 0.2,item.short and 0.35 or 1,item.short and 0.35 or 0.25)
+                r.count:SetText("")
+            else
+                r.name:SetText(item.name)
+                if item.have<item.need then r.name:SetTextColor(1,0.75,0.75)
+                else r.name:SetTextColor(1,1,1) end
+                r.count:SetText(item.have.." / "..item.need)
+                if item.have>=item.need then r.count:SetTextColor(0.15,1,0.2) else r.count:SetTextColor(1,0.25,0.25) end
+                r.icon:SetTexture(item.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+            end
             r.frame:Show()
         else r.frame:Hide() end
     end
     if n>7 then stockPage:SetText("物品 "..(stockOffset+1).." - "..math.min(n,stockOffset+7).." / "..n.." · 滚轮或下方翻页")
-    else stockPage:SetText("共 "..n.." 种物品") end
+    else stockPage:SetText("共 "..stockProductCount.." 种物品") end
 end
 popup:EnableMouseWheel(true)
 popup:SetScript("OnMouseWheel",function() stockOffset=math.max(0,math.min(math.max(0,table.getn(stockItems)-7),stockOffset-arg1));redrawStock() end)
@@ -766,11 +776,28 @@ refreshActiveStock=function()
         local am=a.have<a.need and 1 or 0
         local bm=b.have<b.need and 1 or 0
         if am~=bm then return am>bm end
+        if am==1 then
+            local da=a.need-a.have
+            local db=b.need-b.have
+            if da~=db then return da>db end
+        end
         return a.id<b.id
     end)
     local short=0
-    for i=1,table.getn(stockItems) do if stockItems[i].have<stockItems[i].need then short=short+1 end end
-    pStock:SetText("战前物品 · "..table.getn(stockItems).." 种"..(short>0 and " · |cffff5555不足 "..short.." 种|r" or " · |cff40ff40全部达标|r"))
+    local n=table.getn(stockItems)
+    for i=1,n do if stockItems[i].have<stockItems[i].need then short=short+1 end end
+    stockProductCount=n
+    local grouped={}
+    if short>0 then
+        table.insert(grouped,{header=true,title="不足物品（"..short.."）",short=true})
+        for i=1,n do if stockItems[i].have<stockItems[i].need then table.insert(grouped,stockItems[i]) end end
+    end
+    if n-short>0 then
+        table.insert(grouped,{header=true,title="已达标物品（"..(n-short).."）",short=false})
+        for i=1,n do if stockItems[i].have>=stockItems[i].need then table.insert(grouped,stockItems[i]) end end
+    end
+    stockItems=grouped
+    pStock:SetText("战前物品 · "..n.." 种"..(short>0 and " · |cffff5555不足 "..short.." 种|r" or " · |cff40ff40全部达标|r"))
     redrawStock()
 end
 pClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
