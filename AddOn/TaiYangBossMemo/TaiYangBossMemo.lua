@@ -329,9 +329,13 @@ local savedSnapshot=nil
 local nameBox,entryBox,zoneBox,beforeBox,enabledCheck
 local zoneManual=false
 local zoneProgrammatic=false
-local dirtyLabel
+local dirtyLabel,prepButton
 local function updateDirtyLabel()
     if dirtyLabel then dirtyLabel:SetText(dirty and "● 未保存" or "已保存") end
+    if prepButton then
+        local ready=selectedEntry and bossInfo(selectedEntry) and not dirty
+        if ready then prepButton:Enable() else prepButton:Disable() end
+    end
 end
 local function editorSnapshot()
     if not entryBox then return nil end
@@ -851,12 +855,17 @@ end
 
 local prepOpen=false
 local function togglePrep()
+    if not prepOpen and (not selectedEntry or not bossInfo(selectedEntry) or dirty) then
+        setStatus("请先保存当前 Boss，再配置药剂与装备。")
+        return
+    end
     prepOpen=not prepOpen
     if prepOpen then
         frame:SetHeight(715);manager:Hide();status:Hide();prep:Show();prepRefresh();refreshOutfits()
     else prep:Hide();frame:SetHeight(510);manager:Show();status:Show();refreshList() end
 end
-button(manager,"药剂与装备",235,-363,225,27,function() togglePrep() end)
+prepButton=button(manager,"药剂与装备",235,-363,225,27,function() togglePrep() end)
+updateDirtyLabel()
 button(prep,"返回管理",607,-5,90,25,function() togglePrep() end)
 -- Shared confirmation window for delete, unsaved navigation and closing.
 local modal=CreateFrame("Frame",nil,UIParent)
