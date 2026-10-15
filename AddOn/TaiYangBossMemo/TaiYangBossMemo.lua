@@ -621,7 +621,7 @@ closeButton:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-5,-5)
 closeButton:SetScript("OnClick",safeClose)
 -- WoW 1.12 Escape handling is left to the default UI; the X button checks unsaved data.
 local popup=CreateFrame("Frame","TaiYangBossMemoAlert",UIParent)
-popup:SetWidth(548);popup:SetHeight(410)
+popup:SetWidth(548);popup:SetHeight(344)
 local function restoreAlertPosition()
     popup:ClearAllPoints()
     local p=getDB().alertPos
@@ -652,32 +652,44 @@ local pClose=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
 pClose:SetWidth(92);pClose:SetHeight(22)
 pClose:SetPoint("BOTTOM",popup,"BOTTOM",0,14);pClose:SetText("知道了")
 local activeAlert=nil
-local pStock=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-pStock:SetPoint("TOPLEFT",popup,"TOPLEFT",25,-113);pStock:SetWidth(490);pStock:SetJustifyH("LEFT")
-local stockRows={}
-local stockItems={}
-local stockProductCount=0
-local stockOffset=0
-local redrawStock
-local prevStock,nextStock
--- Two compact columns, four rows each; the footer is outside this bounded region.
-local STOCK_PAGE_SIZE=8
-for i=1,STOCK_PAGE_SIZE do
-    local col=math.floor((i-1)/4)
-    local line=(i-1)%4
-    local row=CreateFrame("Frame",nil,popup)
-    row:SetPoint("TOPLEFT",popup,"TOPLEFT",25+col*257,-151-line*35)
-    row:SetWidth(242);row:SetHeight(29)
-    local icon=row:CreateTexture(nil,"ARTWORK")
-    icon:SetPoint("LEFT",row,"LEFT",0,0);icon:SetWidth(23);icon:SetHeight(23)
-    local name=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    name:SetPoint("LEFT",row,"LEFT",29,0);name:SetWidth(148);name:SetJustifyH("LEFT")
-    local number=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    number:SetPoint("RIGHT",row,"RIGHT",0,0);number:SetWidth(65);number:SetJustifyH("RIGHT")
-    stockRows[i]={frame=row,icon=icon,name=name,count=number}
+-- Two independent item columns: missing on the left, sufficient on the right.
+-- Content starts immediately below the title when there is no pre-fight note.
+local groupLists={{}, {}}
+local groupOffsets={0,0}
+local groupTitles={}
+local groupRows={{},{}}
+local groupNav={}
+local GROUP_SIZE=5
+local columnTop=-95
+local function buildColumn(col)
+    local baseX=(col==1) and 26 or 287
+    local heading=popup:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    heading:SetPoint("TOPLEFT",popup,"TOPLEFT",baseX,-95)
+    heading:SetWidth(235);heading:SetJustifyH("LEFT")
+    groupTitles[col]=heading
+    for i=1,GROUP_SIZE do
+        local row=CreateFrame("Frame",nil,popup)
+        row:SetPoint("TOPLEFT",popup,"TOPLEFT",baseX,-124-(i-1)*31)
+        row:SetWidth(234);row:SetHeight(27)
+        local icon=row:CreateTexture(nil,"ARTWORK")
+        icon:SetPoint("LEFT",row,"LEFT",0,0);icon:SetWidth(23);icon:SetHeight(23)
+        local name=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+        name:SetPoint("LEFT",row,"LEFT",29,0);name:SetWidth(137);name:SetJustifyH("LEFT")
+        local number=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+        number:SetPoint("RIGHT",row,"RIGHT",0,0);number:SetWidth(65);number:SetJustifyH("RIGHT")
+        groupRows[col][i]={frame=row,icon=icon,name=name,count=number}
+    end
+    local prev=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
+    prev:SetWidth(54);prev:SetHeight(20)
+    prev:SetPoint("BOTTOMLEFT",popup,"BOTTOMLEFT",baseX,73);prev:SetText("上翻")
+    local page=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    page:SetPoint("BOTTOMLEFT",popup,"BOTTOMLEFT",baseX+65,77);page:SetWidth(102);page:SetJustifyH("CENTER")
+    local nextBtn=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
+    nextBtn:SetWidth(54);nextBtn:SetHeight(20)
+    nextBtn:SetPoint("BOTTOMLEFT",popup,"BOTTOMLEFT",baseX+180,73);nextBtn:SetText("下翻")
+    groupNav[col]={prev=prev,nextBtn=nextBtn,page=page}
 end
-local stockPage=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-stockPage:SetPoint("BOTTOM",popup,"BOTTOM",0,88)
+buildColumn(1);buildColumn(2)
 local function itemTexture(id,stock)
     if stock[id] and stock[id].bag and type(GetContainerItemInfo)=="function" then
         local texture=GetContainerItemInfo(stock[id].bag,stock[id].slot)
@@ -686,46 +698,61 @@ local function itemTexture(id,stock)
     if type(GetItemIcon)=="function" then return GetItemIcon(id) end
     if type(GetItemInfo)=="function" then local _,_,_,_,_,_,_,_,texture=GetItemInfo(id);return texture end
 end
-redrawStock=function()
-    local n=table.getn(stockItems)
-    if stockOffset>math.max(0,n-STOCK_PAGE_SIZE) then stockOffset=math.max(0,n-STOCK_PAGE_SIZE) end
-    for i=1,STOCK_PAGE_SIZE do
-        local r=stockRows[i]
-        local item=stockItems[i+stockOffset]
-        if item then
-            if item.header then
-                r.icon:SetTexture(nil)
-                r.name:SetText(item.title)
-                r.name:SetTextColor(item.short and 1 or 0.2,item.short and 0.35 or 1,item.short and 0.35 or 0.25)
-                r.count:SetText("")
-            else
-                r.name:SetText(item.name)
-                if item.have<item.need then r.name:SetTextColor(1,0.75,0.75)
-                else r.name:SetTextColor(1,1,1) end
-                r.count:SetText(item.have.." / "..item.need)
-                if item.have>=item.need then r.count:SetTextColor(0.15,1,0.2) else r.count:SetTextColor(1,0.25,0.25) end
+local function redrawStock()
+    for col=1,2 do
+        local list=groupLists[col]
+        local count=table.getn(list)
+        local maxOffset=math.max(0,count-GROUP_SIZE)
+        if groupOffsets[col]>maxOffset then groupOffsets[col]=maxOffset end
+        local title=groupTitles[col]
+        title:ClearAllPoints()
+        title:SetPoint("TOPLEFT",popup,"TOPLEFT",(col==1) and 26 or 287,columnTop)
+        if col==1 then
+            title:SetText("不足物品（"..count.."）")
+            title:SetTextColor(1,0.25,0.25)
+        else
+            title:SetText("已达标物品（"..count.."）")
+            title:SetTextColor(0.2,1,0.3)
+        end
+        for i=1,GROUP_SIZE do
+            local r=groupRows[col][i]
+            r.frame:ClearAllPoints()
+            r.frame:SetPoint("TOPLEFT",popup,"TOPLEFT",(col==1) and 26 or 287,columnTop-29-(i-1)*31)
+            local item=list[groupOffsets[col]+i]
+            if item then
                 r.icon:SetTexture(item.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
-            end
-            r.frame:Show()
-        else r.frame:Hide() end
-    end
-    if n>STOCK_PAGE_SIZE then
-        stockPage:SetText("显示 "..(stockOffset+1).."-"..math.min(n,stockOffset+STOCK_PAGE_SIZE).." / "..n.." 行")
-        stockPage:Show()
-        prevStock:Show();nextStock:Show()
-    else
-        stockPage:Hide()
-        prevStock:Hide();nextStock:Hide()
+                r.name:SetText(item.name)
+                if col==1 then r.name:SetTextColor(1,0.75,0.75);r.count:SetTextColor(1,0.25,0.25)
+                else r.name:SetTextColor(1,1,1);r.count:SetTextColor(0.15,1,0.2) end
+                r.count:SetText(item.have.." / "..item.need)
+                r.frame:Show()
+            else r.frame:Hide() end
+        end
+        local nav=groupNav[col]
+        if count>GROUP_SIZE then
+            nav.page:SetText((groupOffsets[col]+1).."-"..math.min(count,groupOffsets[col]+GROUP_SIZE).." / "..count)
+            nav.prev:Show();nav.nextBtn:Show();nav.page:Show()
+        else nav.prev:Hide();nav.nextBtn:Hide();nav.page:Hide() end
     end
 end
+for col=1,2 do
+    local c=col
+    groupNav[col].prev:SetScript("OnClick",function() groupOffsets[c]=math.max(0,groupOffsets[c]-GROUP_SIZE);redrawStock() end)
+    groupNav[col].nextBtn:SetScript("OnClick",function() groupOffsets[c]=math.min(math.max(0,table.getn(groupLists[c])-GROUP_SIZE),groupOffsets[c]+GROUP_SIZE);redrawStock() end)
+end
 popup:EnableMouseWheel(true)
-popup:SetScript("OnMouseWheel",function() stockOffset=math.max(0,math.min(math.max(0,table.getn(stockItems)-STOCK_PAGE_SIZE),stockOffset-arg1));redrawStock() end)
-prevStock=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
-prevStock:SetWidth(58);prevStock:SetHeight(21);prevStock:SetPoint("BOTTOMLEFT",popup,"BOTTOMLEFT",15,71);prevStock:SetText("上翻")
-prevStock:SetScript("OnClick",function() stockOffset=math.max(0,stockOffset-STOCK_PAGE_SIZE);redrawStock() end)
-nextStock=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
-nextStock:SetWidth(58);nextStock:SetHeight(21);nextStock:SetPoint("BOTTOMRIGHT",popup,"BOTTOMRIGHT",-15,71);nextStock:SetText("下翻")
-nextStock:SetScript("OnClick",function() stockOffset=math.min(math.max(0,table.getn(stockItems)-STOCK_PAGE_SIZE),stockOffset+STOCK_PAGE_SIZE);redrawStock() end)
+popup:SetScript("OnMouseWheel",function()
+    -- Use the cursor's column when possible; left column is the fallback.
+    local col=1
+    if type(GetCursorPosition)=="function" then
+        local x=GetCursorPosition()
+        local left=popup:GetLeft()
+        local scale=popup:GetEffectiveScale()
+        if x and left and scale and x/scale-left>popup:GetWidth()/2 then col=2 end
+    end
+    groupOffsets[col]=math.max(0,math.min(math.max(0,table.getn(groupLists[col])-GROUP_SIZE),groupOffsets[col]-arg1))
+    redrawStock()
+end)
 local refreshActiveStock
 local gearButton=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
 gearButton:SetWidth(170);gearButton:SetHeight(24);gearButton:SetPoint("BOTTOM",popup,"BOTTOM",0,45)
@@ -764,51 +791,44 @@ local function displayNext()
     alertRemaining=getDB().alertSeconds
     queueKeys[activeAlert.key]=nil
     pTitle:SetText(activeAlert.title..(table.getn(queue)>0 and " (待处理 "..table.getn(queue)..")" or ""))
-    pBody:SetText(activeAlert.body)
+    local body=trim(activeAlert.body or "")
+    if body=="" then
+        pBody:Hide()
+        popup:SetHeight(344)
+        columnTop=-89
+    else
+        pBody:SetText(body)
+        pBody:Show()
+        popup:SetHeight(400)
+        columnTop=-145
+    end
     local d=prepData(activeAlert.entry)
-    stockOffset=0
+    groupOffsets[1]=0;groupOffsets[2]=0
     refreshActiveStock()
     if d and type(d.gear)=="table" and next(d.gear) then gearButton:Show() else gearButton:Hide() end
     popup:Show()
 end
 refreshActiveStock=function()
-    stockItems={}
+    groupLists[1]={};groupLists[2]={}
     if not activeAlert then return end
     local d=prepData(activeAlert.entry)
     local stock=inventory()
     if d then for key,need in pairs(d.consumables) do
         local id=tonumber(key)
-        if id then
+        if id and type(need)=="number" then
             local have=stock[id] and stock[id].count or 0
-            table.insert(stockItems,{id=id,name=itemName(id),have=have,need=need,icon=itemTexture(id,stock)})
+            local item={id=id,name=itemName(id),have=have,need=need,icon=itemTexture(id,stock)}
+            if have<need then table.insert(groupLists[1],item)
+            else table.insert(groupLists[2],item) end
         end
     end end
-    table.sort(stockItems,function(a,b)
-        local am=a.have<a.need and 1 or 0
-        local bm=b.have<b.need and 1 or 0
-        if am~=bm then return am>bm end
-        if am==1 then
-            local da=a.need-a.have
-            local db=b.need-b.have
-            if da~=db then return da>db end
-        end
+    table.sort(groupLists[1],function(a,b)
+        local gapA=a.need-a.have
+        local gapB=b.need-b.have
+        if gapA~=gapB then return gapA>gapB end
         return a.id<b.id
     end)
-    local short=0
-    local n=table.getn(stockItems)
-    for i=1,n do if stockItems[i].have<stockItems[i].need then short=short+1 end end
-    stockProductCount=n
-    local grouped={}
-    if short>0 then
-        table.insert(grouped,{header=true,title="不足物品（"..short.."）",short=true})
-        for i=1,n do if stockItems[i].have<stockItems[i].need then table.insert(grouped,stockItems[i]) end end
-    end
-    if n-short>0 then
-        table.insert(grouped,{header=true,title="已达标物品（"..(n-short).."）",short=false})
-        for i=1,n do if stockItems[i].have>=stockItems[i].need then table.insert(grouped,stockItems[i]) end end
-    end
-    stockItems=grouped
-    pStock:SetText("战前物品 · "..n.." 种"..(short>0 and " · |cffff5555不足 "..short.." 种|r" or " · |cff40ff40全部达标|r"))
+    table.sort(groupLists[2],function(a,b) return a.id<b.id end)
     redrawStock()
 end
 pClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
