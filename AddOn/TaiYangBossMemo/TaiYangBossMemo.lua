@@ -402,124 +402,167 @@ refreshList()
 -- Preparation configuration page. Changes are character-local and saved immediately.
 local prep=CreateFrame("Frame",nil,frame)
 prep:SetPoint("TOPLEFT",frame,"TOPLEFT",27,-72)
-prep:SetWidth(700);prep:SetHeight(385);prep:Hide()
+prep:SetWidth(700);prep:SetHeight(590);prep:Hide()
 local prepTitle=label(prep,8,-5,"战前准备 · 当前角色","GameFontNormalLarge",620)
-local prepHint=label(prep,8,-34,"先在 Boss 管理中保存 Entry，再配置药剂和装备。","GameFontHighlightSmall",670)
-local prepStock=label(prep,8,-65,"","GameFontHighlightSmall",680)
+local prepHint=label(prep,8,-29,"先在 Boss 管理中保存 Entry，再配置药剂和装备。","GameFontHighlightSmall",670)
+local prepStock=label(prep,8,-52,"","GameFontHighlightSmall",680)
 local prepRows={}
+local savedRows={}
 local prepTab="bag"
+local bagAll=false
 local prepPage=1
+local savedPage=1
 local prepFilter=""
-local prepSelected=nil
-local prepSelectCount=1
-local prepSearch=edit(prep,9,-93,230,22)
+local prepSearch=edit(prep,9,-75,215,22)
+local prepModeLabel=label(prep,240,-79,"","GameFontHighlightSmall",435)
+local prepStatus=label(prep,10,-567,"填写每行需求数量后点添加/修改；数量为当前角色独立保存。","GameFontHighlightSmall",670)
 local prepRefresh
-prepSearch:SetScript("OnTextChanged",function() prepFilter=trim(this:GetText() or "");prepPage=1;if prepRefresh then prepRefresh() end end)
-local prepModeLabel=label(prep,255,-97,"", "GameFontHighlightSmall",440)
-local prepStatus=label(prep,10,-344,"选择物品后按添加，修改数量会立即保存。","GameFontHighlightSmall",670)
 local function currentPrepEntry()
     local id=tonumber(trim(entryBox:GetText() or ""))
     if id and bossInfo(id) then return id end
 end
+local function validNeed(raw)
+    raw=trim(raw)
+    if not string.find(raw,"^%d+$") then return nil end
+    local n=tonumber(raw)
+    if n and n>=1 and n<=999 and math.floor(n)==n then return n end
+end
 local function appendConsumable(entry,id,quantity)
     local d=prepData(entry)
-    if not d or not id or id<1 or id>4294967295 then return false end
-    local key=tostring(id)
-    d.consumables[key]=math.max(1,math.min(999,math.floor(quantity or 1)))
+    if not d or not id or id<1 or id>4294967295 or not quantity then return false end
+    d.consumables[tostring(id)]=quantity
     return true
 end
 local function sortedConsumables(entry)
     local d=prepData(entry)
     local arr={}
-    if d then for id,need in pairs(d.consumables) do if tonumber(id) then table.insert(arr,tonumber(id)) end end end
+    if d then for id,need in pairs(d.consumables) do
+        local n=tonumber(id)
+        if n then table.insert(arr,n) end
+    end end
     table.sort(arr)
     return arr
+end
+local function usableConsumable(id)
+    if type(GetItemInfo)~="function" then return false end
+    local _,_,_,_,_,typ=GetItemInfo(id)
+    return typ=="消耗品" or typ=="Consumable"
+end
+local function matchItem(id,filter)
+    if filter=="" then return true end
+    local name=itemName(id)
+    return string.find(string.lower(name),string.lower(filter),1,true) or string.find(tostring(id),filter,1,true)
+end
+local function prepSetMode(mode)
+    prepTab=mode;prepPage=1;prepFilter="";prepSearch:SetText("")
+    prepRefresh()
+end
+local function paintFavorite(row,id)
+    local fav=getDB().favorites or {}
+    local liked=fav[tostring(id)]==true
+    row.star:SetText(liked and "★" or "☆")
+    local fs=row.star:GetFontString()
+    if fs then if liked then fs:SetTextColor(1,0.18,0.18) else fs:SetTextColor(1,0.82,0.05) end end
 end
 prepRefresh=function()
     local entry=currentPrepEntry()
     local stock=inventory()
     prepTitle:SetText("战前准备 · "..(entry and (bossInfo(entry).name or "Boss") or "未保存 Boss"))
-    if not entry then prepStock:SetText("请先保存 Boss，再返回配置战前准备。") else
-        local ids=sortedConsumables(entry)
-        local t={}
-        for i=1,math.min(4,table.getn(ids)) do
-            local id=ids[i];local need=prepData(entry).consumables[tostring(id)]
-            table.insert(t,itemName(id).." "..(stock[id] and stock[id].count or 0).."/"..need)
-        end
-        prepStock:SetText("当前药剂（前四项）："..(table.getn(t)>0 and table.concat(t,"  |  ") or "未配置"))
-    end
+    local selected=entry and prepData(entry) or nil
+    local ids=entry and sortedConsumables(entry) or {}
+    prepStock:SetText("已配置 "..table.getn(ids).." 种物品 · 默认只统计随身背包（不含银行）")
     local candidates={}
     if prepTab=="bag" then
         for id,v in pairs(stock) do
-            local name=itemName(id)
-            -- Bag tab lists only usable consumables based on ItemType (fallback: named potions).
-            local usable=false
-            if type(GetItemInfo)=="function" then
-                local _,_,_,_,_,typ=GetItemInfo(id)
-                usable=(typ=="消耗品" or typ=="Consumable")
-            end
-            if usable and (prepFilter=="" or string.find(string.lower(name),string.lower(prepFilter),1,true) or string.find(tostring(id),prepFilter,1,true)) then table.insert(candidates,id) end
+            if (bagAll or usableConsumable(id)) and matchItem(id,prepFilter) then table.insert(candidates,id) end
+        end
+    elseif prepTab=="search" then
+        local typed=tonumber(prepFilter)
+        if typed and typed>0 and typed<=4294967295 then table.insert(candidates,typed) end
+        for id,v in pairs(stock) do
+            if id~=typed and matchItem(id,prepFilter) then table.insert(candidates,id) end
         end
     elseif prepTab=="favorite" then
         local fav=getDB().favorites or {}
-        for id,v in pairs(fav) do if v then table.insert(candidates,tonumber(id)) end end
+        for key,v in pairs(fav) do
+            local id=tonumber(key)
+            if v and id and matchItem(id,prepFilter) then table.insert(candidates,id) end
+        end
     elseif prepTab=="copy" then
-        -- A Boss selection is represented by its entry; copy all configured consumables.
         for key,b in pairs(getAccount().bosses) do
             local n=tonumber(key)
-            if n and n~=entry and prepData(n) and next(prepData(n).consumables) then table.insert(candidates,n) end
-        end
-    else
-        if prepFilter~="" then
-            local id=tonumber(prepFilter)
-            if id and id>0 and id<=4294967295 then table.insert(candidates,id) end
-            -- Search cached inventory names without assuming a global item database.
-            for candidateId,v in pairs(stock) do
-                if candidateId~=id and string.find(string.lower(itemName(candidateId)),string.lower(prepFilter),1,true) then table.insert(candidates,candidateId) end
+            if n and n~=entry and prepData(n) and next(prepData(n).consumables) then
+                local name=bossInfo(n).name or "Boss"
+                if prepFilter=="" or string.find(string.lower(name),string.lower(prepFilter),1,true) or string.find(tostring(n),prepFilter,1,true) then table.insert(candidates,n) end
             end
         end
     end
     table.sort(candidates)
     local total=table.getn(candidates)
-    if prepPage>math.max(1,math.ceil(total/5)) then prepPage=1 end
+    local maxPage=math.max(1,math.ceil(total/5))
+    if prepPage>maxPage then prepPage=maxPage end
     for i=1,5 do
         local row=prepRows[i]
         local id=candidates[(prepPage-1)*5+i]
         if id then
             row.id=id
             row.text:SetText(prepTab=="copy" and ((bossInfo(id).name or "Boss").." ["..id.."]") or (itemName(id).." ["..id.."]  x"..(stock[id] and stock[id].count or 0)))
+            row.quantity:SetText(prepTab=="copy" and "" or tostring(selected and selected.consumables[tostring(id)] or 1))
+            if prepTab=="copy" then row.quantity:Hide();row.star:Hide();row.add:SetText("复制配置")
+            else row.quantity:Show();row.star:Show();row.add:SetText("添加/修改");paintFavorite(row,id) end
             row.frame:Show()
         else row.id=nil;row.frame:Hide() end
     end
-    prepModeLabel:SetText("模式："..({bag="背包消耗品",search="搜索（物品名称/ItemID）",favorite="常用收藏",copy="复制其他 Boss 药剂"})[prepTab].." · "..total.." 项")
+    local currentCount=table.getn(ids)
+    local savedMax=math.max(1,math.ceil(currentCount/4))
+    if savedPage>savedMax then savedPage=savedMax end
+    for i=1,4 do
+        local row=savedRows[i]
+        local id=ids[(savedPage-1)*4+i]
+        if id and selected then
+            row.id=id
+            row.text:SetText(itemName(id).." ["..id.."]")
+            row.quantity:SetText(tostring(selected.consumables[tostring(id)] or 1))
+            row.frame:Show()
+        else row.id=nil;row.frame:Hide() end
+    end
+    prepModeLabel:SetText(({bag=(bagAll and "背包全部物品" or "背包消耗品"),search="搜索全部背包/ItemID",favorite="当前角色收藏",copy="复制其他 Boss"})[prepTab].." · "..total.." 项 · 第 "..prepPage.."/"..maxPage.." 页")
 end
-local function prepSetMode(mode)
-    prepTab=mode;prepPage=1;prepFilter="";prepSearch:SetText("")
-    prepRefresh()
-end
+prepSearch:SetScript("OnTextChanged",function() prepFilter=trim(this:GetText() or "");prepPage=1;if prepRefresh then prepRefresh() end end)
 local modeLabels={{"背包","bag"},{"搜索","search"},{"收藏","favorite"},{"复制","copy"}}
 for i=1,4 do
     local m=modeLabels[i]
-    button(prep,m[1],9+(i-1)*103,-124,96,24,function() prepSetMode(m[2]) end)
+    button(prep,m[1],8+(i-1)*105,-105,98,24,function() prepSetMode(m[2]) end)
 end
+button(prep,"全部/消耗品",435,-105,116,24,function()
+    bagAll=not bagAll;prepTab="bag";prepPage=1;prepRefresh()
+end)
+label(prep,10,-139,"背包选择 / 搜索结果", "GameFontNormal", 250)
+label(prep,414,-140,"需求","GameFontHighlightSmall",65)
 for i=1,5 do
-    local y=-157-(i-1)*32
     local rowFrame=CreateFrame("Frame",nil,prep)
-    rowFrame:SetPoint("TOPLEFT",prep,"TOPLEFT",8,y);rowFrame:SetWidth(670);rowFrame:SetHeight(29)
-    local txt=label(rowFrame,4,-6,"","GameFontHighlightSmall",420)
-    local ri={frame=rowFrame,text=txt,id=nil}
+    rowFrame:SetPoint("TOPLEFT",prep,"TOPLEFT",8,-158-(i-1)*32)
+    rowFrame:SetWidth(681);rowFrame:SetHeight(29)
+    local txt=label(rowFrame,3,-6,"","GameFontHighlightSmall",392)
+    local countBox=edit(rowFrame,403,-2,54,21)
+    local ri={frame=rowFrame,text=txt,quantity=countBox,id=nil}
     prepRows[i]=ri
-    button(rowFrame,"添加/复制",470,-1,99,24,function()
+    ri.add=button(rowFrame,"添加/修改",470,-1,108,23,function()
         local entry=currentPrepEntry();local id=ri.id
         if not entry or not id then prepStatus:SetText("请先保存 Boss");return end
         if prepTab=="copy" then
             local from=prepData(id)
             if from then for k,qty in pairs(from.consumables) do appendConsumable(entry,tonumber(k),qty) end end
-        else appendConsumable(entry,id,prepSelectCount) end
-        prepStatus:SetText("药剂已保存到当前角色的 Boss 配置。")
+            prepStatus:SetText("已复制其他 Boss 的准备清单，原有相同物品需求已覆盖。")
+        else
+            local number=validNeed(ri.quantity:GetText())
+            if not number then prepStatus:SetText("需求数量必须为 1 至 999 的整数。");return end
+            appendConsumable(entry,id,number)
+            prepStatus:SetText(itemName(id).."：需求已添加/修改为 "..number)
+        end
         prepRefresh()
     end)
-    button(rowFrame,"★",581,-1,36,24,function()
+    ri.star=button(rowFrame,"☆",591,-1,40,23,function()
         if not ri.id or prepTab=="copy" then return end
         local d=getDB();if type(d.favorites)~="table" then d.favorites={} end
         local key=tostring(ri.id)
@@ -527,48 +570,57 @@ for i=1,5 do
         prepRefresh()
     end)
 end
-local qty=label(prep,423,-129,"添加数量：1","GameFontHighlightSmall",115)
-button(prep,"−",534,-124,28,24,function() prepSelectCount=math.max(1,prepSelectCount-1);qty:SetText("添加数量："..prepSelectCount) end)
-button(prep,"+",570,-124,28,24,function() prepSelectCount=math.min(99,prepSelectCount+1);qty:SetText("添加数量："..prepSelectCount) end)
-button(prep,"上页",8,-320,68,23,function() prepPage=math.max(1,prepPage-1);prepRefresh() end)
-button(prep,"下页",83,-320,68,23,function() prepPage=prepPage+1;prepRefresh() end)
-button(prep,"已配药剂",160,-320,92,23,function()
-    local e=currentPrepEntry();if not e then return end
-    local ids=sortedConsumables(e)
-    if table.getn(ids)==0 then prepStatus:SetText("此 Boss 尚未配置药剂");return end
-    -- Cycle through saved medicines and allow quantity adjustment/removal via prompt buttons.
-    prepSelected=(prepSelected or 0)+1;if prepSelected>table.getn(ids) then prepSelected=1 end
-    local id=ids[prepSelected];prepStatus:SetText("当前："..itemName(id).." · 需要 "..prepData(e).consumables[tostring(id)].."，用右侧 ± 或移除修改。")
-end)
-local function chosenDrug()
-    local e=currentPrepEntry();if not e then return end
-    local ids=sortedConsumables(e)
-    if not prepSelected or prepSelected>table.getn(ids) then return end
-    return e,ids[prepSelected]
+button(prep,"上一页",8,-321,82,23,function() prepPage=math.max(1,prepPage-1);prepRefresh() end)
+button(prep,"下一页",98,-321,82,23,function() prepPage=prepPage+1;prepRefresh() end)
+label(prep,10,-354,"已配置物品（当前角色）· 在这里可直接改需求或移除", "GameFontNormal",600)
+for i=1,4 do
+    local rowFrame=CreateFrame("Frame",nil,prep)
+    rowFrame:SetPoint("TOPLEFT",prep,"TOPLEFT",8,-377-(i-1)*31)
+    rowFrame:SetWidth(680);rowFrame:SetHeight(28)
+    local txt=label(rowFrame,3,-5,"","GameFontHighlightSmall",390)
+    local number=edit(rowFrame,403,-2,54,21)
+    local ri={frame=rowFrame,text=txt,quantity=number,id=nil}
+    savedRows[i]=ri
+    button(rowFrame,"修改",474,-1,77,23,function()
+        local e=currentPrepEntry();if not e or not ri.id then return end
+        local need=validNeed(ri.quantity:GetText())
+        if not need then prepStatus:SetText("需求数量必须为 1 至 999 的整数。");return end
+        appendConsumable(e,ri.id,need)
+        prepStatus:SetText("需求已修改："..itemName(ri.id).." x"..need)
+        prepRefresh()
+    end)
+    button(rowFrame,"移除",564,-1,76,23,function()
+        local e=currentPrepEntry();if not e or not ri.id then return end
+        prepData(e).consumables[tostring(ri.id)]=nil
+        prepStatus:SetText("已移除："..itemName(ri.id))
+        prepRefresh()
+    end)
 end
-button(prep,"需求−",263,-320,70,23,function()
-    local e,id=chosenDrug();if not id then return end
-    appendConsumable(e,id,math.max(1,prepData(e).consumables[tostring(id)]-1));prepRefresh()
-end)
-button(prep,"需求+",341,-320,70,23,function()
-    local e,id=chosenDrug();if not id then return end
-    appendConsumable(e,id,prepData(e).consumables[tostring(id)]+1);prepRefresh()
-end)
-button(prep,"移除药剂",419,-320,85,23,function()
-    local e,id=chosenDrug();if not id then return end
-    prepData(e).consumables[tostring(id)]=nil;prepSelected=nil;prepRefresh()
-end)
-button(prep,"保存当前装备",517,-320,122,23,function()
+button(prep,"已配上一页",8,-507,108,22,function() savedPage=math.max(1,savedPage-1);prepRefresh() end)
+button(prep,"已配下一页",125,-507,108,22,function() savedPage=savedPage+1;prepRefresh() end)
+-- Gear configuration has a distinct section, not a shared consumable action.
+label(prep,275,-510,"装备方案：仅当前角色，保存不会立即换装", "GameFontHighlightSmall",385)
+button(prep,"保存穿戴为 Boss 套装",470,-540,192,24,function()
     local e=currentPrepEntry();if not e then prepStatus:SetText("请先保存 Boss") return end
-    prepData(e).gear=equipSnapshot()
-    prepStatus:SetText("已为当前角色的这个 Boss 保存当前穿戴装备。")
+    local d=prepData(e)
+    if type(d.gear)=="table" and next(d.gear) and confirmModal then
+        confirmModal("覆盖装备方案","确定用当前穿戴覆盖此 Boss 原有装备方案？",function()
+            d.gear=equipSnapshot();prepStatus:SetText("装备方案已覆盖，战前卡片可手动换装。")
+        end)
+    else d.gear=equipSnapshot();prepStatus:SetText("已保存当前穿戴装备；战前卡片可手动换装。") end
+end)
+button(prep,"清除装备方案",330,-540,125,24,function()
+    local e=currentPrepEntry();if not e then return end
+    if confirmModal then confirmModal("清除装备方案","只清除此角色此 Boss 的装备方案？",function()
+        prepData(e).gear=nil;prepStatus:SetText("已清除装备方案。")
+    end) end
 end)
 local prepOpen=false
 local function togglePrep()
     prepOpen=not prepOpen
     if prepOpen then
-        manager:Hide();status:Hide();prep:Show();prepRefresh()
-    else prep:Hide();manager:Show();status:Show();refreshList() end
+        frame:SetHeight(720);manager:Hide();status:Hide();prep:Show();prepRefresh()
+    else prep:Hide();frame:SetHeight(510);manager:Show();status:Show();refreshList() end
 end
 button(manager,"准备",638,-365,65,25,function() togglePrep() end)
 button(prep,"返回管理",607,-5,90,25,function() togglePrep() end)
@@ -604,7 +656,7 @@ closeButton:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-5,-5)
 closeButton:SetScript("OnClick",safeClose)
 -- WoW 1.12 Escape handling is left to the default UI; the X button checks unsaved data.
 local popup=CreateFrame("Frame","TaiYangBossMemoAlert",UIParent)
-popup:SetWidth(360);popup:SetHeight(245)
+popup:SetWidth(440);popup:SetHeight(404)
 local function restoreAlertPosition()
     popup:ClearAllPoints()
     local p=getDB().alertPos
@@ -629,16 +681,68 @@ end)
 local pTitle=popup:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
 pTitle:SetPoint("TOP",popup,"TOP",0,-25)
 local pBody=popup:CreateFontString(nil,"OVERLAY","GameFontHighlight")
-pBody:SetPoint("TOP",popup,"TOP",0,-52);pBody:SetWidth(315);pBody:SetHeight(58)
+pBody:SetPoint("TOP",popup,"TOP",0,-57);pBody:SetWidth(402);pBody:SetHeight(53)
 pBody:SetJustifyH("CENTER");pBody:SetJustifyV("MIDDLE")
 local pClose=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
 pClose:SetWidth(92);pClose:SetHeight(22)
 pClose:SetPoint("BOTTOM",popup,"BOTTOM",0,14);pClose:SetText("知道了")
 local activeAlert=nil
 local pStock=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-pStock:SetPoint("TOP",popup,"TOP",0,-120);pStock:SetWidth(330);pStock:SetJustifyH("CENTER")
+pStock:SetPoint("TOP",popup,"TOP",0,-113);pStock:SetWidth(410);pStock:SetJustifyH("LEFT")
+local stockRows={}
+local stockItems={}
+local stockOffset=0
+local redrawStock
+for i=1,7 do
+    local row=CreateFrame("Frame",nil,popup)
+    row:SetPoint("TOPLEFT",popup,"TOPLEFT",19,-146-(i-1)*27)
+    row:SetWidth(403);row:SetHeight(26)
+    local icon=row:CreateTexture(nil,"ARTWORK")
+    icon:SetPoint("LEFT",row,"LEFT",0,0);icon:SetWidth(22);icon:SetHeight(22)
+    local name=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    name:SetPoint("LEFT",row,"LEFT",27,0);name:SetWidth(270);name:SetJustifyH("LEFT")
+    local number=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    number:SetPoint("RIGHT",row,"RIGHT",0,0);number:SetWidth(104);number:SetJustifyH("RIGHT")
+    stockRows[i]={frame=row,icon=icon,name=name,count=number}
+end
+local stockPage=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+stockPage:SetPoint("BOTTOM",popup,"BOTTOM",0,77)
+local function itemTexture(id,stock)
+    if stock[id] and stock[id].bag and type(GetContainerItemInfo)=="function" then
+        local texture=GetContainerItemInfo(stock[id].bag,stock[id].slot)
+        if texture then return texture end
+    end
+    if type(GetItemIcon)=="function" then return GetItemIcon(id) end
+    if type(GetItemInfo)=="function" then local _,_,_,_,_,_,_,_,texture=GetItemInfo(id);return texture end
+end
+redrawStock=function()
+    local n=table.getn(stockItems)
+    if stockOffset>math.max(0,n-7) then stockOffset=math.max(0,n-7) end
+    for i=1,7 do
+        local r=stockRows[i]
+        local item=stockItems[i+stockOffset]
+        if item then
+            r.name:SetText(item.name)
+            r.count:SetText(item.have.." / "..item.need)
+            if item.have>=item.need then r.count:SetTextColor(0.15,1,0.2) else r.count:SetTextColor(1,0.25,0.25) end
+            r.icon:SetTexture(item.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+            r.frame:Show()
+        else r.frame:Hide() end
+    end
+    if n>7 then stockPage:SetText("物品 "..(stockOffset+1).." - "..math.min(n,stockOffset+7).." / "..n.." · 滚轮或下方翻页")
+    else stockPage:SetText("共 "..n.." 种物品") end
+end
+popup:EnableMouseWheel(true)
+popup:SetScript("OnMouseWheel",function() stockOffset=math.max(0,math.min(math.max(0,table.getn(stockItems)-7),stockOffset-arg1));redrawStock() end)
+local prevStock=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
+prevStock:SetWidth(58);prevStock:SetHeight(21);prevStock:SetPoint("BOTTOMLEFT",popup,"BOTTOMLEFT",15,71);prevStock:SetText("上翻")
+prevStock:SetScript("OnClick",function() stockOffset=math.max(0,stockOffset-7);redrawStock() end)
+local nextStock=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
+nextStock:SetWidth(58);nextStock:SetHeight(21);nextStock:SetPoint("BOTTOMRIGHT",popup,"BOTTOMRIGHT",-15,71);nextStock:SetText("下翻")
+nextStock:SetScript("OnClick",function() stockOffset=math.min(math.max(0,table.getn(stockItems)-7),stockOffset+7);redrawStock() end)
+local refreshActiveStock
 local gearButton=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
-gearButton:SetWidth(170);gearButton:SetHeight(24);gearButton:SetPoint("BOTTOM",popup,"BOTTOM",0,44)
+gearButton:SetWidth(170);gearButton:SetHeight(24);gearButton:SetPoint("BOTTOM",popup,"BOTTOM",0,45)
 gearButton:SetText("一键换装")
 gearButton:SetScript("OnClick",function() if activeAlert then local ok,message=equipOutfit(activeAlert.entry);say(message);end end)
 local queue={}
@@ -676,26 +780,33 @@ local function displayNext()
     pTitle:SetText(activeAlert.title..(table.getn(queue)>0 and " (待处理 "..table.getn(queue)..")" or ""))
     pBody:SetText(activeAlert.body)
     local d=prepData(activeAlert.entry)
-    local medicines={};local stock=inventory()
-    if d then
-        for id,need in pairs(d.consumables) do
-            local number=tonumber(id)
-            if number then
-                local have=stock[number] and stock[number].count or 0
-                table.insert(medicines,itemName(number).." "..have.."/"..need..(have<need and " !" or ""))
-            end
-        end
-    end
-    table.sort(medicines)
-    local count=table.getn(medicines)
-    if count>3 then
-        local missing=count-3
-        while table.getn(medicines)>3 do table.remove(medicines) end
-        table.insert(medicines,"另有 "..missing.." 种药剂，请打开管理页查看")
-    end
-    pStock:SetText(table.concat(medicines,"\n"))
+    stockOffset=0
+    refreshActiveStock()
     if d and type(d.gear)=="table" and next(d.gear) then gearButton:Show() else gearButton:Hide() end
     popup:Show()
+end
+refreshActiveStock=function()
+    stockItems={}
+    if not activeAlert then return end
+    local d=prepData(activeAlert.entry)
+    local stock=inventory()
+    if d then for key,need in pairs(d.consumables) do
+        local id=tonumber(key)
+        if id then
+            local have=stock[id] and stock[id].count or 0
+            table.insert(stockItems,{id=id,name=itemName(id),have=have,need=need,icon=itemTexture(id,stock)})
+        end
+    end end
+    table.sort(stockItems,function(a,b)
+        local am=a.have<a.need and 1 or 0
+        local bm=b.have<b.need and 1 or 0
+        if am~=bm then return am>bm end
+        return a.id<b.id
+    end)
+    local short=0
+    for i=1,table.getn(stockItems) do if stockItems[i].have<stockItems[i].need then short=short+1 end end
+    pStock:SetText("战前物品 · "..table.getn(stockItems).." 种"..(short>0 and " · |cffff5555不足 "..short.." 种|r" or " · |cff40ff40全部达标|r"))
+    redrawStock()
 end
 pClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
 alertClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
@@ -842,11 +953,13 @@ local function observe()
 end
 local driver=CreateFrame("Frame")
 driver:RegisterEvent("VARIABLES_LOADED")
+driver:RegisterEvent("BAG_UPDATE")
 driver:RegisterEvent("PLAYER_ENTERING_WORLD")
 driver:RegisterEvent("PLAYER_LEAVING_WORLD")
 driver:RegisterEvent("PLAYER_LOGOUT")
 driver:RegisterEvent("PLAYER_TARGET_CHANGED")
 driver:SetScript("OnEvent",function()
+    if event=="BAG_UPDATE" then if activeAlert then refreshActiveStock() end return end
     if event=="VARIABLES_LOADED" then
         getDB()
         resetSession()
@@ -885,81 +998,3 @@ local enabledAll=toggle(-49,"开启自动提醒","enabled")
 local beforeAll=toggle(-90,"开启战前提醒","before")
 local resetAll=toggle(-134,"Boss 重置后重新选中即可提醒（需确认脱战）","realertAfterReset")
 label(settings,10,-185,"② Boss 状态检测间隔（秒）","GameFontNormalLarge")
-local rates={0.2,0.5,1,2}
-local rateButtons={}
-local function updateRate()
-    local d=getDB()
-    for i=1,4 do
-        rateButtons[i]:SetText((d.pollInterval==rates[i] and "● " or "○ ")..tostring(rates[i]).." 秒")
-    end
-end
-for i=1,4 do
-    local n=rates[i]
-    rateButtons[i]=button(settings,"",10+(i-1)*112,-210,103,27,function()
-        getDB().pollInterval=n;timer=0;updateRate()
-    end)
-end
-label(settings,10,-260,"③ 提醒自动关闭","GameFontNormalLarge")
-local durationButtons={}
-local durations={0,5,10,15}
-local function updateDuration()
-    local current=getDB().alertSeconds
-    for i=1,4 do
-        durationButtons[i]:SetText((current==durations[i] and "● " or "○ ")..(durations[i]==0 and "不自动关闭" or durations[i].." 秒"))
-    end
-end
-for i=1,4 do
-    local n=durations[i]
-    durationButtons[i]=button(settings,"",10+(i-1)*112,-284,103,25,function()
-        getDB().alertSeconds=n;updateDuration()
-    end)
-end
-label(settings,10,-320,"④ 运行状态（拖动提醒卡片会自动保存位置）","GameFontNormalLarge")
-local trackerInfo=label(settings,10,-344,"","GameFontHighlight",600)
-
-local function syncSettings()
-    local d=getDB()
-    enabledAll:SetChecked(d.enabled)
-    beforeAll:SetChecked(d.before)
-    resetAll:SetChecked(d.realertAfterReset)
-    updateRate()
-    updateDuration()
-    trackerInfo:SetText("DLL："..(type(TaiYangShenDian)=="function" and "已检测" or "未检测到").."   战斗状态缓存 "..countTracks().." 个 Boss")
-end
-local settingsTicker=CreateFrame("Frame",nil,settings)
-local settingsElapsed=0
-settingsTicker:SetScript("OnUpdate",function() settingsElapsed=settingsElapsed+arg1;if settingsElapsed>=1 then settingsElapsed=0;syncSettings() end end)
-local openSettings=false
-local tab=button(frame,"提醒设置",610,-48,116,27,function()
-    openSettings=not openSettings
-    if openSettings then prepOpen=false;prep:Hide();manager:Hide();settings:Show();status:Hide();syncSettings();this:SetText("返回 Boss 管理")
-    else settings:Hide();manager:Show();status:Show();refreshList();this:SetText("提醒设置") end
-end)
-frame:Hide()
--- Optional FuBar bridge: exposed only after the main UI has initialized.
-TaiYangBossMemo_ToggleSettings=function()
-    if frame:IsShown() then TaiYangBossMemoClose() else TaiYangBossMemoOpen() end
-end
-TaiYangBossMemo_GetFuBarSummary=function()
-    local d=getDB()
-    local enabledCount, allCount=0,0
-    for key,boss in pairs(getAccount().bosses) do
-        if type(boss)=="table" then
-            allCount=allCount+1
-            local n=d.notes[key]
-            if type(n)=="table" and n.enabled~=false and trim(n.before)~="" then enabledCount=enabledCount+1 end
-        end
-    end
-    return d.enabled and "开启" or "关闭", enabledCount,allCount,
-        d.before==true,d.realertAfterReset==true,
-        type(TaiYangShenDian)=="function",d.pollInterval
-end
-TaiYangBossMemoOpen=function()
-    frame:Show()
-    if openSettings then syncSettings() else refreshList() end
-end
-end
-local initOK,initErr=pcall(TaiYangBossMemoInitialize)
-if not initOK and DEFAULT_CHAT_FRAME then
-    DEFAULT_CHAT_FRAME:AddMessage("|cffff5555[BossMemo] 初始化失败: "..tostring(initErr).."|r")
-end
