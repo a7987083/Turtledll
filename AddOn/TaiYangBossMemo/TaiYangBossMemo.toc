@@ -1,6 +1,6 @@
 ## Interface: 11200
 ## Title: 太阳神殿 Boss 备忘录
-## Notes: 中文 Boss 管理、战前与死亡后备忘提醒（需要 TaiYangShenDian.dll M4）
-## Version: 0.7.2
+## Notes: 仅战前提醒（需要 TaiYangShenDian.dll M4）
+## Version: 0.9.1
 ## SavedVariables: TaiYangBossMemoDB
 TaiYangBossMemo.lua
