@@ -1,7 +1,7 @@
 ## Interface: 11200
 ## Title: 太阳神殿 Boss 备忘录
 ## Notes: 战前药剂库存及角色换装；可选 FuBar 入口（需要 TaiYangShenDian.dll M4）
-## Version: 1.1.7
+## Version: 1.1.8
 ## SavedVariables: TaiYangBossMemoDB, TaiYangBossMemoAccountDB, TaiYangBossMemoFuDB
 ## SavedVariablesPerCharacter: TaiYangBossMemoCharDB
 BossZoneDB.lua
