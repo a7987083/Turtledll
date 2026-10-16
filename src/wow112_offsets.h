@@ -48,6 +48,13 @@ constexpr unsigned long GET_ACTIVE_PLAYER_GUID = 0x00468550UL;
 constexpr unsigned long SPELL_DB = 0x00C0D780UL;
 constexpr unsigned long RESOLVE_UNIT_TOKEN = 0x00515940UL;
 
+// WoW 1.12.1 build 5875 native movement command wrappers.
+// These wrappers preserve the client's input-context gate before HANDLER.
+constexpr unsigned long MOVE_FORWARD_START = 0x00513E20UL;
+constexpr unsigned long MOVE_BACKWARD_START = 0x00513E80UL;
+constexpr unsigned long MOVE_STRAFE_LEFT_START = 0x00513FA0UL;
+constexpr unsigned long MOVE_STRAFE_RIGHT_START = 0x00514000UL;
+
 // AURA6-D4-R4 target-duration/lifecycle prediction. Values are read from the stock
 // 1.12 client at cast time; no per-frame scanning is introduced.
 constexpr unsigned long GET_SPELL_DURATION = 0x006EA000UL;
