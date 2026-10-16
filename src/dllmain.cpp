@@ -622,6 +622,7 @@ const int keys[4]={'W','S','A','D'};
 using HandlerFn = void (__thiscall *)(void*,unsigned long,int,unsigned long,unsigned long);
 using ControllerFn = void* (__cdecl *)();
 using KeyStateFn = short (WINAPI *)(int);
+using MovementStartFn = void (__cdecl *)();
 static HandlerFn next=0;
 static volatile LONG paused=0;
 static volatile LONG worldResyncPending=0;
@@ -650,6 +651,8 @@ static bool ensureHook(const char** why){
     if(hooked)return true;
     if(!detectBuild().ok){*why="UNSUPPORTED_BUILD";return false;}
     if(!executable(HANDLER)||!executable(CONTROLLER_GET)||
+       !executable(WoW112::MOVE_FORWARD_START)||!executable(WoW112::MOVE_BACKWARD_START)||
+       !executable(WoW112::MOVE_STRAFE_LEFT_START)||!executable(WoW112::MOVE_STRAFE_RIGHT_START)||
        !readable((void*)INPUT_TIMESTAMP,4)){*why="MOVE_API_UNAVAILABLE";return false;}
     MH_STATUS init=MH_Initialize();
     if(init!=MH_OK&&init!=MH_ERROR_ALREADY_INITIALIZED){*why="MOVE_HOOK_INIT_FAILED";return false;}
@@ -673,14 +676,20 @@ static void syncHeldKeysAfterWorldLoad(){
     if(InterlockedCompareExchange(&worldResyncPending,0,0)==0)return;
     KeyStateFn read=keyState();
     if(!read)return;
-    void* obj=controller();
-    if(!obj||!next)return;
     const unsigned long held=heldKeys(read);
-    InterlockedExchange(&worldResyncPending,0);
-    if(!held)return;
+    if(!held){InterlockedExchange(&worldResyncPending,0);return;}
+    // Use the exact WoW command wrappers used by MoveForwardStart/MoveBackwardStart/
+    // StrafeLeftStart/StrafeRightStart. They preserve the client's post-load input gate
+    // before reaching HANDLER, unlike a direct call to the handler trampoline.
+    const MovementStartFn starts[4]={
+        (MovementStartFn)WoW112::MOVE_FORWARD_START,
+        (MovementStartFn)WoW112::MOVE_BACKWARD_START,
+        (MovementStartFn)WoW112::MOVE_STRAFE_LEFT_START,
+        (MovementStartFn)WoW112::MOVE_STRAFE_RIGHT_START
+    };
     InterlockedExchange(&paused,0);
-    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
-    for(unsigned i=0;i<4;++i)if(held&bits[i])next(obj,bits[i],1,stamp,0);
+    for(unsigned i=0;i<4;++i)if((held&bits[i])&&executable((unsigned long)starts[i]))starts[i]();
+    InterlockedExchange(&worldResyncPending,0);
 }
 static void onWorldLeaving(){
     // The engine may recreate its movement state across a loading screen.
@@ -741,7 +750,8 @@ static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
         // Reset stale Movement pause before the world-phase deduplication gate.
         // Defer a held-key resync until the world is ready for player control.
         MovementNative::onWorldLeaving();
-        MovementNative::syncHeldKeysAfterWorldLoad();
+        // Wait for PLAYER_CONTROL_GAINED; the native command wrappers require the
+        // new world's input context to be ready before accepting a Start event.
         if(InterlockedCompareExchange(&g_worldPhase,1,1)==1)return;
         InterlockedExchange(&g_worldPhase,1);
         TysProfiler::onWorldEntering(L);
