@@ -706,8 +706,8 @@ static void __cdecl onNativeWorldEnter(){
 static bool installWorldLifecycleHooks(const char** why){
     if(worldEnterHooked&&worldLeaveHooked){*why="WORLD_HOOKS_READY";return true;}
     if(!detectBuild().ok){*why="UNSUPPORTED_BUILD";return false;}
-    const unsigned long enter=WoW112::GAMEUI_ENTER_WORLD;
-    const unsigned long leave=WoW112::GAMEUI_LEAVE_WORLD;
+    const unsigned long enter=GAMEUI_ENTER_WORLD;
+    const unsigned long leave=GAMEUI_LEAVE_WORLD;
     if(!executable(enter)||!executable(leave)){*why="WORLD_ROOT_NOT_EXECUTABLE";return false;}
 
     MH_STATUS init=MH_Initialize();
