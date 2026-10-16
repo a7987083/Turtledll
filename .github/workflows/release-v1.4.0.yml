@@ -3,13 +3,14 @@ name: Release TaiYangShenDian v1.4.0
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   release:
-    if: startsWith(github.event.head_commit.message, 'release: TaiYangShenDian v1.4.0')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release: TaiYangShenDian v1.4.0')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
