@@ -1,0 +1,281 @@
+# TaiYangShenDian v1.4.0
+
+适用于 **Turtle WoW / WoW 1.12.x Windows x86**。
+
+## 版本信息
+
+- DLL Version: `1.4.0-AURA6D4-R4-CAST1R2-LFX1-ARX1-DW1-LOS1`
+- API Version: `33`
+- Build: `20261016-v140-api33-mov-world-native-v2`
+- Platform: Windows x86
+- Lua: WoW Lua 5.0
+- Movement World Recovery: Native GameUI Hook
+- 基线：`52604754`
+- 正式合入 `main`：`77737065`
+
+## 核心 API
+
+### Core
+```
+TaiYangShenDian("Core.Version")
+TaiYangShenDian("Core.Status")
+```
+
+### Movement
+```
+TaiYangShenDian("Movement.Pause")
+TaiYangShenDian("Movement.Resume")
+TaiYangShenDian("Movement.IsPaused")
+```
+
+功能：
+
+- `Movement.Pause()` — 暂停当前移动
+- `Movement.Resume()` — 按当前实际按键状态恢复移动
+- `Movement.IsPaused()` — 查询暂停状态
+- 支持按住 W/A/S/D 时暂停与恢复
+- 支持切地图后恢复持续按键移动
+- 支持小退重新登录后恢复持续按键移动
+
+Movement World Recovery 使用 WoW 1.12 客户端原生 GameUI World 生命周期入口：
+```
+World Enter: 0x004908C0
+World Leave: 0x00490A80
+```
+
+### DrinkWalk
+```
+TaiYangShenDian("DrinkWalk.Status")
+TaiYangShenDian("DrinkWalk.ResolveItem")
+TaiYangShenDian("DrinkWalk.UseItem")
+```
+
+用于饮水/吃喝相关原生接口。
+
+### Aura
+```
+TaiYangShenDian("Aura.NativeBus.Status")
+
+TaiYangShenDian("Aura.Status")
+TaiYangShenDian("Aura.Diagnostics")
+TaiYangShenDian("Aura.Snapshot")
+
+TaiYangShenDian("Aura.Duration.Status")
+TaiYangShenDian("Aura.Duration.Snapshot")
+
+TaiYangShenDian("Aura.Source.Status")
+TaiYangShenDian("Aura.Source.Match")
+TaiYangShenDian("Aura.Source.Snapshot")
+
+TaiYangShenDian("Aura.Caster.Status")
+TaiYangShenDian("Aura.Caster.Match")
+TaiYangShenDian("Aura.Caster.Snapshot")
+
+TaiYangShenDian("Aura.State.Status")
+TaiYangShenDian("Aura.Get")
+TaiYangShenDian("Aura.List")
+```
+
+### Cast
+```
+TaiYangShenDian("Cast.Status")
+TaiYangShenDian("Cast.Get")
+
+TaiYangShenDian("Cast.State.Status")
+TaiYangShenDian("Cast.State.Get")
+TaiYangShenDian("Cast.State.GetByGuid")
+TaiYangShenDian("Cast.State.List")
+```
+
+### Boss
+```
+TaiYangShenDian("Boss.State")
+TaiYangShenDian("Boss.Status")
+TaiYangShenDian("Boss.Event.GetAfter")
+```
+
+`Boss.State`：查询指定单位的当前状态。
+
+`Boss.Status`：查询 Boss 事件状态、序号及缓冲区信息。
+
+`Boss.Event.GetAfter`：按事件序号读取后续 Boss 状态事件。
+
+### Unit
+```
+TaiYangShenDian("Unit.Identity")
+TaiYangShenDian("Unit.Guid")
+TaiYangShenDian("Unit.InSight")
+```
+
+### GroundProbe
+```
+TaiYangShenDian("GroundProbe.Status")
+TaiYangShenDian("GroundProbe.PlayerPosition")
+TaiYangShenDian("GroundProbe.Snapshot")
+TaiYangShenDian("GroundProbe.UnitByGuid")
+TaiYangShenDian("GroundProbe.UnitStateByGuid")
+TaiYangShenDian("GroundProbe.DynamicByGuid")
+TaiYangShenDian("GroundProbe.ScopeByGuid")
+TaiYangShenDian("GroundProbe.TotemSnapshot")
+```
+
+### AutoRange
+```
+TaiYangShenDian("AutoRange.RelationByUnit")
+TaiYangShenDian("AutoRange.RelationByGuid")
+
+TaiYangShenDian("AutoRange.VisualSet")
+TaiYangShenDian("AutoRange.VisualMove")
+TaiYangShenDian("AutoRange.VisualHide")
+TaiYangShenDian("AutoRange.VisualShow")
+TaiYangShenDian("AutoRange.VisualRestart")
+TaiYangShenDian("AutoRange.VisualStats")
+TaiYangShenDian("AutoRange.VisualClear")
+TaiYangShenDian("AutoRange.VisualClearAll")
+
+TaiYangShenDian("AutoRange.Status")
+TaiYangShenDian("AutoRange.Resolve")
+TaiYangShenDian("AutoRange.TriggerTrace")
+TaiYangShenDian("AutoRange.TotemInfo")
+```
+
+### DBC
+```
+TaiYangShenDian("DBC.Status")
+
+TaiYangShenDian("spell", spellID)
+TaiYangShenDian("spellradius", radiusID)
+TaiYangShenDian("spellrange", rangeID)
+TaiYangShenDian("spellduration", durationID)
+
+TaiYangShenDian("creaturespelldata", spellID)
+TaiYangShenDian("creaturespellsearch", spellID)
+TaiYangShenDian("creaturebyspell", spellID)
+
+TaiYangShenDian("itemdisplayinfo", displayID)
+
+TaiYangShenDian("spellvisual", visualID)
+TaiYangShenDian("spellvisualkit", kitID)
+TaiYangShenDian("spellvisualeffect", effectID)
+
+TaiYangShenDian("spellsearch", query, limit)
+```
+
+### MoonMarker
+```
+TaiYangShenDian("MoonMarker.Place")
+TaiYangShenDian("MoonMarker.Remote")
+TaiYangShenDian("MoonMarker.Clear")
+
+TaiYangShenDian("MoonMarker.Targeting.Begin")
+TaiYangShenDian("MoonMarker.Targeting.Update")
+TaiYangShenDian("MoonMarker.Targeting.Cancel")
+TaiYangShenDian("MoonMarker.Targeting.Commit")
+
+TaiYangShenDian("MoonMarker.Main.Remote")
+
+TaiYangShenDian("MoonMarker.Advanced.PreviewAt")
+TaiYangShenDian("MoonMarker.Advanced.PreviewAtPlayer")
+TaiYangShenDian("MoonMarker.Advanced.SetPreviewTransform")
+TaiYangShenDian("MoonMarker.Advanced.Main.PlaceAt")
+
+TaiYangShenDian("MoonMarker.Runtime.Status")
+```
+
+以及：
+```
+MoonMarker.Advanced.*
+```
+
+### DreamAvatar
+```
+DreamAvatar.*
+MoonMarker.DreamAvatar.*
+```
+
+### DreamWeapon
+```
+DreamWeapon.*
+MoonMarker.DreamWeapon.*
+```
+
+### Feature / Runtime
+```
+TaiYangShenDian("Feature.List")
+TaiYangShenDian("Feature.Status", feature)
+TaiYangShenDian("Feature.Enable", feature)
+TaiYangShenDian("Feature.Disable", feature)
+
+TaiYangShenDian("Runtime.WorldEvent", event)
+```
+
+### Facing / Speed
+```
+TaiYangShenDian("facing")
+TaiYangShenDian("speed")
+```
+
+### Diagnostics
+```
+TaiYangShenDian("Conflict.Scan")
+TaiYangShenDian("Conflict.Status")
+```
+
+### Profiler
+```
+TaiYangShenDian("profiler", ...)
+TaiYangShenDian("profilerdeep", ...)
+```
+
+## Feature 状态
+
+当前 DLL 提供：
+```
+facing
+speed
+groundprobe
+relation
+dbc
+visual
+dreamavatar
+dreamweapon
+```
+
+可通过：
+```
+TaiYangShenDian("Feature.List")
+TaiYangShenDian("Feature.Status", "facing")
+```
+
+查询。
+
+## Movement 实机验证
+
+本版本的 Movement World Recovery 已进行实际客户端验证：
+```
+Pause / Resume                         PASS
+按住 W → Pause → Resume               PASS
+切地图后保持 W → 恢复移动              PASS
+小退重新登录后保持 W → 恢复移动         PASS
+静止状态 Pause 不产生自动后退           PASS
+```
+
+Movement API 本次正式封版。
+
+## 兼容性
+
+- Turtle WoW
+- WoW 1.12.x / Vanilla x86
+- Windows x86
+- Lua 5.0
+
+## 文件
+```
+taiyangshendian.dll
+```
+
+同时提供：
+```
+taiyangshendian.dll
+taiyangshendian.dll.sha256
+```
