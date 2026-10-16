@@ -29,7 +29,7 @@ extern "C" void* __cdecl memmove(void* d,const void* s,unsigned int n){ unsigned
 namespace TYS {
 constexpr const char* DLL_VERSION = "1.4.0-AURA6D4-R4-CAST1R2-LFX1-ARX1-DW1-LOS1";
 constexpr const char* API_VERSION = "33";
-constexpr const char* BUILD_ID = "20261016-v140-api33-mov7-movement-hook-trace";
+constexpr const char* BUILD_ID = "20261016-v140-api33-mov-rebase-v1";
 constexpr DWORD DLL_PROCESS_ATTACH_ = 1;
 constexpr DWORD DLL_PROCESS_DETACH_ = 0;
 
@@ -656,155 +656,201 @@ static int doMovementDiagnostics(Lua50::State L){
 // The detour only rejects forward/backward/left/right movement *starts*.
 // Stop events and all other flags are forwarded to the original engine routine.
 namespace MovementNative {
-constexpr unsigned long HANDLER = 0x00515090UL;
-constexpr unsigned long CONTROLLER_GET = 0x005143E0UL;
+constexpr unsigned long HANDLER = 0x00515090UL; // CGInputControl::SetControlBit
+constexpr unsigned long CONTROLLER_GET = 0x005143E0UL; // CGInputControl::GetActive
 constexpr unsigned long INPUT_TIMESTAMP = 0x00CF0BC8UL;
-constexpr unsigned long MASK = 0x00000330UL; // CGInputControl movement bits: 0x10|0x20|0x100|0x200
-const unsigned long bits[4]={0x10UL,0x20UL,0x100UL,0x200UL};
-const int keys[4]={'W','S','A','D'};
+
+// Verified from WoW.exe build 5875 wrappers:
+// W: start=0x1000, stop=0x10
+// S: start=0x2000, stop=0x20
+// A: start=0x40,   stop=0x40 (set/clear selected by arg2)
+// D: start=0x80,   stop=0x80 (set/clear selected by arg2)
+constexpr unsigned long FORWARD_START  = 0x1000UL;
+constexpr unsigned long BACKWARD_START = 0x2000UL;
+constexpr unsigned long FORWARD_STOP   = 0x0010UL;
+constexpr unsigned long BACKWARD_STOP  = 0x0020UL;
+constexpr unsigned long STRAFE_LEFT    = 0x0040UL;
+constexpr unsigned long STRAFE_RIGHT   = 0x0080UL;
+
 using HandlerFn = void (__thiscall *)(void*,unsigned long,int,unsigned long,unsigned long);
 using ControllerFn = void* (__cdecl *)();
 using KeyStateFn = short (WINAPI *)(int);
+
 static HandlerFn next=0;
 static volatile LONG paused=0;
-static volatile LONG worldResyncPending=0;
-static volatile LONG worldResyncTicks=0;
-static volatile LONG worldTransitionGate=0;
 static bool hooked=false;
 static bool created=false;
+
 static KeyStateFn keyState(){
     HMODULE user32=GetModuleHandleA("user32.dll");
     return user32?(KeyStateFn)GetProcAddress(user32,"GetAsyncKeyState"):0;
 }
+
 static unsigned long heldKeys(KeyStateFn read){
     unsigned long result=0;
-    if(read)for(unsigned i=0;i<4;++i)if((read(keys[i])&0x8000)!=0)result|=bits[i];
+    if(read){
+        if((read('W')&0x8000)!=0)result|=FORWARD_START;
+        if((read('S')&0x8000)!=0)result|=BACKWARD_START;
+        if((read('A')&0x8000)!=0)result|=STRAFE_LEFT;
+        if((read('D')&0x8000)!=0)result|=STRAFE_RIGHT;
+    }
     return result;
 }
-static void __fastcall onMovement(void* self,void*,unsigned long flags,int starting,
+
+static bool isBlockedStart(unsigned long flags,int setBit){
+    // Forward/backward start wrappers use distinct 0x1000/0x2000 flags.
+    // W may pass setBit=0 while AutoRun is active, so do not key these on setBit.
+    if(flags& (FORWARD_START|BACKWARD_START))return true;
+
+    // A/D use the same flag for start and stop; only the set path is a start.
+    if(setBit && (flags&(STRAFE_LEFT|STRAFE_RIGHT)))return true;
+    return false;
+}
+
+static void __fastcall onMovement(void* self,void*,unsigned long flags,int setBit,
                                   unsigned long timestamp,unsigned long extra){
     if(!next)return;
-    unsigned long before=0,after=0;
-    if(self&&readable((unsigned char*)self+0x04,4))before=*(unsigned long*)((unsigned char*)self+0x04);
-    bool blocked=starting && (flags&MASK) &&
-       (InterlockedCompareExchange(&paused,0,0)!=0 ||
-        InterlockedCompareExchange(&worldTransitionGate,0,0)!=0);
-    if(blocked){
-        const unsigned long allowed=flags&~MASK;
-        if(allowed)next(self,allowed,starting,timestamp,extra);
-    }else next(self,flags,starting,timestamp,extra);
-    if(self&&readable((unsigned char*)self+0x04,4))after=*(unsigned long*)((unsigned char*)self+0x04);
-    movementTraceRecord(self,flags,starting,timestamp,extra,before,after);
+
+    if(InterlockedCompareExchange(&paused,0,0)!=0 && isBlockedStart(flags,setBit)){
+        return;
+    }
+
+    next(self,flags,setBit,timestamp,extra);
 }
+
 static bool ensureHook(const char** why){
     if(hooked)return true;
     if(!detectBuild().ok){*why="UNSUPPORTED_BUILD";return false;}
     if(!executable(HANDLER)||!executable(CONTROLLER_GET)||
-       !readable((void*)INPUT_TIMESTAMP,4)){*why="MOVE_API_UNAVAILABLE";return false;}
+       !readable((void*)INPUT_TIMESTAMP,4)){
+        *why="MOVE_API_UNAVAILABLE";return false;
+    }
+
     MH_STATUS init=MH_Initialize();
-    if(init!=MH_OK&&init!=MH_ERROR_ALREADY_INITIALIZED){*why="MOVE_HOOK_INIT_FAILED";return false;}
+    if(init!=MH_OK&&init!=MH_ERROR_ALREADY_INITIALIZED){
+        *why="MOVE_HOOK_INIT_FAILED";return false;
+    }
+
     if(!created){
-        MH_STATUS cr=MH_CreateHook((LPVOID)HANDLER,(LPVOID)&onMovement,(LPVOID*)&next);
+        MH_STATUS cr=MH_CreateHook(
+            (LPVOID)HANDLER,(LPVOID)&onMovement,(LPVOID*)&next);
         if(cr!=MH_OK){*why="MOVE_HOOK_CREATE_FAILED";return false;}
         created=true;
     }
+
     MH_STATUS en=MH_EnableHook((LPVOID)HANDLER);
-    if(en!=MH_OK&&en!=MH_ERROR_ENABLED){*why="MOVE_HOOK_ENABLE_FAILED";return false;}
+    if(en!=MH_OK&&en!=MH_ERROR_ENABLED){
+        *why="MOVE_HOOK_ENABLE_FAILED";return false;
+    }
+
     hooked=true;
     return true;
 }
-static void* controller(){return ((ControllerFn)CONTROLLER_GET)();}
-static bool updateControlBits(void* obj,unsigned long setMask,unsigned long clearMask){
-    if(!obj)return false;
-    volatile LONG* state=(volatile LONG*)((unsigned char*)obj+0x04);
-    LONG oldValue=InterlockedCompareExchange(state,0,0);
-    for(;;){
-        LONG nextValue=(oldValue|(LONG)setMask)&~(LONG)clearMask;
-        LONG observed=InterlockedCompareExchange(state,nextValue,oldValue);
-        if(observed==oldValue)return true;
-        oldValue=observed;
-    }
+
+static void* controller(){
+    return ((ControllerFn)CONTROLLER_GET)();
 }
+
 static void stopAll(void* obj){
-    // WoW 1.12.1 SetControlBit ultimately updates CGInputControl +0x04.
-    // Do this as a state mutation instead of calling the internal movement
-    // dispatcher from an insecure Lua call stack.
-    updateControlBits(obj,0,MASK);
+    if(!obj||!next)return;
+    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+
+    // These are the exact stop events emitted by the WoW wrappers.
+    // Forward/backward are set events; A/D are clear events.
+    next(obj,FORWARD_STOP,1,stamp,0);
+    next(obj,BACKWARD_STOP,1,stamp,0);
+    next(obj,STRAFE_LEFT,0,stamp,0);
+    next(obj,STRAFE_RIGHT,0,stamp,0);
 }
-static bool syncHeldKeysAfterWorldLoad(){
-    if(InterlockedCompareExchange(&worldResyncPending,0,0)==0)return true;
-    const LONG resyncTick=InterlockedCompareExchange(&worldResyncTicks,0,0);
-    if(resyncTick>=300){
-        InterlockedExchange(&worldResyncPending,0);
-        InterlockedExchange(&worldTransitionGate,0);
-        InterlockedExchange(&paused,0);
-        return true;
-    }
-    InterlockedExchange(&worldResyncTicks,resyncTick+1);
-    KeyStateFn read=keyState();
-    if(!read)return false;
-    const unsigned long held=heldKeys(read);
-    void* obj=controller();
-    if(!obj)return false;
-    // Reconstruct only the physical WASD intent in CGInputControl +0x04.
-    // No internal dispatcher call is made from the Lua frame callback.
-    InterlockedExchange(&paused,0);
-    updateControlBits(obj,held,0);
-    InterlockedExchange(&worldTransitionGate,0);
-    InterlockedExchange(&worldResyncPending,0);
-    return true;
+
+static void resumeHeld(void* obj,KeyStateFn read){
+    if(!obj||!next||!read)return;
+
+    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+
+    // W Start has a special AutoRun-dependent setBit:
+    // (~controllerState >> 12) & 1, exactly as the client wrapper does.
+    unsigned long state=*(volatile unsigned long*)((unsigned char*)obj+0x04);
+    int wSetBit=(int)((~state>>12)&1UL);
+
+    if(read('W')&0x8000)next(obj,FORWARD_START,wSetBit,stamp,0);
+    if(read('S')&0x8000)next(obj,BACKWARD_START,1,stamp,0);
+    if(read('A')&0x8000)next(obj,STRAFE_LEFT,1,stamp,0);
+    if(read('D')&0x8000)next(obj,STRAFE_RIGHT,1,stamp,0);
 }
+
 static void onWorldLeaving(){
-    // Preserve the pause state while the client destroys/recreates its input context.
-    // The separate transition gate rejects new physical Start events during loading.
-    InterlockedExchange(&worldResyncTicks,0);
-    InterlockedExchange(&worldTransitionGate,1);
-    InterlockedExchange(&worldResyncPending,1);
+    // World transition is a new input context. Clear only our logical gate;
+    // do not synthesize movement during loading.
+    InterlockedExchange(&paused,0);
 }
+
 static int dispatch(Lua50::State L,const char* command){
-    if(eq(command,"Movement.Diagnostics"))return doMovementDiagnostics(L);
     if(eq(command,"Movement.IsPaused")){
         Lua50::PushBool(L,InterlockedCompareExchange(&paused,0,0)!=0);
-        Lua50::PushString(L,"OK");return 2;
+        Lua50::PushString(L,"OK");
+        return 2;
     }
+
     if(eq(command,"Movement.Pause")){
-        if(InterlockedCompareExchange(&paused,0,0)!=0){pushBoolCode(L,true,"ALREADY_PAUSED");return 2;}
+        if(InterlockedCompareExchange(&paused,0,0)!=0){
+            pushBoolCode(L,true,"ALREADY_PAUSED");
+            return 2;
+        }
+
         const char* why="OK";
-        if(!ensureHook(&why)){pushBoolCode(L,false,why);return 2;}
+        if(!ensureHook(&why)){
+            pushBoolCode(L,false,why);
+            return 2;
+        }
+
         void* obj=controller();
-        if(!obj){pushBoolCode(L,false,"MOVE_CONTROLLER_UNAVAILABLE");return 2;}
-        // Engage the gate before stopping movement, so new starts cannot race in.
+        if(!obj){
+            pushBoolCode(L,false,"MOVE_CONTROLLER_UNAVAILABLE");
+            return 2;
+        }
+
+        // Gate first, then emit the client's real stop events.
         InterlockedExchange(&paused,1);
         stopAll(obj);
-        pushBoolCode(L,true,"WASD_PAUSED");return 2;
+
+        pushBoolCode(L,true,"WASD_PAUSED");
+        return 2;
     }
+
     if(eq(command,"Movement.Resume")){
-        if(InterlockedCompareExchange(&paused,0,0)==0){pushBoolCode(L,true,"ALREADY_RESUMED");return 2;}
+        if(InterlockedCompareExchange(&paused,0,0)==0){
+            pushBoolCode(L,true,"ALREADY_RESUMED");
+            return 2;
+        }
+
         KeyStateFn read=keyState();
-        if(!read){pushBoolCode(L,false,"KEY_STATE_UNAVAILABLE");return 2;}
+        if(!read){
+            pushBoolCode(L,false,"KEY_STATE_UNAVAILABLE");
+            return 2;
+        }
+
         void* obj=controller();
-        if(!obj){pushBoolCode(L,false,"MOVE_CONTROLLER_UNAVAILABLE");return 2;}
-        unsigned long held=heldKeys(read);
+        if(!obj){
+            pushBoolCode(L,false,"MOVE_CONTROLLER_UNAVAILABLE");
+            return 2;
+        }
+
         InterlockedExchange(&paused,0);
-        if(!updateControlBits(obj,held,0)){pushBoolCode(L,false,"MOVE_RESUME_FAILED");return 2;}
-        pushBoolCode(L,true,"OK");return 2;
+        resumeHeld(obj,read);
+
+        pushBoolCode(L,true,"OK");
+        return 2;
     }
+
     return -1;
 }
-} // namespace MovementNative
-
-static bool setRuntimeLifecycleOnUpdate(Lua50::State L,bool enabled);
-static int __fastcall runtimeLifecycleOnUpdate(Lua50::State L){
-    if(!L)return 0;
-    if(MovementNative::syncHeldKeysAfterWorldLoad())setRuntimeLifecycleOnUpdate(L,false);
-    return 0;
-}
+} // namespace MovementNativee
 
 static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
     if(!ev)return;
     if(eq(ev,"PLAYER_LEAVING_WORLD")){
         MovementNative::onWorldLeaving();
-        setRuntimeLifecycleOnUpdate(L,false);
         if(InterlockedCompareExchange(&g_worldPhase,2,2)==2)return;
         InterlockedExchange(&g_worldPhase,2);
         TysProfiler::onWorldLeaving(L);
@@ -814,15 +860,8 @@ static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
         if(g_visualSceneCreated||TysVisual::activeCount()||TysVisual::moonActiveCount())TysVisual::onWorldLeaving();
         return;
     }
-    if(eq(ev,"PLAYER_CONTROL_GAINED")){
-        if(MovementNative::syncHeldKeysAfterWorldLoad())setRuntimeLifecycleOnUpdate(L,false);
-        return;
-    }
     if(eq(ev,"PLAYER_ENTERING_WORLD")){
-        // Reset stale Movement pause before the world-phase deduplication gate.
-        // Defer a held-key resync until the world is ready for player control.
         MovementNative::onWorldLeaving();
-        setRuntimeLifecycleOnUpdate(L,true);
         if(InterlockedCompareExchange(&g_worldPhase,1,1)==1)return;
         InterlockedExchange(&g_worldPhase,1);
         TysProfiler::onWorldEntering(L);
