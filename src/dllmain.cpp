@@ -29,7 +29,7 @@ extern "C" void* __cdecl memmove(void* d,const void* s,unsigned int n){ unsigned
 namespace TYS {
 constexpr const char* DLL_VERSION = "1.4.0-AURA6D4-R4-CAST1R2-LFX1-ARX1-DW1-LOS1";
 constexpr const char* API_VERSION = "33";
-constexpr const char* BUILD_ID = "20261016-v140-api33-mov5-native-setcontrol-world-resync";
+constexpr const char* BUILD_ID = "20261016-v140-api33-mov6-native-control-state";
 constexpr DWORD DLL_PROCESS_ATTACH_ = 1;
 constexpr DWORD DLL_PROCESS_DETACH_ = 0;
 
@@ -668,12 +668,22 @@ static bool ensureHook(const char** why){
     return true;
 }
 static void* controller(){return ((ControllerFn)CONTROLLER_GET)();}
+static bool updateControlBits(void* obj,unsigned long setMask,unsigned long clearMask){
+    if(!obj)return false;
+    volatile LONG* state=(volatile LONG*)((unsigned char*)obj+0x04);
+    LONG oldValue=InterlockedCompareExchange(state,0,0);
+    for(;;){
+        LONG nextValue=(oldValue|(LONG)setMask)&~(LONG)clearMask;
+        LONG observed=InterlockedCompareExchange(state,nextValue,oldValue);
+        if(observed==oldValue)return true;
+        oldValue=observed;
+    }
+}
 static void stopAll(void* obj){
-    if(!obj||!next)return;
-    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
-    // CGInputControl::SetControlBit is the only validated 1.12.1 actuator here.
-    // Do not call guessed adjacent addresses as Start/Stop wrappers.
-    for(unsigned i=0;i<4;++i)next(obj,bits[i],0,stamp,0);
+    // WoW 1.12.1 SetControlBit ultimately updates CGInputControl +0x04.
+    // Do this as a state mutation instead of calling the internal movement
+    // dispatcher from an insecure Lua call stack.
+    updateControlBits(obj,0,MASK);
 }
 static bool syncHeldKeysAfterWorldLoad(){
     if(InterlockedCompareExchange(&worldResyncPending,0,0)==0)return true;
@@ -689,16 +699,11 @@ static bool syncHeldKeysAfterWorldLoad(){
     if(!read)return false;
     const unsigned long held=heldKeys(read);
     void* obj=controller();
-    if(!obj||!next)return false;
-    // Re-enter the movement state through the validated SetControlBit trampoline.
-    // Keep the transition gate active until the Start calls are issued.
-    if(held){
-        InterlockedExchange(&paused,0);
-        const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
-        for(unsigned i=0;i<4;++i)if(held&bits[i])next(obj,bits[i],1,stamp,0);
-    }else{
-        InterlockedExchange(&paused,0);
-    }
+    if(!obj)return false;
+    // Reconstruct only the physical WASD intent in CGInputControl +0x04.
+    // No internal dispatcher call is made from the Lua frame callback.
+    InterlockedExchange(&paused,0);
+    updateControlBits(obj,held,0);
     InterlockedExchange(&worldTransitionGate,0);
     InterlockedExchange(&worldResyncPending,0);
     return true;
@@ -734,8 +739,7 @@ static int dispatch(Lua50::State L,const char* command){
         if(!obj){pushBoolCode(L,false,"MOVE_CONTROLLER_UNAVAILABLE");return 2;}
         unsigned long held=heldKeys(read);
         InterlockedExchange(&paused,0);
-        const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
-        for(unsigned i=0;i<4;++i)if(held&bits[i])next(obj,bits[i],1,stamp,0);
+        if(!updateControlBits(obj,held,0)){pushBoolCode(L,false,"MOVE_RESUME_FAILED");return 2;}
         pushBoolCode(L,true,"OK");return 2;
     }
     return -1;
