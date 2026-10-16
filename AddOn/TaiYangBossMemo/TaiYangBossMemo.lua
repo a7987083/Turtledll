@@ -13,7 +13,7 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function()
     end
 end
 local function TaiYangBossMemoInitialize()
--- TaiYangBossMemo 1.1.3 | WoW 1.12.1 / Lua 5.0
+-- TaiYangBossMemo 1.1.4 | WoW 1.12.1 / Lua 5.0
 -- Shared account boss catalog + character-specific notes; old account DB is migration-only.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
 local db,shown=nil,{}
@@ -985,6 +985,7 @@ local function itemTexture(id,stock)
     if type(GetItemIcon)=="function" then return GetItemIcon(id) end
     if type(GetItemInfo)=="function" then local _,_,_,_,_,_,_,_,texture=GetItemInfo(id);return texture end
 end
+local render=TaiYangBossMemoUIRender
 local function redrawStock()
     for col=1,2 do
         local list=groupLists[col]
@@ -995,10 +996,10 @@ local function redrawStock()
         title:ClearAllPoints()
         title:SetPoint("TOPLEFT",popup,"TOPLEFT",(col==1) and 26 or 287,columnTop)
         if col==1 then
-            title:SetText("不足物品（"..count.."）")
+            render.SetText(title,"不足物品（"..count.."）")
             title:SetTextColor(1,0.25,0.25)
         else
-            title:SetText("已达标物品（"..count.."）")
+            render.SetText(title,"已达标物品（"..count.."）")
             title:SetTextColor(0.2,1,0.3)
         end
         for i=1,GROUP_SIZE do
@@ -1007,17 +1008,17 @@ local function redrawStock()
             r.frame:SetPoint("TOPLEFT",popup,"TOPLEFT",(col==1) and 26 or 287,columnTop-29-(i-1)*31)
             local item=list[groupOffsets[col]+i]
             if item then
-                r.icon:SetTexture(item.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
-                r.name:SetText(item.name)
+                render.SetTexture(r.icon,item.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+                render.SetText(r.name,item.name)
                 if col==1 then r.name:SetTextColor(1,0.75,0.75);r.count:SetTextColor(1,0.25,0.25)
                 else r.name:SetTextColor(1,1,1);r.count:SetTextColor(0.15,1,0.2) end
-                r.count:SetText(item.have.." / "..item.need)
+                render.SetText(r.count,item.have.." / "..item.need)
                 r.frame:Show()
             else r.frame:Hide() end
         end
         local nav=groupNav[col]
         if count>GROUP_SIZE then
-            nav.page:SetText((groupOffsets[col]+1).."-"..math.min(count,groupOffsets[col]+GROUP_SIZE).." / "..count)
+            render.SetText(nav.page,(groupOffsets[col]+1).."-"..math.min(count,groupOffsets[col]+GROUP_SIZE).." / "..count)
             nav.prev:Show();nav.nextBtn:Show();nav.page:Show()
         else nav.prev:Hide();nav.nextBtn:Hide();nav.page:Hide() end
     end
@@ -1062,7 +1063,7 @@ local function refreshAlertOutfits(available)
         local b=alertSetButtons[i]
         if name then
             local missing=setMissing(sets[name].slots,available)
-            b:SetText(name..(missing==0 and "（装备齐全）" or "（缺失"..missing.."件）"))
+            render.SetText(b,name..(missing==0 and "（装备齐全）" or "（缺失"..missing.."件）"))
             b.setName=name
             b:Show()
         else b.setName=nil;b:Hide() end
@@ -1468,7 +1469,7 @@ local function syncSettings()
     resetAll:SetChecked(d.realertAfterReset)
     updateRate()
     updateDuration()
-    trackerInfo:SetText("DLL："..(type(TaiYangShenDian)=="function" and "已检测" or "未检测到").."   战斗状态缓存 "..countTracks().." 个 Boss")
+    render.SetText(trackerInfo,"DLL："..(type(TaiYangShenDian)=="function" and "已检测" or "未检测到").."   战斗状态缓存 "..countTracks().." 个 Boss")
 end
 local settingsTicker=CreateFrame("Frame",nil,settings)
 local settingsElapsed=0
