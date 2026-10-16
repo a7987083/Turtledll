@@ -29,7 +29,7 @@ extern "C" void* __cdecl memmove(void* d,const void* s,unsigned int n){ unsigned
 namespace TYS {
 constexpr const char* DLL_VERSION = "1.4.0-AURA6D4-R4-CAST1R2-LFX1-ARX1-DW1-LOS1";
 constexpr const char* API_VERSION = "33";
-constexpr const char* BUILD_ID = "20261016-v140-api33-mov4-native-wasd-world-resync-retry";
+constexpr const char* BUILD_ID = "20261016-v140-api33-mov5-native-setcontrol-world-resync";
 constexpr DWORD DLL_PROCESS_ATTACH_ = 1;
 constexpr DWORD DLL_PROCESS_DETACH_ = 0;
 
@@ -616,8 +616,8 @@ namespace MovementNative {
 constexpr unsigned long HANDLER = 0x00515090UL;
 constexpr unsigned long CONTROLLER_GET = 0x005143E0UL;
 constexpr unsigned long INPUT_TIMESTAMP = 0x00CF0BC8UL;
-constexpr unsigned long MASK = 0x000000F0UL; // W/S/A/D: 0x10|0x20|0x40|0x80
-const unsigned long bits[4]={0x10UL,0x20UL,0x40UL,0x80UL};
+constexpr unsigned long MASK = 0x00000330UL; // CGInputControl movement bits: 0x10|0x20|0x100|0x200
+const unsigned long bits[4]={0x10UL,0x20UL,0x100UL,0x200UL};
 const int keys[4]={'W','S','A','D'};
 using HandlerFn = void (__thiscall *)(void*,unsigned long,int,unsigned long,unsigned long);
 using ControllerFn = void* (__cdecl *)();
@@ -628,6 +628,7 @@ static HandlerFn next=0;
 static volatile LONG paused=0;
 static volatile LONG worldResyncPending=0;
 static volatile LONG worldResyncTicks=0;
+static volatile LONG worldTransitionGate=0;
 static bool hooked=false;
 static bool created=false;
 static KeyStateFn keyState(){
@@ -642,7 +643,9 @@ static unsigned long heldKeys(KeyStateFn read){
 static void __fastcall onMovement(void* self,void*,unsigned long flags,int starting,
                                   unsigned long timestamp,unsigned long extra){
     if(!next)return;
-    if(starting && (flags&MASK) && InterlockedCompareExchange(&paused,0,0)!=0){
+    if(starting && (flags&MASK) &&
+       (InterlockedCompareExchange(&paused,0,0)!=0 ||
+        InterlockedCompareExchange(&worldTransitionGate,0,0)!=0)){
         const unsigned long allowed=flags&~MASK;
         if(allowed)next(self,allowed,starting,timestamp,extra);
         return;
@@ -653,11 +656,6 @@ static bool ensureHook(const char** why){
     if(hooked)return true;
     if(!detectBuild().ok){*why="UNSUPPORTED_BUILD";return false;}
     if(!executable(HANDLER)||!executable(CONTROLLER_GET)||
-       !executable(WoW112::MOVE_FORWARD_START)||!executable(WoW112::MOVE_BACKWARD_START)||
-       !executable(WoW112::MOVE_STRAFE_LEFT_START)||!executable(WoW112::MOVE_STRAFE_RIGHT_START)||
-       !executable(WoW112::MOVE_FORWARD_STOP)||!executable(WoW112::MOVE_BACKWARD_STOP)||
-       !executable(WoW112::MOVE_STRAFE_LEFT_STOP)||!executable(WoW112::MOVE_STRAFE_RIGHT_STOP)||
-       !executable(WoW112::MOVE_INPUT_CONTEXT_CHECK)||
        !readable((void*)INPUT_TIMESTAMP,4)){*why="MOVE_API_UNAVAILABLE";return false;}
     MH_STATUS init=MH_Initialize();
     if(init!=MH_OK&&init!=MH_ERROR_ALREADY_INITIALIZED){*why="MOVE_HOOK_INIT_FAILED";return false;}
@@ -674,48 +672,44 @@ static bool ensureHook(const char** why){
 static void* controller(){return ((ControllerFn)CONTROLLER_GET)();}
 static void stopAll(void* obj){
     if(!obj||!next)return;
-    const MovementStartFn stops[4]={
-        (MovementStartFn)WoW112::MOVE_FORWARD_STOP,
-        (MovementStartFn)WoW112::MOVE_BACKWARD_STOP,
-        (MovementStartFn)WoW112::MOVE_STRAFE_LEFT_STOP,
-        (MovementStartFn)WoW112::MOVE_STRAFE_RIGHT_STOP
-    };
-    for(unsigned i=0;i<4;++i)if(executable((unsigned long)stops[i]))stops[i]();
+    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+    // CGInputControl::SetControlBit is the only validated 1.12.1 actuator here.
+    // Do not call guessed adjacent addresses as Start/Stop wrappers.
+    for(unsigned i=0;i<4;++i)next(obj,bits[i],0,stamp,0);
 }
 static bool syncHeldKeysAfterWorldLoad(){
     if(InterlockedCompareExchange(&worldResyncPending,0,0)==0)return true;
     const LONG resyncTick=InterlockedCompareExchange(&worldResyncTicks,0,0);
     if(resyncTick>=300){
         InterlockedExchange(&worldResyncPending,0);
+        InterlockedExchange(&worldTransitionGate,0);
+        InterlockedExchange(&paused,0);
         return true;
     }
     InterlockedExchange(&worldResyncTicks,resyncTick+1);
     KeyStateFn read=keyState();
     if(!read)return false;
     const unsigned long held=heldKeys(read);
-    if(!held){InterlockedExchange(&worldResyncPending,0);return true;}
-    MovementContextFn context=(MovementContextFn)WoW112::MOVE_INPUT_CONTEXT_CHECK;
-    if(!context||context((void*)0)==0)return false;
-    const MovementStartFn starts[4]={
-        (MovementStartFn)WoW112::MOVE_FORWARD_START,
-        (MovementStartFn)WoW112::MOVE_BACKWARD_START,
-        (MovementStartFn)WoW112::MOVE_STRAFE_LEFT_START,
-        (MovementStartFn)WoW112::MOVE_STRAFE_RIGHT_START
-    };
-    InterlockedExchange(&paused,0);
-    bool invoked=false;
-    for(unsigned i=0;i<4;++i)if((held&bits[i])&&executable((unsigned long)starts[i])){
-        starts[i]();
-        invoked=true;
+    void* obj=controller();
+    if(!obj||!next)return false;
+    // Re-enter the movement state through the validated SetControlBit trampoline.
+    // Keep the transition gate active until the Start calls are issued.
+    if(held){
+        InterlockedExchange(&paused,0);
+        const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+        for(unsigned i=0;i<4;++i)if(held&bits[i])next(obj,bits[i],1,stamp,0);
+    }else{
+        InterlockedExchange(&paused,0);
     }
-    if(invoked)InterlockedExchange(&worldResyncPending,0);
-    return invoked;
+    InterlockedExchange(&worldTransitionGate,0);
+    InterlockedExchange(&worldResyncPending,0);
+    return true;
 }
 static void onWorldLeaving(){
-    // The engine may recreate its movement state across a loading screen.
-    // Clear our gate, then request one post-load sync of physically held WASD keys.
-    InterlockedExchange(&paused,0);
+    // Preserve the pause state while the client destroys/recreates its input context.
+    // The separate transition gate rejects new physical Start events during loading.
     InterlockedExchange(&worldResyncTicks,0);
+    InterlockedExchange(&worldTransitionGate,1);
     InterlockedExchange(&worldResyncPending,1);
 }
 static int dispatch(Lua50::State L,const char* command){
