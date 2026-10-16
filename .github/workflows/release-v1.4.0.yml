@@ -343,3 +343,5 @@ EOF
               --notes-file release-notes.md \
               --latest
           fi
+
+# Release trigger for the v1.4.0 main build.
