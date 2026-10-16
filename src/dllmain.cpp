@@ -631,7 +631,7 @@ static void appendHexField(char* out,unsigned long cap,const char* key,unsigned 
     cat(out,cap,key);char h[16]={0};hex32(h,sizeof(h),v);cat(out,cap,h);
 }
 static int doMovementDiagnostics(Lua50::State L){
-    char out[12000]={0};
+    char out[4096]={0};
     LONG total=InterlockedCompareExchange(&g_movementTraceWrite,0,0);
     unsigned long count=(unsigned long)(total<32?total:32);
     cat(out,sizeof(out),"COUNT=");appendUInt(out,sizeof(out),count);
