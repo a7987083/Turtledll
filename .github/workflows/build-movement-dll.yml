@@ -46,3 +46,15 @@ jobs:
             taiyangshendian.dll
             taiyangshendian.dll.sha256
           if-no-files-found: error
+
+      - name: Publish TaiYangShenDian v1.4.0
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create v1.4.0 taiyangshendian.dll taiyangshendian.dll.sha256 \
+            --repo "${{ github.repository }}" \
+            --target "${GITHUB_SHA}" \
+            --title "TaiYangShenDian v1.4.0" \
+            --notes-file release/TaiYangShenDian-v1.4.0.md
