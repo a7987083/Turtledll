@@ -162,3 +162,7 @@ constexpr unsigned long TYPE_PLAYER = 4UL;
 constexpr unsigned long TYPE_GAMEOBJECT = 5UL;
 constexpr unsigned long TYPE_DYNAMICOBJECT = 6UL;
 }
+
+// WoW 1.12.1 GameUI world lifecycle roots verified against supplied WoW.exe.
+constexpr unsigned long GAMEUI_ENTER_WORLD = 0x004908C0UL;
+constexpr unsigned long GAMEUI_LEAVE_WORLD = 0x00490A80UL;

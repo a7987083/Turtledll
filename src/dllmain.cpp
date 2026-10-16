@@ -29,7 +29,7 @@ extern "C" void* __cdecl memmove(void* d,const void* s,unsigned int n){ unsigned
 namespace TYS {
 constexpr const char* DLL_VERSION = "1.4.0-AURA6D4-R4-CAST1R2-LFX1-ARX1-DW1-LOS1";
 constexpr const char* API_VERSION = "33";
-constexpr const char* BUILD_ID = "20261014-v140-api33-mov1-native-wasd";
+constexpr const char* BUILD_ID = "20261016-v140-api33-mov-world-native-v2";
 constexpr DWORD DLL_PROCESS_ATTACH_ = 1;
 constexpr DWORD DLL_PROCESS_DETACH_ = 0;
 
@@ -668,8 +668,77 @@ static void stopAll(void* obj){
     const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
     for(unsigned i=0;i<4;++i)next(obj,bits[i],0,stamp,0);
 }
+using WorldLifecycleFn = void (__cdecl *)();
+static WorldLifecycleFn nextWorldEnter=0;
+static WorldLifecycleFn nextWorldLeave=0;
+static bool worldEnterCreated=false;
+static bool worldLeaveCreated=false;
+static bool worldEnterHooked=false;
+static bool worldLeaveHooked=false;
+static char worldHookStatus[96]="NOT_INSTALLED";
+
+static void restoreHeldAfterNativeWorldEnter(){
+    // This is intentionally the same key-state/read-and-Start path already
+    // validated by Movement.Resume in the 52604754 baseline. The only change
+    // is when it is invoked: after the client's native GameUI enter cascade.
+    KeyStateFn read=keyState();
+    void* obj=controller();
+    if(!read||!obj)return;
+    const unsigned long heldNow=heldKeys(read);
+    if(!heldNow)return;
+    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+    for(unsigned i=0;i<4;++i)if(heldNow&bits[i])next(obj,bits[i],1,stamp,0);
+}
+
+static void __cdecl onNativeWorldLeave(){
+    // Clear our gate before the client tears down the old world.
+    InterlockedExchange(&paused,0);
+    if(nextWorldLeave)nextWorldLeave();
+}
+
+static void __cdecl onNativeWorldEnter(){
+    // Let the client finish its own GameUI/world reconstruction first.
+    if(nextWorldEnter)nextWorldEnter();
+    InterlockedExchange(&paused,0);
+    restoreHeldAfterNativeWorldEnter();
+}
+
+static bool installWorldLifecycleHooks(const char** why){
+    if(worldEnterHooked&&worldLeaveHooked){*why="WORLD_HOOKS_READY";return true;}
+    if(!detectBuild().ok){*why="UNSUPPORTED_BUILD";return false;}
+    const unsigned long enter=GAMEUI_ENTER_WORLD;
+    const unsigned long leave=GAMEUI_LEAVE_WORLD;
+    if(!executable(enter)||!executable(leave)){*why="WORLD_ROOT_NOT_EXECUTABLE";return false;}
+
+    MH_STATUS init=MH_Initialize();
+    if(init!=MH_OK&&init!=MH_ERROR_ALREADY_INITIALIZED){*why="WORLD_HOOK_INIT_FAILED";return false;}
+
+    if(!worldEnterCreated){
+        MH_STATUS cr=MH_CreateHook((LPVOID)enter,(LPVOID)&onNativeWorldEnter,(LPVOID*)&nextWorldEnter);
+        if(cr!=MH_OK){*why="WORLD_ENTER_HOOK_CREATE_FAILED";return false;}
+        worldEnterCreated=true;
+    }
+    if(!worldLeaveCreated){
+        MH_STATUS cr=MH_CreateHook((LPVOID)leave,(LPVOID)&onNativeWorldLeave,(LPVOID*)&nextWorldLeave);
+        if(cr!=MH_OK){*why="WORLD_LEAVE_HOOK_CREATE_FAILED";return false;}
+        worldLeaveCreated=true;
+    }
+
+    MH_STATUS enEnter=MH_EnableHook((LPVOID)enter);
+    if(enEnter!=MH_OK&&enEnter!=MH_ERROR_ENABLED){*why="WORLD_ENTER_HOOK_ENABLE_FAILED";return false;}
+    MH_STATUS enLeave=MH_EnableHook((LPVOID)leave);
+    if(enLeave!=MH_OK&&enLeave!=MH_ERROR_ENABLED){*why="WORLD_LEAVE_HOOK_ENABLE_FAILED";return false;}
+
+    worldEnterHooked=true;
+    worldLeaveHooked=true;
+    cpy(worldHookStatus,sizeof(worldHookStatus),"READY_NATIVE_GAMEUI_4908C0_490A80");
+    *why=worldHookStatus;
+    return true;
+}
+
 static void onWorldLeaving(){
-    // No synthetic movement restart while transitioning worlds.
+    // Kept for the existing Lua lifecycle path. Native GameUI hooks are the
+    // authoritative movement recovery path in v2.
     InterlockedExchange(&paused,0);
 }
 static int dispatch(Lua50::State L,const char* command){
@@ -1377,6 +1446,7 @@ static void buildConflictReport(){
     cat(o,cap,"\nPLAYER_LOAD|OBS="); cat(o,cap,g_playerObserve);
     cat(o,cap,"\nPLAYER_HOOK|MODE="); cat(o,cap,g_playerHookMode); cat(o,cap,"|ENABLED="); cat(o,cap,g_playerEnabled?"1":"0"); cat(o,cap,"|TARGET="); char h[16]={0};hex32(h,sizeof(h),g_playerHookTarget);cat(o,cap,h);
     cat(o,cap,"\nAURA|BACKEND=");cat(o,cap,TysAuraNative::backend());cat(o,cap,"|STATUS=");cat(o,cap,TysAuraNative::status());cat(o,cap,"|NATIVE_HOOKS=");cat(o,cap,TysAuraNative::nativeHooksInstalled()?"1":"0");cat(o,cap,"|EVENTS_READY=");cat(o,cap,TysAuraNative::eventsReady()?"1":"0");cat(o,cap,"|NATIVE_BUS=");cat(o,cap,TysNativeBus::status());
+    cat(o,cap,"\nMOVEMENT_WORLD|STATUS="); cat(o,cap,MovementNative::worldHookStatus);
     cat(o,cap,"\nGLUE_LOAD|OBS="); cat(o,cap,g_glueObserve);
     cat(o,cap,"\nFRAME_REGISTER|OBS="); cat(o,cap,g_frameObserve);
     const char* fc="";facingPreflight(&fc);
@@ -1418,6 +1488,9 @@ static void doLoad(){
     observeEntry(WoW112::PLAYER_LOAD_SCRIPT_FUNCTIONS,"PLAYER_LOAD_SCRIPT_FUNCTIONS observe-only",g_playerObserve,sizeof(g_playerObserve));
     observeEntry(WoW112::GLUE_LOAD_SCRIPT_FUNCTIONS,"GLUE_LOAD_SCRIPT_FUNCTIONS observe-only",g_glueObserve,sizeof(g_glueObserve));
     observeEntry(WoW112::FRAME_SCRIPT_REGISTER_FUNCTION,"FRAME_SCRIPT_REGISTER_FUNCTION observe-only",g_frameObserve,sizeof(g_frameObserve));
+    const char* worldWhy="WORLD_HOOK_NOT_ATTEMPTED";
+    if(MovementNative::installWorldLifecycleHooks(&worldWhy)) logText("Movement native world hooks: READY\r\n");
+    else { logText("Movement native world hooks: "); logText(worldWhy); logText("\r\n"); }
     if(installPlayerHookDirect()){ logText("PLAYER lifecycle post-hook enabled: "); logText(g_playerHookMode); logText("\r\n"); }
     else { logText("PLAYER lifecycle post-hook NOT enabled: "); logText(g_playerHookMode); logText("\r\n"); }
     registerAfterLifecycle("OK_DIRECT_LOAD"); buildConflictReport(); InterlockedExchange(&g_loaded,1); logText("Load complete\r\n");
