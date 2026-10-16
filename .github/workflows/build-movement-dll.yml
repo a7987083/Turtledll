@@ -2,7 +2,7 @@ name: Build Movement DLL x86
 
 on:
   push:
-    branches: [dll-dev, dll-dev-movement-world-native-v2]
+    branches: [dll-dev]
     paths:
       - 'src/**'
       - 'build/**'
