@@ -624,6 +624,7 @@ using ControllerFn = void* (__cdecl *)();
 using KeyStateFn = short (WINAPI *)(int);
 static HandlerFn next=0;
 static volatile LONG paused=0;
+static volatile LONG worldResyncPending=0;
 static bool hooked=false;
 static bool created=false;
 static KeyStateFn keyState(){
@@ -668,9 +669,24 @@ static void stopAll(void* obj){
     const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
     for(unsigned i=0;i<4;++i)next(obj,bits[i],0,stamp,0);
 }
-static void onWorldLeaving(){
-    // No synthetic movement restart while transitioning worlds.
+static void syncHeldKeysAfterWorldLoad(){
+    if(InterlockedCompareExchange(&worldResyncPending,0,0)==0)return;
+    KeyStateFn read=keyState();
+    if(!read)return;
+    void* obj=controller();
+    if(!obj||!next)return;
+    const unsigned long held=heldKeys(read);
+    InterlockedExchange(&worldResyncPending,0);
+    if(!held)return;
     InterlockedExchange(&paused,0);
+    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+    for(unsigned i=0;i<4;++i)if(held&bits[i])next(obj,bits[i],1,stamp,0);
+}
+static void onWorldLeaving(){
+    // The engine may recreate its movement state across a loading screen.
+    // Clear our gate, then request one post-load sync of physically held WASD keys.
+    InterlockedExchange(&paused,0);
+    InterlockedExchange(&worldResyncPending,1);
 }
 static int dispatch(Lua50::State L,const char* command){
     if(eq(command,"Movement.IsPaused")){
@@ -717,10 +733,15 @@ static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
         if(g_visualSceneCreated||TysVisual::activeCount()||TysVisual::moonActiveCount())TysVisual::onWorldLeaving();
         return;
     }
+    if(eq(ev,"PLAYER_CONTROL_GAINED")){
+        MovementNative::syncHeldKeysAfterWorldLoad();
+        return;
+    }
     if(eq(ev,"PLAYER_ENTERING_WORLD")){
         // Reset stale Movement pause before the world-phase deduplication gate.
-        // Never synthesize movement Start when entering a world.
+        // Defer a held-key resync until the world is ready for player control.
         MovementNative::onWorldLeaving();
+        MovementNative::syncHeldKeysAfterWorldLoad();
         if(InterlockedCompareExchange(&g_worldPhase,1,1)==1)return;
         InterlockedExchange(&g_worldPhase,1);
         TysProfiler::onWorldEntering(L);
@@ -771,7 +792,7 @@ static bool installRuntimeLifecycleFrame(Lua50::State L){
     Lua50::PushString(L,"Frame");Lua50::PushString(L,"TaiYangShenDianRuntimeLifecycleFrame");
     if(Lua50::PCall(L,2,1,0)!=0){Lua50::SetTop(L,top);cpy(g_runtimeLifecycleStatus,sizeof(g_runtimeLifecycleStatus),"CREATEFRAME_FAILED");return false;}
     const int frameIndex=top+1;
-    if(!callFrameMethodString(L,frameIndex,"RegisterEvent","PLAYER_LEAVING_WORLD")||!callFrameMethodString(L,frameIndex,"RegisterEvent","PLAYER_ENTERING_WORLD")){
+    if(!callFrameMethodString(L,frameIndex,"RegisterEvent","PLAYER_LEAVING_WORLD")||!callFrameMethodString(L,frameIndex,"RegisterEvent","PLAYER_ENTERING_WORLD")||!callFrameMethodString(L,frameIndex,"RegisterEvent","PLAYER_CONTROL_GAINED")){
         Lua50::SetTop(L,top);cpy(g_runtimeLifecycleStatus,sizeof(g_runtimeLifecycleStatus),"REGISTER_EVENT_FAILED");return false;
     }
     const int methodTop=Lua50::GetTop(L);
