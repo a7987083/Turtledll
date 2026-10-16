@@ -641,7 +641,7 @@ static int doMovementDiagnostics(Lua50::State L){
     for(unsigned long i=0;i<count;++i){
         unsigned long logical=(unsigned long)total-count+i;
         const MovementTrace& e=g_movementTrace[logical%32UL];
-        cat(out,sizeof(out),"\n");
+        cat(out,outCap,"\n");
         appendHexField(out,outCap,"SELF=",e.self);cat(out,outCap,"|FLAGS=");appendHexField(out,outCap,"",e.flags);
         cat(out,outCap,"|START=");appendInt(out,outCap,e.starting);
         cat(out,outCap,"|TS=");appendUInt(out,outCap,e.timestamp);
