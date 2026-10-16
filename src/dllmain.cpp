@@ -887,20 +887,6 @@ static bool callFrameMethodString(Lua50::State L,int frameIndex,const char* meth
     const int rc=Lua50::PCall(L,2,0,0);Lua50::SetTop(L,top);return rc==0;
 }
 
-static bool setRuntimeLifecycleOnUpdate(Lua50::State L,bool enabled){
-    if(!L)return false;
-    const int top=Lua50::GetTop(L);
-    Lua50::GetGlobal(L,"TaiYangShenDianRuntimeLifecycleFrame");
-    if(Lua50::Type(L,-1)!=5){Lua50::SetTop(L,top);return false;}
-    Lua50::PushString(L,"SetScript");Lua50::GetTable(L,-2);
-    if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);return false;}
-    Lua50::PushValue(L,-2);Lua50::PushString(L,"OnUpdate");
-    if(enabled)Lua50::PushCClosure(L,&runtimeLifecycleOnUpdate,0);else Lua50::PushNil(L);
-    const int rc=Lua50::PCall(L,3,0,0);
-    Lua50::SetTop(L,top);
-    return rc==0;
-}
-
 static bool installRuntimeLifecycleFrame(Lua50::State L){
     if(!L)return false;
     if(g_runtimeLifecycleState==L&&eq(g_runtimeLifecycleStatus,"INSTALLED")){
@@ -926,7 +912,7 @@ static bool installRuntimeLifecycleFrame(Lua50::State L){
     Lua50::PushString(L,"Frame");Lua50::PushString(L,"TaiYangShenDianRuntimeLifecycleFrame");
     if(Lua50::PCall(L,2,1,0)!=0){Lua50::SetTop(L,top);cpy(g_runtimeLifecycleStatus,sizeof(g_runtimeLifecycleStatus),"CREATEFRAME_FAILED");return false;}
     const int frameIndex=top+1;
-    if(!callFrameMethodString(L,frameIndex,"RegisterEvent","PLAYER_LEAVING_WORLD")||!callFrameMethodString(L,frameIndex,"RegisterEvent","PLAYER_ENTERING_WORLD")||!callFrameMethodString(L,frameIndex,"RegisterEvent","PLAYER_CONTROL_GAINED")){
+    if(!callFrameMethodString(L,frameIndex,"RegisterEvent","PLAYER_LEAVING_WORLD")||!callFrameMethodString(L,frameIndex,"RegisterEvent","PLAYER_ENTERING_WORLD")){
         Lua50::SetTop(L,top);cpy(g_runtimeLifecycleStatus,sizeof(g_runtimeLifecycleStatus),"REGISTER_EVENT_FAILED");return false;
     }
     const int methodTop=Lua50::GetTop(L);
