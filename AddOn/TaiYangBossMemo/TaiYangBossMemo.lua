@@ -13,7 +13,7 @@ SlashCmdList["TAIYANGBOSSMEMO"]=function()
     end
 end
 local function TaiYangBossMemoInitialize()
--- TaiYangBossMemo 1.1.5 | WoW 1.12.1 / Lua 5.0
+-- TaiYangBossMemo 1.1.6 | WoW 1.12.1 / Lua 5.0
 -- Shared account boss catalog + character-specific notes; old account DB is migration-only.
 local PREFIX="|cffffd100[太阳Boss备忘录]|r "
 local db,shown=nil,{}
@@ -99,6 +99,7 @@ local function getDB()
     end
     if db.enabled==nil then db.enabled=true end
     if db.before==nil then db.before=true end
+    if db.mapReminder==nil then db.mapReminder=false end
     if db.realertAfterReset==nil then db.realertAfterReset=false end
     if db.alertSeconds~=0 and db.alertSeconds~=5 and db.alertSeconds~=10 and db.alertSeconds~=15 then db.alertSeconds=0 end
     if type(db.alertPos)~="table" then db.alertPos=nil end
@@ -1120,6 +1121,7 @@ local function playerIsDead()
     -- Vanilla WoW 1.12 native API; do not consume a reminder when dead/ghost.
     return type(UnitIsDeadOrGhost)=="function" and not not UnitIsDeadOrGhost("player")
 end
+local renderCurrentAlert
 local function displayNext()
     -- Queued reminders must still refer to enabled, existing notes when shown.
     while table.getn(queue)>0 do
@@ -1142,7 +1144,11 @@ local function displayNext()
     activeAlert=table.remove(queue,1)
     alertRemaining=getDB().alertSeconds
     queueKeys[activeAlert.key]=nil
-    pTitle:SetText(activeAlert.title..(table.getn(queue)>0 and " (待处理 "..table.getn(queue)..")" or ""))
+    renderCurrentAlert()
+end
+renderCurrentAlert=function()
+    if not activeAlert then return end
+    pTitle:SetText(activeAlert.title..(not activeAlert.preview and table.getn(queue)>0 and " (待处理 "..table.getn(queue)..")" or ""))
     local body=trim(activeAlert.body or "")
     if body=="" then
         pBody:Hide()
@@ -1159,6 +1165,15 @@ local function displayNext()
     refreshActiveStock()
     alertSetPage=1;updateAlertGear()
     popup:Show()
+end
+local function showBossPreparation(key)
+    local b=bossInfo(key)
+    local n=note(key)
+    if not b or not n then return end
+    -- Preview does not create a GUID, consume a reminder, or enter the queue.
+    activeAlert={key="preview:"..tostring(key),entry=key,title="战前提醒 · "..(b.name or "Boss"),body=n.before or "",preview=true}
+    alertRemaining=0
+    renderCurrentAlert()
 end
 refreshActiveStock=function()
     groupLists[1]={};groupLists[2]={}
@@ -1188,7 +1203,7 @@ pClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
 alertClose:SetScript("OnClick",function() activeAlert=nil;displayNext() end)
 local alertTicker=CreateFrame("Frame",nil,popup)
 alertTicker:SetScript("OnUpdate",function()
-    if activeAlert and getDB().alertSeconds>0 then
+    if activeAlert and not activeAlert.preview and getDB().alertSeconds>0 then
         alertRemaining=alertRemaining-arg1
         if alertRemaining<=0 then activeAlert=nil;displayNext() end
     end
@@ -1352,6 +1367,159 @@ local function maintainTracks()
         if now-t.lastSeen>TRACK_TTL_MS then tracks[g]=nil end
     end
 end
+local mapController={}
+do
+-- Map-entry preparation summary; follows MoonMarker's area-event approach.
+-- Only user-saved Boss.zone records are used; AtlasLoot is for edit-time suggestions.
+local mapWindow=CreateFrame("Frame",nil,UIParent)
+mapWindow:SetWidth(410);mapWindow:SetHeight(168)
+mapWindow:SetPoint("CENTER",UIParent,"CENTER",0,115)
+mapWindow:SetFrameStrata("DIALOG")
+mapWindow:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=11,top=12,bottom=11}})
+mapWindow:SetMovable(true);mapWindow:EnableMouse(true);mapWindow:RegisterForDrag("LeftButton")
+mapWindow:SetScript("OnDragStart",function() this:StartMoving() end)
+mapWindow:SetScript("OnDragStop",function() this:StopMovingOrSizing() end)
+local mapHeading=label(mapWindow,16,-15,"地图 · 战前准备","GameFontNormalLarge",370)
+local mapHeader=label(mapWindow,18,-42,"Boss 名称                 药剂             装备","GameFontHighlightSmall",360)
+local mapScroll=CreateFrame("ScrollFrame",nil,mapWindow)
+mapScroll:SetPoint("TOPLEFT",mapWindow,"TOPLEFT",13,-65)
+mapScroll:SetWidth(382);mapScroll:EnableMouseWheel(true)
+local mapContent=CreateFrame("Frame",nil,mapScroll)
+mapContent:SetWidth(373);mapContent:SetHeight(30)
+mapScroll:SetScrollChild(mapContent)
+local mapRows={}
+local mapKeys={}
+local mapSelected=nil
+local mapCurrentZone=nil
+local mapPending=false
+local mapDelay=0
+local mapWindowShownZone=nil
+local function mapEntries(zone)
+    local keys={}
+    for key,boss in pairs(getAccount().bosses) do
+        if type(boss)=="table" and trim(boss.zone or "")==zone and note(key) then
+            table.insert(keys,key)
+        end
+    end
+    table.sort(keys,function(a,b)
+        local aa=bossInfo(a);local bb=bossInfo(b)
+        return (aa and aa.name or "")<(bb and bb.name or "")
+    end)
+    return keys
+end
+local mapClose=button(mapWindow,"知道了",211,-999,172,25,function() mapWindow:Hide() end)
+local mapOpen=button(mapWindow,"查看准备",24,-999,172,25,function()
+    if not mapSelected then return end
+    mapWindow:Hide()
+    showBossPreparation(mapSelected)
+end)
+local function mapRow(i)
+    if mapRows[i] then return mapRows[i] end
+    local row=CreateFrame("Button",nil,mapContent)
+    row:SetWidth(373);row:SetHeight(26)
+    row:SetPoint("TOPLEFT",mapContent,"TOPLEFT",0,-(i-1)*27)
+    local name=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    name:SetPoint("LEFT",row,"LEFT",5,0);name:SetWidth(171);name:SetJustifyH("LEFT")
+    local pots=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    pots:SetPoint("LEFT",row,"LEFT",184,0);pots:SetWidth(75)
+    local gear=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    gear:SetPoint("LEFT",row,"LEFT",274,0);gear:SetWidth(85)
+    row:SetScript("OnClick",function()
+        mapSelected=mapKeys[i]
+        for j=1,table.getn(mapRows) do
+            local r=mapRows[j]
+            if r.key then r.name:SetText((r.key==mapSelected and "▶ " or "  ")..(bossInfo(r.key).name or "Boss")) end
+        end
+    end)
+    mapRows[i]={frame=row,name=name,pots=pots,gear=gear}
+    return mapRows[i]
+end
+local function showMapWindow(zone,keys)
+    mapKeys=keys;mapSelected=keys[1]
+    setTextIfChanged(mapHeading,zone.." · 战前准备（"..table.getn(keys).."）")
+    -- Build one snapshot for all Boss rows and all named outfits.
+    local stock,available=inventory(true)
+    local count=table.getn(keys)
+    for i=1,count do
+        local key=keys[i]
+        local d=prepData(key)
+        local needs=0;local insufficient=false
+        if d and type(d.consumables)=="table" then
+            for id,required in pairs(d.consumables) do
+                if type(required)=="number" and required>0 then
+                    needs=needs+1
+                    local item=stock[tonumber(id)]
+                    if not item or item.count<required then insufficient=true end
+                end
+            end
+        end
+        local potionStatus=needs==0 and "未配置" or (insufficient and "不足" or "正常")
+        local sets=outfitSets(key)
+        local hasSet=false;local complete=false
+        if sets then for _,set in pairs(sets) do
+            if type(set)=="table" and type(set.slots)=="table" then
+                hasSet=true
+                if setMissing(set.slots,available)==0 then complete=true;break end
+            end
+        end end
+        local gearStatus=not hasSet and "未配置" or (complete and "正常" or "缺失")
+        local r=mapRow(i)
+        r.key=key;r.name:SetText((i==1 and "▶ " or "  ")..(bossInfo(key).name or "Boss"))
+        r.pots:SetText(potionStatus);r.gear:SetText(gearStatus)
+        r.pots:SetTextColor(insufficient and 1 or 0.4,insufficient and 0.25 or 1,needs==0 and 0.5 or 0.4)
+        r.gear:SetTextColor(hasSet and not complete and 1 or 0.4,hasSet and not complete and 0.25 or 1,hasSet and 0.4 or 0.5)
+        r.frame:Show()
+    end
+    for i=count+1,table.getn(mapRows) do mapRows[i].key=nil;mapRows[i].frame:Hide() end
+    local screenHeight=UIParent:GetHeight() or 768
+    local visible=math.min(count*27,math.max(110,screenHeight-250))
+    mapScroll:SetHeight(visible)
+    mapContent:SetHeight(math.max(visible,count*27))
+    mapScroll:SetVerticalScroll(0)
+    mapWindow:SetHeight(visible+119)
+    mapOpen:ClearAllPoints();mapOpen:SetPoint("BOTTOMLEFT",mapWindow,"BOTTOMLEFT",24,17)
+    mapClose:ClearAllPoints();mapClose:SetPoint("BOTTOMRIGHT",mapWindow,"BOTTOMRIGHT",-24,17)
+    mapWindow:Show()
+end
+mapScroll:SetScript("OnMouseWheel",function()
+    local old=mapScroll:GetVerticalScroll()
+    local maximum=math.max(0,mapContent:GetHeight()-mapScroll:GetHeight())
+    local nextValue=math.max(0,math.min(maximum,old-arg1*54))
+    mapScroll:SetVerticalScroll(nextValue)
+end)
+mapWindow:Hide()
+local function scheduleMapReminder()
+    if not getDB().mapReminder then mapPending=false;mapWindow:Hide();return end
+    mapPending=true;mapDelay=0
+end
+local function checkMapReminder()
+    local zone=currentZoneName()
+    if zone=="" then return end
+    if zone~=mapCurrentZone then
+        mapCurrentZone=zone
+        mapWindowShownZone=nil
+        mapWindow:Hide()
+    end
+    if not getDB().mapReminder or mapWindowShownZone==zone then return end
+    local keys=mapEntries(zone)
+    if table.getn(keys)==0 then return end
+    mapWindowShownZone=zone
+    showMapWindow(zone,keys)
+end
+mapController.schedule=scheduleMapReminder
+mapController.tick=function(dt)
+    if mapPending then
+        mapDelay=mapDelay+dt
+        if mapDelay>=0.7 then mapPending=false;checkMapReminder() end
+    end
+end
+mapController.reset=function()
+    mapPending=false;mapCurrentZone=nil;mapWindowShownZone=nil;mapWindow:Hide()
+end
+mapController.disable=function()
+    mapPending=false;mapWindow:Hide()
+end
+end -- isolate map UI locals from WoW Lua 5.0's 200-local function limit
 local driver=CreateFrame("Frame")
 driver:RegisterEvent("VARIABLES_LOADED")
 driver:RegisterEvent("BAG_UPDATE")
@@ -1359,6 +1527,9 @@ driver:RegisterEvent("PLAYER_ENTERING_WORLD")
 driver:RegisterEvent("PLAYER_LEAVING_WORLD")
 driver:RegisterEvent("PLAYER_LOGOUT")
 driver:RegisterEvent("PLAYER_TARGET_CHANGED")
+driver:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+driver:RegisterEvent("ZONE_CHANGED")
+driver:RegisterEvent("ZONE_CHANGED_INDOORS")
 -- BAG_UPDATE can fire several times for one inventory action. Merge these
 -- bursts into one redraw without delaying the target-change reminder.
 local bagRefreshPending=false
@@ -1386,6 +1557,10 @@ driver:SetScript("OnEvent",function()
         resetSession()
         clearPendingBagRefresh()
         maintenanceElapsed=0
+        if event=="PLAYER_ENTERING_WORLD" then mapController.schedule()
+        else mapController.reset() end
+    elseif event=="ZONE_CHANGED_NEW_AREA" or event=="ZONE_CHANGED" or event=="ZONE_CHANGED_INDOORS" then
+        mapController.schedule()
     elseif event=="PLAYER_TARGET_CHANGED" then
         pendingNewSelection=true
         -- Act on target selection promptly; do not wait for the next polling tick.
@@ -1397,6 +1572,7 @@ driver:SetScript("OnEvent",function()
     end
 end)
 driver:SetScript("OnUpdate",function()
+    mapController.tick(arg1)
     -- Keep maintenance independent from the active target and the global
     -- reminder toggle; saved notes and gear are never touched here.
     maintenanceElapsed=maintenanceElapsed+arg1
@@ -1426,7 +1602,7 @@ end)
 -- All settings are in the Chinese UI; /bossmemo only opens the window.
 local settings=CreateFrame("Frame",nil,frame)
 settings:SetPoint("TOPLEFT",frame,"TOPLEFT",27,-68)
-settings:SetWidth(700);settings:SetHeight(368)
+settings:SetWidth(700);settings:SetHeight(418)
 settings:Hide()
 label(settings,5,-8,"① 提醒控制","GameFontNormalLarge")
 local function toggle(y,text,key)
@@ -1439,7 +1615,13 @@ end
 local enabledAll=toggle(-49,"开启自动提醒","enabled")
 local beforeAll=toggle(-90,"开启战前提醒","before")
 local resetAll=toggle(-134,"Boss 重置后重新选中即可提醒（需确认脱战）","realertAfterReset")
-label(settings,10,-185,"② Boss 状态检测间隔（秒）","GameFontNormalLarge")
+local mapAll=toggle(-170,"开启地图战前提醒（进入已配置地图时弹窗）","mapReminder")
+mapAll:SetScript("OnClick",function()
+    getDB().mapReminder=this:GetChecked() and true or false
+    if getDB().mapReminder then mapController.schedule()
+    else mapController.disable() end
+end)
+label(settings,10,-216,"② Boss 状态检测间隔（秒）","GameFontNormalLarge")
 local rates={0.2,0.5,1,2}
 local rateButtons={}
 local function updateRate()
@@ -1450,11 +1632,11 @@ local function updateRate()
 end
 for i=1,4 do
     local n=rates[i]
-    rateButtons[i]=button(settings,"",10+(i-1)*112,-210,103,27,function()
+    rateButtons[i]=button(settings,"",10+(i-1)*112,-241,103,27,function()
         getDB().pollInterval=n;timer=0;updateRate()
     end)
 end
-label(settings,10,-260,"③ 提醒自动关闭","GameFontNormalLarge")
+label(settings,10,-291,"③ 提醒自动关闭","GameFontNormalLarge")
 local durationButtons={}
 local durations={0,5,10,15}
 local function updateDuration()
@@ -1465,18 +1647,19 @@ local function updateDuration()
 end
 for i=1,4 do
     local n=durations[i]
-    durationButtons[i]=button(settings,"",10+(i-1)*112,-284,103,25,function()
+    durationButtons[i]=button(settings,"",10+(i-1)*112,-315,103,25,function()
         getDB().alertSeconds=n;updateDuration()
     end)
 end
-label(settings,10,-320,"④ 运行状态（拖动提醒卡片会自动保存位置）","GameFontNormalLarge")
-local trackerInfo=label(settings,10,-344,"","GameFontHighlight",600)
+label(settings,10,-351,"④ 运行状态（拖动提醒卡片会自动保存位置）","GameFontNormalLarge")
+local trackerInfo=label(settings,10,-375,"","GameFontHighlight",600)
 
 local function syncSettings()
     local d=getDB()
     enabledAll:SetChecked(d.enabled)
     beforeAll:SetChecked(d.before)
     resetAll:SetChecked(d.realertAfterReset)
+    mapAll:SetChecked(d.mapReminder)
     updateRate()
     updateDuration()
     setTextIfChanged(trackerInfo,"DLL："..(type(TaiYangShenDian)=="function" and "已检测" or "未检测到").."   战斗状态缓存 "..countTracks().." 个 Boss")
@@ -1487,7 +1670,7 @@ settingsTicker:SetScript("OnUpdate",function() settingsElapsed=settingsElapsed+a
 local openSettings=false
 local tab=button(frame,"提醒设置",610,-48,116,27,function()
     openSettings=not openSettings
-    if openSettings then prepOpen=false;prep:Hide();frame:SetHeight(510);manager:Hide();settings:Show();status:Hide();syncSettings();this:SetText("返回 Boss 管理")
+    if openSettings then prepOpen=false;prep:Hide();frame:SetHeight(565);manager:Hide();settings:Show();status:Hide();syncSettings();this:SetText("返回 Boss 管理")
     else settings:Hide();manager:Show();status:Show();refreshList();this:SetText("提醒设置") end
 end)
 frame:Hide()
