@@ -29,7 +29,7 @@ extern "C" void* __cdecl memmove(void* d,const void* s,unsigned int n){ unsigned
 namespace TYS {
 constexpr const char* DLL_VERSION = "1.4.0-AURA6D4-R4-CAST1R2-LFX1-ARX1-DW1-LOS1";
 constexpr const char* API_VERSION = "33";
-constexpr const char* BUILD_ID = "20261016-v140-api33-mov3-native-wasd-world-resync";
+constexpr const char* BUILD_ID = "20261016-v140-api33-mov4-native-wasd-world-resync-retry";
 constexpr DWORD DLL_PROCESS_ATTACH_ = 1;
 constexpr DWORD DLL_PROCESS_DETACH_ = 0;
 
@@ -616,16 +616,18 @@ namespace MovementNative {
 constexpr unsigned long HANDLER = 0x00515090UL;
 constexpr unsigned long CONTROLLER_GET = 0x005143E0UL;
 constexpr unsigned long INPUT_TIMESTAMP = 0x00CF0BC8UL;
-constexpr unsigned long MASK = 0x00000330UL; // 0x10|0x20|0x100|0x200
-const unsigned long bits[4]={0x10UL,0x20UL,0x100UL,0x200UL};
+constexpr unsigned long MASK = 0x000000F0UL; // W/S/A/D: 0x10|0x20|0x40|0x80
+const unsigned long bits[4]={0x10UL,0x20UL,0x40UL,0x80UL};
 const int keys[4]={'W','S','A','D'};
 using HandlerFn = void (__thiscall *)(void*,unsigned long,int,unsigned long,unsigned long);
 using ControllerFn = void* (__cdecl *)();
 using KeyStateFn = short (WINAPI *)(int);
 using MovementStartFn = void (__cdecl *)();
+using MovementContextFn = int (__thiscall *)(void*);
 static HandlerFn next=0;
 static volatile LONG paused=0;
 static volatile LONG worldResyncPending=0;
+static volatile LONG worldResyncTicks=0;
 static bool hooked=false;
 static bool created=false;
 static KeyStateFn keyState(){
@@ -653,6 +655,9 @@ static bool ensureHook(const char** why){
     if(!executable(HANDLER)||!executable(CONTROLLER_GET)||
        !executable(WoW112::MOVE_FORWARD_START)||!executable(WoW112::MOVE_BACKWARD_START)||
        !executable(WoW112::MOVE_STRAFE_LEFT_START)||!executable(WoW112::MOVE_STRAFE_RIGHT_START)||
+       !executable(WoW112::MOVE_FORWARD_STOP)||!executable(WoW112::MOVE_BACKWARD_STOP)||
+       !executable(WoW112::MOVE_STRAFE_LEFT_STOP)||!executable(WoW112::MOVE_STRAFE_RIGHT_STOP)||
+       !executable(WoW112::MOVE_INPUT_CONTEXT_CHECK)||
        !readable((void*)INPUT_TIMESTAMP,4)){*why="MOVE_API_UNAVAILABLE";return false;}
     MH_STATUS init=MH_Initialize();
     if(init!=MH_OK&&init!=MH_ERROR_ALREADY_INITIALIZED){*why="MOVE_HOOK_INIT_FAILED";return false;}
@@ -669,18 +674,26 @@ static bool ensureHook(const char** why){
 static void* controller(){return ((ControllerFn)CONTROLLER_GET)();}
 static void stopAll(void* obj){
     if(!obj||!next)return;
-    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
-    for(unsigned i=0;i<4;++i)next(obj,bits[i],0,stamp,0);
+    const MovementStartFn stops[4]={
+        (MovementStartFn)WoW112::MOVE_FORWARD_STOP,
+        (MovementStartFn)WoW112::MOVE_BACKWARD_STOP,
+        (MovementStartFn)WoW112::MOVE_STRAFE_LEFT_STOP,
+        (MovementStartFn)WoW112::MOVE_STRAFE_RIGHT_STOP
+    };
+    for(unsigned i=0;i<4;++i)if(executable((unsigned long)stops[i]))stops[i]();
 }
-static void syncHeldKeysAfterWorldLoad(){
-    if(InterlockedCompareExchange(&worldResyncPending,0,0)==0)return;
+static bool syncHeldKeysAfterWorldLoad(){
+    if(InterlockedCompareExchange(&worldResyncPending,0,0)==0)return true;
+    if(InterlockedIncrement(&worldResyncTicks)>300){
+        InterlockedExchange(&worldResyncPending,0);
+        return true;
+    }
     KeyStateFn read=keyState();
-    if(!read)return;
+    if(!read)return false;
     const unsigned long held=heldKeys(read);
-    if(!held){InterlockedExchange(&worldResyncPending,0);return;}
-    // Use the exact WoW command wrappers used by MoveForwardStart/MoveBackwardStart/
-    // StrafeLeftStart/StrafeRightStart. They preserve the client's post-load input gate
-    // before reaching HANDLER, unlike a direct call to the handler trampoline.
+    if(!held){InterlockedExchange(&worldResyncPending,0);return true;}
+    MovementContextFn context=(MovementContextFn)WoW112::MOVE_INPUT_CONTEXT_CHECK;
+    if(!context||context((void*)0)==0)return false;
     const MovementStartFn starts[4]={
         (MovementStartFn)WoW112::MOVE_FORWARD_START,
         (MovementStartFn)WoW112::MOVE_BACKWARD_START,
@@ -688,13 +701,19 @@ static void syncHeldKeysAfterWorldLoad(){
         (MovementStartFn)WoW112::MOVE_STRAFE_RIGHT_START
     };
     InterlockedExchange(&paused,0);
-    for(unsigned i=0;i<4;++i)if((held&bits[i])&&executable((unsigned long)starts[i]))starts[i]();
-    InterlockedExchange(&worldResyncPending,0);
+    bool invoked=false;
+    for(unsigned i=0;i<4;++i)if((held&bits[i])&&executable((unsigned long)starts[i])){
+        starts[i]();
+        invoked=true;
+    }
+    if(invoked)InterlockedExchange(&worldResyncPending,0);
+    return invoked;
 }
 static void onWorldLeaving(){
     // The engine may recreate its movement state across a loading screen.
     // Clear our gate, then request one post-load sync of physically held WASD keys.
     InterlockedExchange(&paused,0);
+    InterlockedExchange(&worldResyncTicks,0);
     InterlockedExchange(&worldResyncPending,1);
 }
 static int dispatch(Lua50::State L,const char* command){
@@ -729,10 +748,18 @@ static int dispatch(Lua50::State L,const char* command){
 }
 } // namespace MovementNative
 
+static bool setRuntimeLifecycleOnUpdate(Lua50::State L,bool enabled);
+static int __fastcall runtimeLifecycleOnUpdate(Lua50::State L){
+    if(!L)return 0;
+    if(MovementNative::syncHeldKeysAfterWorldLoad())setRuntimeLifecycleOnUpdate(L,false);
+    return 0;
+}
+
 static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
     if(!ev)return;
     if(eq(ev,"PLAYER_LEAVING_WORLD")){
         MovementNative::onWorldLeaving();
+        setRuntimeLifecycleOnUpdate(L,false);
         if(InterlockedCompareExchange(&g_worldPhase,2,2)==2)return;
         InterlockedExchange(&g_worldPhase,2);
         TysProfiler::onWorldLeaving(L);
@@ -743,15 +770,14 @@ static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
         return;
     }
     if(eq(ev,"PLAYER_CONTROL_GAINED")){
-        MovementNative::syncHeldKeysAfterWorldLoad();
+        if(MovementNative::syncHeldKeysAfterWorldLoad())setRuntimeLifecycleOnUpdate(L,false);
         return;
     }
     if(eq(ev,"PLAYER_ENTERING_WORLD")){
         // Reset stale Movement pause before the world-phase deduplication gate.
         // Defer a held-key resync until the world is ready for player control.
         MovementNative::onWorldLeaving();
-        // Wait for PLAYER_CONTROL_GAINED; the native command wrappers require the
-        // new world's input context to be ready before accepting a Start event.
+        setRuntimeLifecycleOnUpdate(L,true);
         if(InterlockedCompareExchange(&g_worldPhase,1,1)==1)return;
         InterlockedExchange(&g_worldPhase,1);
         TysProfiler::onWorldEntering(L);
@@ -775,6 +801,20 @@ static bool callFrameMethodString(Lua50::State L,int frameIndex,const char* meth
     if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);return false;}
     Lua50::PushValue(L,frameIndex);Lua50::PushString(L,arg);
     const int rc=Lua50::PCall(L,2,0,0);Lua50::SetTop(L,top);return rc==0;
+}
+
+static bool setRuntimeLifecycleOnUpdate(Lua50::State L,bool enabled){
+    if(!L)return false;
+    const int top=Lua50::GetTop(L);
+    Lua50::GetGlobal(L,"TaiYangShenDianRuntimeLifecycleFrame");
+    if(Lua50::Type(L,-1)!=5){Lua50::SetTop(L,top);return false;}
+    Lua50::PushString(L,"SetScript");Lua50::GetTable(L,-2);
+    if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);return false;}
+    Lua50::PushValue(L,-2);Lua50::PushString(L,"OnUpdate");
+    if(enabled)Lua50::PushCClosure(L,&runtimeLifecycleOnUpdate,0);else Lua50::PushNil(L);
+    const int rc=Lua50::PCall(L,3,0,0);
+    Lua50::SetTop(L,top);
+    return rc==0;
 }
 
 static bool installRuntimeLifecycleFrame(Lua50::State L){
