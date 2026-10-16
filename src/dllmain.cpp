@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <intrin.h>
 #include "../third_party/minhook/include/MinHook.h"
 #include "wow112_offsets.h"
 #include "lua50.h"
@@ -29,7 +30,7 @@ extern "C" void* __cdecl memmove(void* d,const void* s,unsigned int n){ unsigned
 namespace TYS {
 constexpr const char* DLL_VERSION = "1.4.0-AURA6D4-R4-CAST1R2-LFX1-ARX1-DW1-LOS1";
 constexpr const char* API_VERSION = "33";
-constexpr const char* BUILD_ID = "20261016-v140-api33-mov6-native-control-state";
+constexpr const char* BUILD_ID = "20261016-v140-api33-mov7-movement-hook-trace";
 constexpr DWORD DLL_PROCESS_ATTACH_ = 1;
 constexpr DWORD DLL_PROCESS_DETACH_ = 0;
 
@@ -609,6 +610,47 @@ static bool commandNeedsVisualRuntime(const char* cmd){
 }
 
 static void pushBoolCode(Lua50::State L,bool ok,const char* code);
+struct MovementTrace {
+    unsigned long self;
+    unsigned long flags;
+    int starting;
+    unsigned long timestamp;
+    unsigned long extra;
+    unsigned long returnAddress;
+    unsigned long stateBefore;
+    unsigned long stateAfter;
+};
+static MovementTrace g_movementTrace[32]={};
+static volatile LONG g_movementTraceWrite=0;
+static void movementTraceRecord(void* self,unsigned long flags,int starting,unsigned long timestamp,unsigned long extra,unsigned long stateBefore,unsigned long stateAfter){
+    LONG n=InterlockedIncrement(&g_movementTraceWrite)-1;
+    MovementTrace& e=g_movementTrace[(unsigned long)n%32UL];
+    e.self=(unsigned long)self;e.flags=flags;e.starting=starting;e.timestamp=timestamp;e.extra=extra;
+    e.returnAddress=(unsigned long)_ReturnAddress();e.stateBefore=stateBefore;e.stateAfter=stateAfter;
+}
+static void appendHexField(char* out,unsigned long cap,const char* key,unsigned long v){
+    cat(out,cap,key);char h[16]={0};hex32(h,sizeof(h),v);cat(out,cap,h);
+}
+static int doMovementDiagnostics(Lua50::State L){
+    char out[12000]={0};
+    LONG total=InterlockedCompareExchange(&g_movementTraceWrite,0,0);
+    unsigned long count=(unsigned long)(total<32?total:32);
+    cat(out,sizeof(out),"COUNT=");appendUInt(out,sizeof(out),count);
+    cat(out,sizeof(out),"|TOTAL=");appendUInt(out,sizeof(out),(unsigned long)total);
+    for(unsigned long i=0;i<count;++i){
+        unsigned long logical=(unsigned long)total-count+i;
+        const MovementTrace& e=g_movementTrace[logical%32UL];
+        cat(out,sizeof(out),"\n");
+        appendHexField(out,sizeof(out),"SELF=",e.self);cat(out,sizeof(out),"|FLAGS=");appendHexField(out,sizeof(out),"",e.flags);
+        cat(out,sizeof(out),"|START=");appendInt(out,sizeof(out),e.starting);
+        cat(out,sizeof(out),"|TS=");appendUInt(out,sizeof(out),e.timestamp);
+        cat(out,sizeof(out),"|EXTRA=");appendHexField(out,sizeof(out),"",e.extra);
+        cat(out,sizeof(out),"|RET=");appendHexField(out,sizeof(out),"",e.returnAddress);
+        cat(out,sizeof(out),"|STATE0=");appendHexField(out,sizeof(out),"",e.stateBefore);
+        cat(out,sizeof(out),"|STATE1=");appendHexField(out,sizeof(out),"",e.stateAfter);
+    }
+    Lua50::PushString(L,out);return 1;
+}
 // MOV1: WoW 1.12.1 build 5875 native WASD pause. No protected Lua movement calls.
 // The detour only rejects forward/backward/left/right movement *starts*.
 // Stop events and all other flags are forwarded to the original engine routine.
@@ -641,14 +683,17 @@ static unsigned long heldKeys(KeyStateFn read){
 static void __fastcall onMovement(void* self,void*,unsigned long flags,int starting,
                                   unsigned long timestamp,unsigned long extra){
     if(!next)return;
-    if(starting && (flags&MASK) &&
+    unsigned long before=0,after=0;
+    if(self&&readable((unsigned char*)self+0x04,4))before=*(unsigned long*)((unsigned char*)self+0x04);
+    bool blocked=starting && (flags&MASK) &&
        (InterlockedCompareExchange(&paused,0,0)!=0 ||
-        InterlockedCompareExchange(&worldTransitionGate,0,0)!=0)){
+        InterlockedCompareExchange(&worldTransitionGate,0,0)!=0);
+    if(blocked){
         const unsigned long allowed=flags&~MASK;
         if(allowed)next(self,allowed,starting,timestamp,extra);
-        return;
-    }
-    next(self,flags,starting,timestamp,extra);
+    }else next(self,flags,starting,timestamp,extra);
+    if(self&&readable((unsigned char*)self+0x04,4))after=*(unsigned long*)((unsigned char*)self+0x04);
+    movementTraceRecord(self,flags,starting,timestamp,extra,before,after);
 }
 static bool ensureHook(const char** why){
     if(hooked)return true;
@@ -716,6 +761,7 @@ static void onWorldLeaving(){
     InterlockedExchange(&worldResyncPending,1);
 }
 static int dispatch(Lua50::State L,const char* command){
+    if(eq(command,"Movement.Diagnostics"))return doMovementDiagnostics(L);
     if(eq(command,"Movement.IsPaused")){
         Lua50::PushBool(L,InterlockedCompareExchange(&paused,0,0)!=0);
         Lua50::PushString(L,"OK");return 2;
