@@ -29,7 +29,7 @@ extern "C" void* __cdecl memmove(void* d,const void* s,unsigned int n){ unsigned
 namespace TYS {
 constexpr const char* DLL_VERSION = "1.4.0-AURA6D4-R4-CAST1R2-LFX1-ARX1-DW1-LOS1";
 constexpr const char* API_VERSION = "33";
-constexpr const char* BUILD_ID = "20260830-v140-arx1-api33-dw1-los-paircache50";
+constexpr const char* BUILD_ID = "20261014-v140-api33-mov1-native-wasd";
 constexpr DWORD DLL_PROCESS_ATTACH_ = 1;
 constexpr DWORD DLL_PROCESS_DETACH_ = 0;
 
@@ -608,84 +608,106 @@ static bool commandNeedsVisualRuntime(const char* cmd){
     return false;
 }
 
-// Movement API prototype: keyboard WASD only; reject unverified movement modes.
-// Movement input is driven through the client's Lua movement functions.
-static bool g_movementPaused=false;
-static unsigned long g_movementHeldMask=0;
-static const int kMoveKeys[4]={'W','S','A','D'};
-static const char* kMoveStart[4]={"MoveForwardStart","MoveBackwardStart","StrafeLeftStart","StrafeRightStart"};
-static const char* kMoveStop[4]={"MoveForwardStop","MoveBackwardStop","StrafeLeftStop","StrafeRightStop"};
-static bool movementCall(Lua50::State L,const char* name){
-    int top=Lua50::GetTop(L);
-    Lua50::GetGlobal(L,name);
-    if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);return false;}
-    bool ok=Lua50::PCall(L,0,0,0)==0;
-    Lua50::SetTop(L,top);
-    return ok;
-}
-typedef short (WINAPI *MovementKeyStateFn)(int);
-static MovementKeyStateFn movementKeyState(){
+static void pushBoolCode(Lua50::State L,bool ok,const char* code);
+// MOV1: WoW 1.12.1 build 5875 native WASD pause. No protected Lua movement calls.
+// The detour only rejects forward/backward/left/right movement *starts*.
+// Stop events and all other flags are forwarded to the original engine routine.
+namespace MovementNative {
+constexpr unsigned long HANDLER = 0x00515090UL;
+constexpr unsigned long CONTROLLER_GET = 0x005143E0UL;
+constexpr unsigned long INPUT_TIMESTAMP = 0x00CF0BC8UL;
+constexpr unsigned long MASK = 0x00000330UL; // 0x10|0x20|0x100|0x200
+const unsigned long bits[4]={0x10UL,0x20UL,0x100UL,0x200UL};
+const int keys[4]={'W','S','A','D'};
+using HandlerFn = void (__thiscall *)(void*,unsigned long,int,unsigned long,unsigned long);
+using ControllerFn = void* (__cdecl *)();
+using KeyStateFn = short (WINAPI *)(int);
+static HandlerFn next=0;
+static volatile LONG paused=0;
+static bool hooked=false;
+static bool created=false;
+static KeyStateFn keyState(){
     HMODULE user32=GetModuleHandleA("user32.dll");
-    return user32?(MovementKeyStateFn)GetProcAddress(user32,"GetAsyncKeyState"):0;
+    return user32?(KeyStateFn)GetProcAddress(user32,"GetAsyncKeyState"):0;
 }
-static unsigned long physicalMovementKeys(){
-    MovementKeyStateFn read=movementKeyState();
-    if(!read)return 0;
-    unsigned long mask=0;
-    for(unsigned i=0;i<4;++i)if(read(kMoveKeys[i]) & 0x8000)mask|=(1UL<<i);
-    return mask;
+static unsigned long heldKeys(KeyStateFn read){
+    unsigned long result=0;
+    if(read)for(unsigned i=0;i<4;++i)if((read(keys[i])&0x8000)!=0)result|=bits[i];
+    return result;
 }
-static bool movementFunctionsReady(Lua50::State L){
-    int top=Lua50::GetTop(L);
-    for(unsigned i=0;i<4;++i)for(unsigned j=0;j<2;++j){
-        Lua50::GetGlobal(L,j?kMoveStop[i]:kMoveStart[i]);
-        bool ok=Lua50::Type(L,-1)==WoW112::LUA_TFUNCTION;
-        Lua50::SetTop(L,top);
-        if(!ok)return false;
+static void __fastcall onMovement(void* self,void*,unsigned long flags,int starting,
+                                  unsigned long timestamp,unsigned long extra){
+    if(!next)return;
+    if(starting && (flags&MASK) && InterlockedCompareExchange(&paused,0,0)!=0){
+        const unsigned long allowed=flags&~MASK;
+        if(allowed)next(self,allowed,starting,timestamp,extra);
+        return;
     }
+    next(self,flags,starting,timestamp,extra);
+}
+static bool ensureHook(const char** why){
+    if(hooked)return true;
+    if(!detectBuild().ok){*why="UNSUPPORTED_BUILD";return false;}
+    if(!executable(HANDLER)||!executable(CONTROLLER_GET)||
+       !readable((void*)INPUT_TIMESTAMP,4)){*why="MOVE_API_UNAVAILABLE";return false;}
+    MH_STATUS init=MH_Initialize();
+    if(init!=MH_OK&&init!=MH_ERROR_ALREADY_INITIALIZED){*why="MOVE_HOOK_INIT_FAILED";return false;}
+    if(!created){
+        MH_STATUS cr=MH_CreateHook((LPVOID)HANDLER,(LPVOID)&onMovement,(LPVOID*)&next);
+        if(cr!=MH_OK){*why="MOVE_HOOK_CREATE_FAILED";return false;}
+        created=true;
+    }
+    MH_STATUS en=MH_EnableHook((LPVOID)HANDLER);
+    if(en!=MH_OK&&en!=MH_ERROR_ENABLED){*why="MOVE_HOOK_ENABLE_FAILED";return false;}
+    hooked=true;
     return true;
 }
-static bool movementRelease(Lua50::State L){
-    if(!g_movementPaused)return true;
-    // Never replay a stale press. Start only keys still physically held.
-    const unsigned long held=physicalMovementKeys();
-    bool ok=true;
-    for(unsigned i=0;i<4;++i){
-        if(held&(1UL<<i))ok=movementCall(L,kMoveStart[i]) && ok;
-    }
-    g_movementPaused=false;
-    g_movementHeldMask=0;
-    return ok;
+static void* controller(){return ((ControllerFn)CONTROLLER_GET)();}
+static void stopAll(void* obj){
+    if(!obj||!next)return;
+    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+    for(unsigned i=0;i<4;++i)next(obj,bits[i],0,stamp,0);
 }
-static int doMovement(Lua50::State L,const char* cmd){
-    if(eq(cmd,"Movement.IsPaused")){
-        Lua50::PushBool(L,g_movementPaused);Lua50::PushString(L,"OK");return 2;
+static void onWorldLeaving(){
+    // No synthetic movement restart while transitioning worlds.
+    InterlockedExchange(&paused,0);
+}
+static int dispatch(Lua50::State L,const char* command){
+    if(eq(command,"Movement.IsPaused")){
+        Lua50::PushBool(L,InterlockedCompareExchange(&paused,0,0)!=0);
+        Lua50::PushString(L,"OK");return 2;
     }
-    if(eq(cmd,"Movement.Resume")){
-        bool ok=movementRelease(L);
-        Lua50::PushBool(L,ok);Lua50::PushString(L,ok?"OK":"MOVE_RESUME_FAILED");return 2;
+    if(eq(command,"Movement.Pause")){
+        if(InterlockedCompareExchange(&paused,0,0)!=0){pushBoolCode(L,true,"ALREADY_PAUSED");return 2;}
+        const char* why="OK";
+        if(!ensureHook(&why)){pushBoolCode(L,false,why);return 2;}
+        void* obj=controller();
+        if(!obj){pushBoolCode(L,false,"MOVE_CONTROLLER_UNAVAILABLE");return 2;}
+        // Engage the gate before stopping movement, so new starts cannot race in.
+        InterlockedExchange(&paused,1);
+        stopAll(obj);
+        pushBoolCode(L,true,"WASD_PAUSED");return 2;
     }
-    if(eq(cmd,"Movement.Pause")){
-        if(g_movementPaused){Lua50::PushBool(L,true);Lua50::PushString(L,"ALREADY_PAUSED");return 2;}
-        if(!movementFunctionsReady(L) || !movementKeyState()){Lua50::PushBool(L,false);Lua50::PushString(L,"MOVE_API_UNAVAILABLE");return 2;}
-        // Do not claim coverage of auto-run or mouse movement; this is a WASD prototype.
-        const unsigned long held=physicalMovementKeys();
-        if(!held){Lua50::PushBool(L,false);Lua50::PushString(L,"NO_WASD_INTENT");return 2;}
-        bool ok=true;
-        for(unsigned i=0;i<4;++i)if(held&(1UL<<i))ok=movementCall(L,kMoveStop[i]) && ok;
-        if(!ok){for(unsigned i=0;i<4;++i)if(held&(1UL<<i))movementCall(L,kMoveStart[i]);
-            Lua50::PushBool(L,false);Lua50::PushString(L,"MOVE_PAUSE_FAILED");return 2;}
-        g_movementHeldMask=held;
-        g_movementPaused=true;
-        Lua50::PushBool(L,true);Lua50::PushString(L,"WASD_PAUSED");return 2;
+    if(eq(command,"Movement.Resume")){
+        if(InterlockedCompareExchange(&paused,0,0)==0){pushBoolCode(L,true,"ALREADY_RESUMED");return 2;}
+        KeyStateFn read=keyState();
+        if(!read){pushBoolCode(L,false,"KEY_STATE_UNAVAILABLE");return 2;}
+        void* obj=controller();
+        if(!obj){pushBoolCode(L,false,"MOVE_CONTROLLER_UNAVAILABLE");return 2;}
+        unsigned long held=heldKeys(read);
+        InterlockedExchange(&paused,0);
+        const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+        for(unsigned i=0;i<4;++i)if(held&bits[i])next(obj,bits[i],1,stamp,0);
+        pushBoolCode(L,true,"OK");return 2;
     }
     return -1;
 }
+} // namespace MovementNative
 
 static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
     if(!ev)return;
-    if(eq(ev,"PLAYER_LEAVING_WORLD") || eq(ev,"PLAYER_DEAD"))movementRelease(L);
     if(eq(ev,"PLAYER_LEAVING_WORLD")){
+        MovementNative::onWorldLeaving();
         if(InterlockedCompareExchange(&g_worldPhase,2,2)==2)return;
         InterlockedExchange(&g_worldPhase,2);
         TysProfiler::onWorldLeaving(L);
@@ -696,6 +718,9 @@ static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
         return;
     }
     if(eq(ev,"PLAYER_ENTERING_WORLD")){
+        // Reset stale Movement pause before the world-phase deduplication gate.
+        // Never synthesize movement Start when entering a world.
+        MovementNative::onWorldLeaving();
         if(InterlockedCompareExchange(&g_worldPhase,1,1)==1)return;
         InterlockedExchange(&g_worldPhase,1);
         TysProfiler::onWorldEntering(L);
@@ -723,7 +748,23 @@ static bool callFrameMethodString(Lua50::State L,int frameIndex,const char* meth
 
 static bool installRuntimeLifecycleFrame(Lua50::State L){
     if(!L)return false;
-    if(g_runtimeLifecycleState==L&&eq(g_runtimeLifecycleStatus,"INSTALLED"))return true;
+    if(g_runtimeLifecycleState==L&&eq(g_runtimeLifecycleStatus,"INSTALLED")){
+        // A cached Lua State does not prove that the named frame survived UI reload.
+        // Validate the registered frame and its OnEvent callback before reusing it.
+        const int saved=Lua50::GetTop(L);
+        Lua50::GetGlobal(L,"TaiYangShenDianRuntimeLifecycleFrame");
+        bool frameReady=Lua50::Type(L,-1)==5; // Lua 5.0 LUA_TTABLE
+        if(frameReady){
+            Lua50::PushString(L,"GetScript");Lua50::GetTable(L,-2);
+            if(Lua50::Type(L,-1)==WoW112::LUA_TFUNCTION){
+                Lua50::PushValue(L,-2);Lua50::PushString(L,"OnEvent");
+                frameReady=Lua50::PCall(L,2,1,0)==0 && Lua50::Type(L,-1)==WoW112::LUA_TFUNCTION;
+            }else frameReady=false;
+        }
+        Lua50::SetTop(L,saved);
+        if(frameReady)return true;
+        cpy(g_runtimeLifecycleStatus,sizeof(g_runtimeLifecycleStatus),"FRAME_STALE_REINSTALL");
+    }
     const int top=Lua50::GetTop(L);
     Lua50::GetGlobal(L,"CreateFrame");
     if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);cpy(g_runtimeLifecycleStatus,sizeof(g_runtimeLifecycleStatus),"CREATEFRAME_MISSING");return false;}
@@ -804,6 +845,74 @@ static void tableSetString(Lua50::State L,const char* key,const char* value){Lua
 static void tableSetBool(Lua50::State L,const char* key,bool value){Lua50::PushString(L,key);Lua50::PushBool(L,value);Lua50::SetTable(L,-3);}
 static void tableSetNumber(Lua50::State L,const char* key,double value){Lua50::PushString(L,key);Lua50::PushNumber(L,value);Lua50::SetTable(L,-3);}
 
+// M1: one-shot identity query; reuses existing object resolution and Lua 5.0 globals.
+// No new hook, ObjectManager sweep, native ABI guesswork, or background watcher.
+static bool identityLuaString(Lua50::State L,const char* api,const char* token,char* out,unsigned long cap){
+    const int top=Lua50::GetTop(L);out[0]=0;
+    Lua50::GetGlobal(L,api);
+    if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);return false;}
+    Lua50::PushString(L,token);
+    bool ok=Lua50::PCall(L,1,1,0)==0 && Lua50::IsString(L,-1);
+    if(ok)cpy(out,cap,Lua50::ToString(L,-1));
+    Lua50::SetTop(L,top);return ok&&out[0]!=0;
+}
+static bool identityLuaLevel(Lua50::State L,const char* token,double* out){
+    const int top=Lua50::GetTop(L);
+    Lua50::GetGlobal(L,"UnitLevel");
+    if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);return false;}
+    Lua50::PushString(L,token);
+    bool ok=Lua50::PCall(L,1,1,0)==0 && Lua50::IsNumber(L,-1);
+    if(ok)*out=Lua50::ToNumber(L,-1);
+    Lua50::SetTop(L,top);return ok;
+}
+static int doUnitIdentity(Lua50::State L){
+    const char* code="OK";const char* token=0;void* obj=0;
+    unsigned long long guid=0;unsigned long entry=0,type=0;
+    bool guidKnown=false,entryKnown=false,typeKnown=false;
+    char name[256]={0},classification[80]={0},guidText[17]={0};
+    double level=0;
+    bool nameKnown=false,levelKnown=false,classificationKnown=false;
+    if(!detectBuild().ok)code="UNSUPPORTED_BUILD";
+    else if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2)||!validUnitToken(Lua50::ToString(L,2)))code="BAD_ARGUMENT";
+    else {
+        token=Lua50::ToString(L,2);
+        obj=resolveUnit(token);
+        if(!obj)code="UNIT_NOT_FOUND";
+        else if(!objectType(obj,&type)||(type!=WoW112::TYPE_UNIT&&type!=WoW112::TYPE_PLAYER))code="UNIT_NOT_SUPPORTED";
+        else {
+            typeKnown=true;
+            guidKnown=objectGuid(obj,&guid);
+            if(guidKnown)hex64(guidText,sizeof(guidText),guid);
+            entryKnown=objectEntry(obj,&entry);
+            nameKnown=identityLuaString(L,"UnitName",token,name,sizeof(name));
+            levelKnown=identityLuaLevel(L,token,&level);
+            classificationKnown=identityLuaString(L,"UnitClassification",token,classification,sizeof(classification));
+            if(!guidKnown)code="GUID_UNAVAILABLE";
+            else if(!entryKnown)code="ENTRY_UNAVAILABLE";
+        }
+    }
+    Lua50::NewTable(L);
+    tableSetBool(L,"ok",eq(code,"OK"));
+    tableSetString(L,"code",code);
+    tableSetNumber(L,"schemaVersion",1);
+    Lua50::PushString(L,"data");Lua50::NewTable(L);
+    if(token)tableSetString(L,"unit",token);
+    if(guidKnown)tableSetString(L,"guid",guidText);
+    if(entryKnown)tableSetNumber(L,"entry",(double)entry);
+    if(typeKnown)tableSetNumber(L,"objectType",(double)type);
+    if(nameKnown)tableSetString(L,"name",name);
+    if(levelKnown)tableSetNumber(L,"level",level);
+    if(classificationKnown)tableSetString(L,"classification",classification);
+    tableSetBool(L,"guidKnown",guidKnown);
+    tableSetBool(L,"entryKnown",entryKnown);
+    tableSetBool(L,"nameKnown",nameKnown);
+    tableSetBool(L,"levelKnown",levelKnown);
+    tableSetBool(L,"classificationKnown",classificationKnown);
+    tableSetNumber(L,"timestampMS",(double)GetTickCount());
+    Lua50::SetTable(L,-3);
+    return 1;
+}
+
 static int doUnitGuid(Lua50::State L){
     if(!detectBuild().ok)return pushError(L,"UNSUPPORTED_BUILD");
     if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2))return pushError(L,"BAD_ARGUMENT");const char* token=Lua50::ToString(L,2);
@@ -824,17 +933,192 @@ static int doUnitInSight(Lua50::State L){
     Lua50::PushBool(L,los);Lua50::PushString(L,los?"OK":"BLOCKED");return 2;
 }
 
+// M2: no new hook. Combat is known only when a supplied live unit token
+// resolves to the exact same GUID and the native Lua combat API succeeds.
+static bool m2CombatByToken(Lua50::State L,const char* token,bool* combat){
+    if(!token||!combat||!validUnitToken(token))return false;
+    int top=Lua50::GetTop(L);
+    Lua50::GetGlobal(L,"UnitAffectingCombat");
+    if(Lua50::Type(L,-1)!=WoW112::LUA_TFUNCTION){Lua50::SetTop(L,top);return false;}
+    Lua50::PushString(L,token);
+    bool ok=Lua50::PCall(L,1,1,0)==0;
+    if(ok){
+        int typ=Lua50::Type(L,-1);
+        // WoW 1.12 may return nil for false; a successful nil result is false.
+        if(typ==1 || typ==0 || typ==3)*combat=Lua50::ToBoolean(L,-1)!=0;
+        else ok=false;
+    }
+    Lua50::SetTop(L,top);
+    return ok;
+}
 static int doUnitStateByGuid(Lua50::State L){
     int e=requireFeature(L,&g_groundProbeEnabled);if(e)return e;if(!detectBuild().ok)return pushError(L,"UNSUPPORTED_BUILD");
-    if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2))return pushError(L,"BAD_ARGUMENT");unsigned long long g=0;if(!parseGuid(Lua50::ToString(L,2),&g))return pushError(L,"GUID_INVALID");
-    char h[17]={0};hex64(h,sizeof(h),g);Lua50::NewTable(L);tableSetString(L,"guid",h);void* o=findObjectByGuid(g);
+    if(Lua50::GetTop(L)<2||!Lua50::IsString(L,2))return pushError(L,"BAD_ARGUMENT");
+    unsigned long long g=0;if(!parseGuid(Lua50::ToString(L,2),&g))return pushError(L,"GUID_INVALID");
+    const char* token=(Lua50::GetTop(L)>=3&&Lua50::IsString(L,3))?Lua50::ToString(L,3):0;
+    bool combatKnown=false,combat=false;
+    if(token&&validUnitToken(token)){
+        void* resolved=resolveUnit(token);unsigned long long tokenGuid=0;
+        if(resolved&&objectGuid(resolved,&tokenGuid)&&tokenGuid==g)
+            combatKnown=m2CombatByToken(L,token,&combat);
+    }
+    char h[17]={0};hex64(h,sizeof(h),g);
+    Lua50::NewTable(L);tableSetString(L,"guid",h);
+    tableSetNumber(L,"schemaVersion",2);
+    tableSetNumber(L,"timestampMS",(double)GetTickCount());
+    tableSetBool(L,"inCombatKnown",combatKnown);
+    if(combatKnown)tableSetBool(L,"inCombat",combat);
+    tableSetString(L,"lifeState","UNKNOWN");
+    void* o=findObjectByGuid(g);
     if(!o){tableSetBool(L,"visible",false);tableSetBool(L,"deadKnown",false);tableSetString(L,"code","GUID_NOT_VISIBLE");return 1;}
-    unsigned long t=0;if(!objectType(o,&t)||(t!=WoW112::TYPE_UNIT&&t!=WoW112::TYPE_PLAYER)){tableSetBool(L,"visible",true);tableSetBool(L,"deadKnown",false);tableSetString(L,"code","GUID_NOT_UNIT");return 1;}
-    tableSetBool(L,"visible",true);tableSetNumber(L,"objectType",(double)t);unsigned long entry=0;if(objectEntry(o,&entry))tableSetNumber(L,"entry",(double)entry);
-    float p[3]={0,0,0};if(objectPosition(o,p)){tableSetNumber(L,"x",(double)p[0]);tableSetNumber(L,"y",(double)p[1]);tableSetNumber(L,"z",(double)p[2]);}
-    unsigned char* d=0;unsigned long hp=0,maxHp=0,dyn=0;bool fields=descriptorPtr(o,&d)&&descriptorU32At(d,WoW112::UNIT_FIELD_HEALTH_INDEX,&hp)&&descriptorU32At(d,WoW112::UNIT_FIELD_MAXHEALTH_INDEX,&maxHp)&&descriptorU32At(d,WoW112::UNIT_DYNAMIC_FLAGS_INDEX,&dyn);
-    if(fields){bool dead=(hp<1UL)||((dyn&WoW112::UNIT_DYNFLAG_DEAD)!=0);tableSetBool(L,"deadKnown",true);tableSetBool(L,"dead",dead);tableSetNumber(L,"health",(double)hp);tableSetNumber(L,"maxHealth",(double)maxHp);tableSetNumber(L,"dynamicFlags",(double)dyn);tableSetString(L,"code","OK");}
-    else {tableSetBool(L,"deadKnown",false);tableSetString(L,"code","UNIT_FIELDS_UNAVAILABLE");}
+    unsigned long t=0;if(!objectType(o,&t)||(t!=WoW112::TYPE_UNIT&&t!=WoW112::TYPE_PLAYER)){
+        tableSetBool(L,"visible",true);tableSetBool(L,"deadKnown",false);tableSetString(L,"code","GUID_NOT_UNIT");return 1;
+    }
+    tableSetBool(L,"visible",true);tableSetNumber(L,"objectType",(double)t);
+    unsigned long entry=0;if(objectEntry(o,&entry))tableSetNumber(L,"entry",(double)entry);
+    float pos[3]={0,0,0};if(objectPosition(o,pos)){
+        tableSetNumber(L,"x",(double)pos[0]);tableSetNumber(L,"y",(double)pos[1]);tableSetNumber(L,"z",(double)pos[2]);
+    }
+    unsigned char* d=0;unsigned long hp=0,maxHp=0,dyn=0;
+    bool fields=descriptorPtr(o,&d)&&descriptorU32At(d,WoW112::UNIT_FIELD_HEALTH_INDEX,&hp)&&
+        descriptorU32At(d,WoW112::UNIT_FIELD_MAXHEALTH_INDEX,&maxHp)&&descriptorU32At(d,WoW112::UNIT_DYNAMIC_FLAGS_INDEX,&dyn);
+    if(fields){
+        bool dead=(hp<1UL)||((dyn&WoW112::UNIT_DYNFLAG_DEAD)!=0);
+        tableSetBool(L,"deadKnown",true);tableSetBool(L,"dead",dead);
+        tableSetString(L,"lifeState",dead?"DEAD":"ALIVE");
+        tableSetNumber(L,"health",(double)hp);tableSetNumber(L,"maxHealth",(double)maxHp);
+        tableSetNumber(L,"dynamicFlags",(double)dyn);tableSetString(L,"code","OK");
+    }else{tableSetBool(L,"deadKnown",false);tableSetString(L,"code","UNIT_FIELDS_UNAVAILABLE");}
+    return 1;
+}
+
+// M4 one-shot observation journal. No new hooks, threads, or global scanning.
+// Querying Boss.State drives transitions; absence of observation NEVER implies kill/reset.
+struct BossTrack { unsigned long long guid; char state[16]; };
+struct BossEvt { unsigned long seq; unsigned long time; unsigned long long guid; unsigned long entry; bool candidate; char state[16]; char previous[16]; char evidence[48]; };
+static BossTrack g_bossTracks[64]={};
+static BossEvt g_bossEvents[64]={};
+static unsigned long g_bossSeq=0,g_bossWrites=0,g_bossDropped=0;
+static unsigned g_bossTrackCursor=0;
+static void bossObserve(unsigned long long guid,unsigned long entry,bool candidate,const char* state,const char* evidence){
+    if(!guid || eq(state,"UNKNOWN"))return;
+    BossTrack* track=0;
+    for(unsigned i=0;i<64;++i)if(g_bossTracks[i].guid==guid){track=&g_bossTracks[i];break;}
+    if(!track){track=&g_bossTracks[g_bossTrackCursor++%64];track->guid=guid;track->state[0]=0;}
+    if(eq(track->state,state))return;
+    BossEvt& ev=g_bossEvents[g_bossWrites%64];
+    if(g_bossWrites>=64)++g_bossDropped;
+    ev.seq=++g_bossSeq;ev.time=GetTickCount();ev.guid=guid;ev.entry=entry;ev.candidate=candidate;
+    cpy(ev.previous,sizeof(ev.previous),track->state[0]?track->state:"NONE");
+    cpy(ev.state,sizeof(ev.state),state);cpy(ev.evidence,sizeof(ev.evidence),evidence);
+    cpy(track->state,sizeof(track->state),state);++g_bossWrites;
+}
+static int doBossStatus(Lua50::State L){
+    Lua50::NewTable(L);
+    tableSetBool(L,"ok",true);tableSetString(L,"code","OK");tableSetNumber(L,"schemaVersion",1);
+    tableSetNumber(L,"latestSeq",(double)g_bossSeq);
+    tableSetNumber(L,"oldestSeq",g_bossWrites?(double)(g_bossSeq-(g_bossWrites<64?g_bossWrites:64)+1):0);
+    tableSetNumber(L,"bufferCapacity",64);tableSetNumber(L,"bufferCount",(double)(g_bossWrites<64?g_bossWrites:64));
+    tableSetNumber(L,"overwritten",(double)g_bossDropped);
+    tableSetString(L,"source","BOSS_STATE_QUERIES");
+    tableSetBool(L,"hookInstalled",false);
+    tableSetBool(L,"encounterVictorySupported",false);
+    return 1;
+}
+static int doBossEventsAfter(Lua50::State L){
+    unsigned long cursor=0;
+    if(Lua50::GetTop(L)>=2){
+        if(!Lua50::IsNumber(L,2))return pushError(L,"BAD_ARGUMENT");
+        double v=Lua50::ToNumber(L,2);
+        if(!(v==v)||v<0||v>4294967295.0)return pushError(L,"BAD_ARGUMENT");
+        cursor=(unsigned long)v;
+    }
+    unsigned long count=g_bossWrites<64?g_bossWrites:64;
+    unsigned long oldest=count?g_bossSeq-count+1:0;
+    bool lost=count && cursor<oldest-1;
+    Lua50::NewTable(L);
+    tableSetBool(L,"ok",true);tableSetString(L,"code",lost?"EVENTS_LOST":"OK");
+    tableSetNumber(L,"schemaVersion",1);tableSetNumber(L,"latestSeq",(double)g_bossSeq);
+    tableSetNumber(L,"oldestSeq",(double)oldest);tableSetBool(L,"lost",lost);
+    Lua50::PushString(L,"events");Lua50::NewTable(L);unsigned n=0;
+    for(unsigned long seq=oldest;count&&seq<=g_bossSeq;++seq){
+        if(seq<=cursor)continue;
+        const BossEvt& ev=g_bossEvents[(seq-1)%64];
+        if(ev.seq!=seq)continue;
+        Lua50::PushNumber(L,(double)++n);Lua50::NewTable(L);
+        tableSetNumber(L,"seq",(double)ev.seq);tableSetNumber(L,"timestampMS",(double)ev.time);
+        char h[17]={0};hex64(h,sizeof(h),ev.guid);tableSetString(L,"guid",h);
+        tableSetNumber(L,"entry",(double)ev.entry);tableSetBool(L,"bossCandidate",ev.candidate);
+        tableSetString(L,"state",ev.state);tableSetString(L,"previous",ev.previous);
+        tableSetString(L,"evidence",ev.evidence);tableSetString(L,"encounterResult","UNCONFIRMED");
+        Lua50::SetTable(L,-3);
+    }
+    Lua50::SetTable(L,-3);tableSetNumber(L,"count",(double)n);return 1;
+}
+
+// M3: explicit-call-only Boss.State. Observed unit state is NOT raid encounter victory.
+static int doBossState(Lua50::State L){
+    const char* code="OK";const char* state="UNKNOWN";const char* evidence="NONE";
+    const char* unit="target";void* obj=0;unsigned long long guid=0;
+    unsigned long entry=0;bool entryKnown=false,combatKnown=false,combat=false,deadKnown=false,dead=false;
+    unsigned long health=0,maxHealth=0;bool healthKnown=false;
+    char name[256]={0},cls[80]={0},gh[17]={0};double level=0;
+    bool nameKnown=false,clsKnown=false,levelKnown=false;
+    if(!detectBuild().ok)code="UNSUPPORTED_BUILD";
+    else if(Lua50::GetTop(L)>=2&&(!Lua50::IsString(L,2)||!validUnitToken(Lua50::ToString(L,2))))code="BAD_ARGUMENT";
+    else {
+        if(Lua50::GetTop(L)>=2)unit=Lua50::ToString(L,2);
+        obj=resolveUnit(unit);
+        if(!obj)code="UNIT_NOT_FOUND";
+        else {
+            unsigned long type=0;
+            if(!objectType(obj,&type)||(type!=WoW112::TYPE_UNIT&&type!=WoW112::TYPE_PLAYER))code="UNIT_NOT_SUPPORTED";
+            else if(!objectGuid(obj,&guid))code="GUID_UNAVAILABLE";
+            else {
+                hex64(gh,sizeof(gh),guid);
+                entryKnown=objectEntry(obj,&entry);
+                nameKnown=identityLuaString(L,"UnitName",unit,name,sizeof(name));
+                clsKnown=identityLuaString(L,"UnitClassification",unit,cls,sizeof(cls));
+                levelKnown=identityLuaLevel(L,unit,&level);
+                combatKnown=m2CombatByToken(L,unit,&combat);
+                unsigned char* d=0;unsigned long dyn=0;
+                if(descriptorPtr(obj,&d)&&descriptorU32At(d,WoW112::UNIT_FIELD_HEALTH_INDEX,&health)&&
+                   descriptorU32At(d,WoW112::UNIT_FIELD_MAXHEALTH_INDEX,&maxHealth)&&
+                   descriptorU32At(d,WoW112::UNIT_DYNAMIC_FLAGS_INDEX,&dyn)){
+                    healthKnown=true;deadKnown=true;dead=(health==0)||((dyn&WoW112::UNIT_DYNFLAG_DEAD)!=0);
+                }
+                if(deadKnown&&dead){state="DEAD";evidence="UNIT_DEATH_FLAG_OR_ZERO_HP";}
+                else if(combatKnown&&combat){state="ENGAGED";evidence="UNIT_AFFECTING_COMBAT";}
+                else if(deadKnown&&!dead){state="DETECTED";evidence="UNIT_ALIVE";}
+                else {state="UNKNOWN";evidence="INSUFFICIENT_DATA";}
+            }
+        }
+    }
+    if(eq(code,"OK"))bossObserve(guid,entryKnown?entry:0,(clsKnown&&ieq(cls,"worldboss"))||(levelKnown&&level==-1),state,evidence);
+    Lua50::NewTable(L);
+    tableSetBool(L,"ok",eq(code,"OK"));tableSetString(L,"code",code);
+    tableSetNumber(L,"schemaVersion",1);
+    tableSetString(L,"state",state);tableSetString(L,"evidence",evidence);
+    tableSetString(L,"encounterResult","UNCONFIRMED");
+    tableSetNumber(L,"timestampMS",(double)GetTickCount());
+    Lua50::PushString(L,"data");Lua50::NewTable(L);
+    tableSetString(L,"unit",unit);
+    if(guid)tableSetString(L,"guid",gh);
+    if(entryKnown)tableSetNumber(L,"entry",(double)entry);
+    if(nameKnown)tableSetString(L,"name",name);
+    if(clsKnown)tableSetString(L,"classification",cls);
+    if(levelKnown)tableSetNumber(L,"level",level);
+    tableSetBool(L,"entryKnown",entryKnown);tableSetBool(L,"nameKnown",nameKnown);
+    tableSetBool(L,"classificationKnown",clsKnown);tableSetBool(L,"levelKnown",levelKnown);
+    tableSetBool(L,"inCombatKnown",combatKnown);
+    if(combatKnown)tableSetBool(L,"inCombat",combat);
+    tableSetBool(L,"deadKnown",deadKnown);
+    if(deadKnown)tableSetBool(L,"dead",dead);
+    if(healthKnown){tableSetNumber(L,"health",(double)health);tableSetNumber(L,"maxHealth",(double)maxHealth);}
+    tableSetBool(L,"healthKnown",healthKnown);
+    // Candidate classification is advisory only; elite does not imply boss.
+    tableSetBool(L,"bossCandidate",(clsKnown&&ieq(cls,"worldboss"))||(levelKnown&&level==-1));
+    Lua50::SetTable(L,-3);
     return 1;
 }
 
@@ -936,6 +1220,7 @@ static int __fastcall scriptMain(Lua50::State _L){
     if(Lua50::GetTop(L)<1||!Lua50::IsString(L,1))return pushError(L,"BAD_ARGUMENT");
     const char* cmd=Lua50::ToString(L,1); if(!cmd)return pushError(L,"BAD_ARGUMENT");
     if(eq(cmd,"Core.Version")){ Lua50::PushString(L,DLL_VERSION); Lua50::PushString(L,API_VERSION); Lua50::PushString(L,BUILD_ID); return 3; }
+    if(eq(cmd,"Movement.Pause")||eq(cmd,"Movement.Resume")||eq(cmd,"Movement.IsPaused"))return MovementNative::dispatch(callerL?callerL:L,cmd);
     if(eq(cmd,"DrinkWalk.Status"))return TysDrinkWalkNative::dispatchStatus(callerL?callerL:L);
     if(eq(cmd,"DrinkWalk.ResolveItem"))return TysDrinkWalkNative::dispatchResolveItem(callerL?callerL:L);
     if(eq(cmd,"DrinkWalk.UseItem"))return TysDrinkWalkNative::dispatchUseItem(callerL?callerL:L);
@@ -1008,11 +1293,10 @@ static int __fastcall scriptMain(Lua50::State _L){
         }
         return pushError(L,"API_NOT_FOUND");
     }
-    if(eq(cmd,"Movement.Pause")||eq(cmd,"Movement.Resume")||eq(cmd,"Movement.IsPaused"))return doMovement(L,cmd);
     if(eq(cmd,"MoonMarker.Runtime.Status"))return doMoonMarkerRuntimeStatus(L);
     if(isMoonMarkerGuardedCommand(cmd)&&!TysMoonRuntimeGuard::enabled())return pushMoonMarkerGuardFailure(L);
     if(eq(cmd,"facing"))return doFacing(L); if(eq(cmd,"speed"))return doSpeed(L);
-    if(eq(cmd,"Unit.Guid"))return doUnitGuid(L); if(eq(cmd,"Unit.InSight"))return doUnitInSight(L);
+    if(eq(cmd,"Boss.Event.GetAfter"))return doBossEventsAfter(L); if(eq(cmd,"Boss.Status"))return doBossStatus(L); if(eq(cmd,"Boss.State"))return doBossState(L); if(eq(cmd,"Unit.Identity"))return doUnitIdentity(L); if(eq(cmd,"Unit.Guid"))return doUnitGuid(L); if(eq(cmd,"Unit.InSight"))return doUnitInSight(L);
     if(eq(cmd,"GroundProbe.Status"))return doGroundStatus(L); if(eq(cmd,"GroundProbe.PlayerPosition"))return doPlayerPosition(L); if(eq(cmd,"GroundProbe.Snapshot"))return doSnapshot(L); if(eq(cmd,"GroundProbe.UnitByGuid"))return doUnitByGuid(L); if(eq(cmd,"GroundProbe.UnitStateByGuid"))return doUnitStateByGuid(L); if(eq(cmd,"GroundProbe.DynamicByGuid"))return doDynamicByGuid(L); if(eq(cmd,"GroundProbe.ScopeByGuid"))return doScopeByGuid(L); if(eq(cmd,"GroundProbe.TotemSnapshot"))return doTotemSnapshot(L);
     if(eq(cmd,"AutoRange.RelationByUnit"))return doRelationByUnit(L); if(eq(cmd,"AutoRange.RelationByGuid"))return doRelationByGuid(L);
     // V1.3-DW5: authorization is classified by command type, not by the
