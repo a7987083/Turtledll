@@ -261,6 +261,14 @@ local function equipOutfit(entry,setName)
     if type(CursorHasItem)=="function" and CursorHasItem() then return false,"请先清空鼠标上的物品" end
     if type(PickupContainerItem)~="function" or type(PickupInventoryItem)~="function" then return false,"当前客户端缺少换装接口" end
     local changed,missing=0,0
+    local missingNames={}
+    local function recordMissing(link,slot)
+        local display=string.match(link or "","|h%[([^%]]+)%]|h")
+        if not display and type(GetItemInfo)=="function" then display=GetItemInfo(link) end
+        if not display or display=="" then display="装备槽位 "..tostring(slot) end
+        table.insert(missingNames,display)
+        missing=missing+1
+    end
     for i=1,table.getn(EQUIP_SLOTS) do
         local slot=EQUIP_SLOTS[i]
         local wanted=saved.slots[tostring(slot)]
@@ -276,11 +284,12 @@ local function equipOutfit(entry,setName)
                 PickupContainerItem(location[1],location[2])
                 PickupInventoryItem(slot)
                 if type(CursorHasItem)=="function" and CursorHasItem() then PickupContainerItem(location[1],location[2]) end
-                if GetInventoryItemLink("player",slot)==wanted then changed=changed+1 else missing=missing+1 end
-            else missing=missing+1 end
+                if GetInventoryItemLink("player",slot)==wanted then changed=changed+1 else recordMissing(wanted,slot) end
+            else recordMissing(wanted,slot) end
         end
     end
-    return missing==0,"「"..setName.."」换装：成功 "..changed.." 槽，未完成 "..missing.." 槽"
+    if missing==0 then return true,"「"..setName.."」换装：成功 "..changed.." 槽，装备齐全" end
+    return false,"「"..setName.."」换装：成功 "..changed.." 槽；缺失装备："..table.concat(missingNames,"、")
 end
 
 local frame=CreateFrame("Frame","TaiYangBossMemoWindow",UIParent)
@@ -1423,7 +1432,7 @@ local function updateMapSelection()
             local selected=(r.key==mapSelected)
             local boss=bossInfo(r.key)
             r.name:SetText((selected and "▶ " or "   ")..(boss and boss.name or "Boss"))
-            if selected then r.highlight:Show() else r.highlight:Hide() end
+            if selected then r.highlight:Show();r.border:Show() else r.highlight:Hide();r.border:Hide() end
         end
     end
 end
@@ -1435,8 +1444,26 @@ local function mapRow(i)
     local highlight=row:CreateTexture(nil,"BACKGROUND")
     highlight:SetAllPoints(row)
     highlight:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
-    highlight:SetVertexColor(0.85,0.65,0.1,0.32)
+    highlight:SetVertexColor(0.85,0.65,0.1,0.23)
     highlight:Hide()
+    -- Four 2px gold edges remain legible over dark dungeon backgrounds.
+    local selectionBorder=CreateFrame("Frame",nil,row)
+    selectionBorder:SetAllPoints(row)
+    selectionBorder:SetFrameLevel(row:GetFrameLevel()+2)
+    local function goldEdge(point1,point2,width,height)
+        local edge=selectionBorder:CreateTexture(nil,"OVERLAY")
+        edge:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
+        edge:SetVertexColor(1,0.78,0.12,1)
+        edge:SetPoint(point1,selectionBorder,point1,0,0)
+        if point2 then edge:SetPoint(point2,selectionBorder,point2,0,0) end
+        if width then edge:SetWidth(width) end
+        if height then edge:SetHeight(height) end
+    end
+    goldEdge("TOPLEFT","TOPRIGHT",nil,2)
+    goldEdge("BOTTOMLEFT","BOTTOMRIGHT",nil,2)
+    goldEdge("TOPLEFT","BOTTOMLEFT",2,nil)
+    goldEdge("TOPRIGHT","BOTTOMRIGHT",2,nil)
+    selectionBorder:Hide()
     local name=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     name:SetPoint("LEFT",row,"LEFT",5,0);name:SetWidth(171);name:SetJustifyH("LEFT")
     local pots=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
@@ -1447,7 +1474,7 @@ local function mapRow(i)
         mapSelected=mapKeys[i]
         updateMapSelection()
     end)
-    mapRows[i]={frame=row,name=name,pots=pots,gear=gear,highlight=highlight}
+    mapRows[i]={frame=row,name=name,pots=pots,gear=gear,highlight=highlight,border=selectionBorder}
     return mapRows[i]
 end
 local function showMapWindow(zone,keys)
