@@ -189,6 +189,26 @@ local function itemName(id)
     end
     return "物品 #"..tostring(id)
 end
+-- Keep original slot links for matching; names are display-only metadata.
+local function gearDisplayName(link,slot)
+    if type(link)=="string" then
+        -- Vanilla links may contain a full colorized hyperlink or only item:<id>.
+        local fromLink=string.match(link,"|h%[([^%]]+)%]|h")
+        if fromLink and fromLink~="" then return fromLink end
+    end
+    if type(GetItemInfo)=="function" then
+        local id=itemID(link)
+        local name=id and GetItemInfo(id) or nil
+        if type(name)=="string" and name~="" then return name end
+        if type(link)=="string" then
+            name=GetItemInfo(link)
+            if type(name)=="string" and name~="" then return name end
+        end
+    end
+    local id=itemID(link)
+    if id then return "物品 #"..tostring(id).."（槽位 "..tostring(slot).."）" end
+    return "装备槽位 "..tostring(slot).."（名称未缓存）"
+end
 local function prepData(entry)
     local item=anyNote(entry)
     if not item then return nil end
@@ -262,11 +282,12 @@ local function equipOutfit(entry,setName)
     if type(PickupContainerItem)~="function" or type(PickupInventoryItem)~="function" then return false,"当前客户端缺少换装接口" end
     local changed,missing=0,0
     local missingNames={}
-    local function recordMissing(link,slot)
-        local display=string.match(link or "","|h%[([^%]]+)%]|h")
-        if not display and type(GetItemInfo)=="function" then display=GetItemInfo(link) end
-        if not display or display=="" then display="装备槽位 "..tostring(slot) end
-        table.insert(missingNames,display)
+    local failedNames={}
+    local function recordMissing(link,slot,foundButFailed)
+        local stored=saved.slotNames and saved.slotNames[tostring(slot)]
+        local display=(type(stored)=="string" and stored~="") and stored or gearDisplayName(link,slot)
+        if foundButFailed then table.insert(failedNames,display)
+        else table.insert(missingNames,display) end
         missing=missing+1
     end
     for i=1,table.getn(EQUIP_SLOTS) do
@@ -284,12 +305,15 @@ local function equipOutfit(entry,setName)
                 PickupContainerItem(location[1],location[2])
                 PickupInventoryItem(slot)
                 if type(CursorHasItem)=="function" and CursorHasItem() then PickupContainerItem(location[1],location[2]) end
-                if GetInventoryItemLink("player",slot)==wanted then changed=changed+1 else recordMissing(wanted,slot) end
-            else recordMissing(wanted,slot) end
+                if GetInventoryItemLink("player",slot)==wanted then changed=changed+1 else recordMissing(wanted,slot,true) end
+            else recordMissing(wanted,slot,false) end
         end
     end
     if missing==0 then return true,"「"..setName.."」换装：成功 "..changed.." 槽，装备齐全" end
-    return false,"「"..setName.."」换装：成功 "..changed.." 槽；缺失装备："..table.concat(missingNames,"、")
+    local parts={"「"..setName.."」换装：成功 "..changed.." 槽"}
+    if table.getn(missingNames)>0 then table.insert(parts,"缺失装备："..table.concat(missingNames,"、")) end
+    if table.getn(failedNames)>0 then table.insert(parts,"换装失败："..table.concat(failedNames,"、")) end
+    return false,table.concat(parts,"；")
 end
 
 local frame=CreateFrame("Frame","TaiYangBossMemoWindow",UIParent)
@@ -819,10 +843,12 @@ button(outfitNameModal,"保存",55,-142,125,25,function()
     end
     outfitNameError:SetText("")
     local slots=equipSnapshot()
+    local slotNames={}
+    for slot,link in pairs(slots) do slotNames[slot]=gearDisplayName(link,slot) end
     if not next(slots) then prepStatus:SetText("当前未读取到已穿戴装备，不能保存");return end
     local sets=outfitSets(e)
     local function commit()
-        sets[name]={name=name,slots=slots}
+        sets[name]={name=name,slots=slots,slotNames=slotNames}
         outfitNameModal:Hide()
         outfitPage=1;refreshOutfits()
     end
@@ -1498,19 +1524,19 @@ local function showMapWindow(zone,keys)
         end
         local potionStatus=needs==0 and "未配置" or (insufficient and "不足" or "正常")
         local sets=outfitSets(key)
-        local hasSet=false;local complete=false
+        local hasSet=false;local allComplete=true
         if sets then for _,set in pairs(sets) do
             if type(set)=="table" and type(set.slots)=="table" then
                 hasSet=true
-                if setMissing(set.slots,available)==0 then complete=true;break end
+                if setMissing(set.slots,available)>0 then allComplete=false end
             end
         end end
-        local gearStatus=not hasSet and "未配置" or (complete and "正常" or "缺失")
+        local gearStatus=not hasSet and "未配置" or (allComplete and "正常" or "缺失")
         local r=mapRow(i)
         r.key=key;r.name:SetText((i==1 and "▶ " or "  ")..(bossInfo(key).name or "Boss"))
         r.pots:SetText(potionStatus);r.gear:SetText(gearStatus)
         r.pots:SetTextColor(insufficient and 1 or 0.4,insufficient and 0.25 or 1,needs==0 and 0.5 or 0.4)
-        r.gear:SetTextColor(hasSet and not complete and 1 or 0.4,hasSet and not complete and 0.25 or 1,hasSet and 0.4 or 0.5)
+        r.gear:SetTextColor(hasSet and not allComplete and 1 or 0.4,hasSet and not allComplete and 0.25 or 1,hasSet and 0.4 or 0.5)
         r.frame:Show()
     end
     for i=count+1,table.getn(mapRows) do mapRows[i].key=nil;mapRows[i].frame:Hide() end
