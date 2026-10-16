@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # TaiYangShenDian v1.4.0 release build marker; no functional change.
+# dll-dev validation rebuild marker; no functional change.
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd)"
