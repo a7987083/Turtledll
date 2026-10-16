@@ -631,22 +631,24 @@ static void appendHexField(char* out,unsigned long cap,const char* key,unsigned 
     cat(out,cap,key);char h[16]={0};hex32(h,sizeof(h),v);cat(out,cap,h);
 }
 static int doMovementDiagnostics(Lua50::State L){
-    char out[4096]={0};
+    char* out=g_recordScratch;
+    unsigned long outCap=sizeof(g_recordScratch);
+    out[0]=0;
     LONG total=InterlockedCompareExchange(&g_movementTraceWrite,0,0);
     unsigned long count=(unsigned long)(total<32?total:32);
-    cat(out,sizeof(out),"COUNT=");appendUInt(out,sizeof(out),count);
-    cat(out,sizeof(out),"|TOTAL=");appendUInt(out,sizeof(out),(unsigned long)total);
+    cat(out,outCap,"COUNT=");appendUInt(out,outCap,count);
+    cat(out,outCap,"|TOTAL=");appendUInt(out,outCap,(unsigned long)total);
     for(unsigned long i=0;i<count;++i){
         unsigned long logical=(unsigned long)total-count+i;
         const MovementTrace& e=g_movementTrace[logical%32UL];
         cat(out,sizeof(out),"\n");
-        appendHexField(out,sizeof(out),"SELF=",e.self);cat(out,sizeof(out),"|FLAGS=");appendHexField(out,sizeof(out),"",e.flags);
-        cat(out,sizeof(out),"|START=");appendInt(out,sizeof(out),e.starting);
-        cat(out,sizeof(out),"|TS=");appendUInt(out,sizeof(out),e.timestamp);
-        cat(out,sizeof(out),"|EXTRA=");appendHexField(out,sizeof(out),"",e.extra);
-        cat(out,sizeof(out),"|RET=");appendHexField(out,sizeof(out),"",e.returnAddress);
-        cat(out,sizeof(out),"|STATE0=");appendHexField(out,sizeof(out),"",e.stateBefore);
-        cat(out,sizeof(out),"|STATE1=");appendHexField(out,sizeof(out),"",e.stateAfter);
+        appendHexField(out,outCap,"SELF=",e.self);cat(out,outCap,"|FLAGS=");appendHexField(out,outCap,"",e.flags);
+        cat(out,outCap,"|START=");appendInt(out,outCap,e.starting);
+        cat(out,outCap,"|TS=");appendUInt(out,outCap,e.timestamp);
+        cat(out,outCap,"|EXTRA=");appendHexField(out,outCap,"",e.extra);
+        cat(out,outCap,"|RET=");appendHexField(out,outCap,"",e.returnAddress);
+        cat(out,outCap,"|STATE0=");appendHexField(out,outCap,"",e.stateBefore);
+        cat(out,outCap,"|STATE1=");appendHexField(out,outCap,"",e.stateAfter);
     }
     Lua50::PushString(L,out);return 1;
 }
