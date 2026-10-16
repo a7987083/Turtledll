@@ -29,7 +29,7 @@ extern "C" void* __cdecl memmove(void* d,const void* s,unsigned int n){ unsigned
 namespace TYS {
 constexpr const char* DLL_VERSION = "1.4.0-AURA6D4-R4-CAST1R2-LFX1-ARX1-DW1-LOS1";
 constexpr const char* API_VERSION = "33";
-constexpr const char* BUILD_ID = "20261016-v140-api33-mov-rebase-v1";
+constexpr const char* BUILD_ID = "20261016-v140-api33-mov-rebase-v2";
 constexpr DWORD DLL_PROCESS_ATTACH_ = 1;
 constexpr DWORD DLL_PROCESS_DETACH_ = 0;
 
@@ -656,53 +656,37 @@ static int doMovementDiagnostics(Lua50::State L){
 // The detour only rejects forward/backward/left/right movement *starts*.
 // Stop events and all other flags are forwarded to the original engine routine.
 namespace MovementNative {
-constexpr unsigned long HANDLER = 0x00515090UL; // CGInputControl::SetControlBit
-constexpr unsigned long CONTROLLER_GET = 0x005143E0UL; // CGInputControl::GetActive
+constexpr unsigned long HANDLER = 0x00515090UL;
+constexpr unsigned long CONTROLLER_GET = 0x005143E0UL;
 constexpr unsigned long INPUT_TIMESTAMP = 0x00CF0BC8UL;
 
-// Verified from WoW.exe build 5875 wrappers:
-// W: start=0x1000, stop=0x10
-// S: start=0x2000, stop=0x20
-// A: start=0x40,   stop=0x40 (set/clear selected by arg2)
-// D: start=0x80,   stop=0x80 (set/clear selected by arg2)
+// WoW 1.12.1 build 5875 native wrappers recovered from WoW.exe:
+// MoveForwardStart  = SetControlBit(0x1000, wAutoRunBit,  time, 0)
+// MoveForwardStop   = SetControlBit(0x0010, 1,             time, 0)
+// MoveBackwardStart = SetControlBit(0x2000, 1,             time, 0)
+// MoveBackwardStop  = SetControlBit(0x0020, 1,             time, 0)
+// StrafeLeftStart   = SetControlBit(0x0040, 1,             time, 0)
+// StrafeLeftStop    = SetControlBit(0x0040, 0,             time, 0)
+// StrafeRightStart  = SetControlBit(0x0080, 1,             time, 0)
+// StrafeRightStop   = SetControlBit(0x0080, 0,             time, 0)
 constexpr unsigned long FORWARD_START  = 0x1000UL;
 constexpr unsigned long BACKWARD_START = 0x2000UL;
-constexpr unsigned long FORWARD_STOP   = 0x0010UL;
-constexpr unsigned long BACKWARD_STOP  = 0x0020UL;
-constexpr unsigned long STRAFE_LEFT    = 0x0040UL;
-constexpr unsigned long STRAFE_RIGHT   = 0x0080UL;
+constexpr unsigned long STRAFE_LEFT   = 0x0040UL;
+constexpr unsigned long STRAFE_RIGHT  = 0x0080UL;
+constexpr unsigned long START_MASK =
+    FORWARD_START | BACKWARD_START | STRAFE_LEFT | STRAFE_RIGHT;
 
 using HandlerFn = void (__thiscall *)(void*,unsigned long,int,unsigned long,unsigned long);
 using ControllerFn = void* (__cdecl *)();
-using KeyStateFn = short (WINAPI *)(int);
 
 static HandlerFn next=0;
 static volatile LONG paused=0;
+static volatile LONG pausedBits=0;
 static bool hooked=false;
 static bool created=false;
 
-static KeyStateFn keyState(){
-    HMODULE user32=GetModuleHandleA("user32.dll");
-    return user32?(KeyStateFn)GetProcAddress(user32,"GetAsyncKeyState"):0;
-}
-
-static unsigned long heldKeys(KeyStateFn read){
-    unsigned long result=0;
-    if(read){
-        if((read('W')&0x8000)!=0)result|=FORWARD_START;
-        if((read('S')&0x8000)!=0)result|=BACKWARD_START;
-        if((read('A')&0x8000)!=0)result|=STRAFE_LEFT;
-        if((read('D')&0x8000)!=0)result|=STRAFE_RIGHT;
-    }
-    return result;
-}
-
 static bool isBlockedStart(unsigned long flags,int setBit){
-    // Forward/backward start wrappers use distinct 0x1000/0x2000 flags.
-    // W may pass setBit=0 while AutoRun is active, so do not key these on setBit.
-    if(flags& (FORWARD_START|BACKWARD_START))return true;
-
-    // A/D use the same flag for start and stop; only the set path is a start.
+    if(flags&(FORWARD_START|BACKWARD_START))return true;
     if(setBit && (flags&(STRAFE_LEFT|STRAFE_RIGHT)))return true;
     return false;
 }
@@ -711,7 +695,8 @@ static void __fastcall onMovement(void* self,void*,unsigned long flags,int setBi
                                   unsigned long timestamp,unsigned long extra){
     if(!next)return;
 
-    if(InterlockedCompareExchange(&paused,0,0)!=0 && isBlockedStart(flags,setBit)){
+    if(InterlockedCompareExchange(&paused,0,0)!=0 &&
+       isBlockedStart(flags,setBit)){
         return;
     }
 
@@ -732,8 +717,7 @@ static bool ensureHook(const char** why){
     }
 
     if(!created){
-        MH_STATUS cr=MH_CreateHook(
-            (LPVOID)HANDLER,(LPVOID)&onMovement,(LPVOID*)&next);
+        MH_STATUS cr=MH_CreateHook((LPVOID)HANDLER,(LPVOID)&onMovement,(LPVOID*)&next);
         if(cr!=MH_OK){*why="MOVE_HOOK_CREATE_FAILED";return false;}
         created=true;
     }
@@ -751,37 +735,45 @@ static void* controller(){
     return ((ControllerFn)CONTROLLER_GET)();
 }
 
-static void stopAll(void* obj){
-    if(!obj||!next)return;
-    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
-
-    // These are the exact stop events emitted by the WoW wrappers.
-    // Forward/backward are set events; A/D are clear events.
-    next(obj,FORWARD_STOP,1,stamp,0);
-    next(obj,BACKWARD_STOP,1,stamp,0);
-    next(obj,STRAFE_LEFT,0,stamp,0);
-    next(obj,STRAFE_RIGHT,0,stamp,0);
+static unsigned long controllerState(void* obj){
+    return obj?*(volatile unsigned long*)((unsigned char*)obj+0x04):0;
 }
 
-static void resumeHeld(void* obj,KeyStateFn read){
-    if(!obj||!next||!read)return;
+static void stopActive(void* obj,unsigned long active,unsigned long stamp){
+    if(!obj||!next)return;
 
-    const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+    // Only stop directions that were actually active at Pause().
+    // This is deliberately not "stop all": the client stop wrappers have
+    // side effects, and invoking an unrelated stop while stationary caused
+    // the observed reverse movement.
+    if(active&FORWARD_START)
+        next(obj,0x0010UL,1,stamp,0);
+    if(active&BACKWARD_START)
+        next(obj,0x0020UL,1,stamp,0);
+    if(active&STRAFE_LEFT)
+        next(obj,STRAFE_LEFT,0,stamp,0);
+    if(active&STRAFE_RIGHT)
+        next(obj,STRAFE_RIGHT,0,stamp,0);
+}
 
-    // W Start has a special AutoRun-dependent setBit:
-    // (~controllerState >> 12) & 1, exactly as the client wrapper does.
-    unsigned long state=*(volatile unsigned long*)((unsigned char*)obj+0x04);
-    int wSetBit=(int)((~state>>12)&1UL);
+static void resumeSnapshot(void* obj,unsigned long active,unsigned long stamp){
+    if(!obj||!next)return;
 
-    if(read('W')&0x8000)next(obj,FORWARD_START,wSetBit,stamp,0);
-    if(read('S')&0x8000)next(obj,BACKWARD_START,1,stamp,0);
-    if(read('A')&0x8000)next(obj,STRAFE_LEFT,1,stamp,0);
-    if(read('D')&0x8000)next(obj,STRAFE_RIGHT,1,stamp,0);
+    if(active&FORWARD_START){
+        const unsigned long state=controllerState(obj);
+        const int wSetBit=(int)((~state>>12)&1UL);
+        next(obj,FORWARD_START,wSetBit,stamp,0);
+    }
+    if(active&BACKWARD_START)
+        next(obj,BACKWARD_START,1,stamp,0);
+    if(active&STRAFE_LEFT)
+        next(obj,STRAFE_LEFT,1,stamp,0);
+    if(active&STRAFE_RIGHT)
+        next(obj,STRAFE_RIGHT,1,stamp,0);
 }
 
 static void onWorldLeaving(){
-    // World transition is a new input context. Clear only our logical gate;
-    // do not synthesize movement during loading.
+    InterlockedExchange(&pausedBits,0);
     InterlockedExchange(&paused,0);
 }
 
@@ -810,9 +802,15 @@ static int dispatch(Lua50::State L,const char* command){
             return 2;
         }
 
-        // Gate first, then emit the client's real stop events.
+        const unsigned long active=controllerState(obj)&START_MASK;
+        InterlockedExchange(&pausedBits,(LONG)active);
+
+        // Gate first so physical key-repeat cannot re-enter SetControlBit
+        // while we issue the matching client stop events.
         InterlockedExchange(&paused,1);
-        stopAll(obj);
+
+        const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+        stopActive(obj,active,stamp);
 
         pushBoolCode(L,true,"WASD_PAUSED");
         return 2;
@@ -824,20 +822,21 @@ static int dispatch(Lua50::State L,const char* command){
             return 2;
         }
 
-        KeyStateFn read=keyState();
-        if(!read){
-            pushBoolCode(L,false,"KEY_STATE_UNAVAILABLE");
-            return 2;
-        }
-
         void* obj=controller();
         if(!obj){
             pushBoolCode(L,false,"MOVE_CONTROLLER_UNAVAILABLE");
             return 2;
         }
 
+        const unsigned long active=(unsigned long)InterlockedCompareExchange(&pausedBits,0,0);
+        const unsigned long stamp=*(volatile unsigned long*)INPUT_TIMESTAMP;
+
+        // Replay the exact directions that were active at Pause(), rather
+        // than consulting GetAsyncKeyState. This makes repeated
+        // Pause/Resume cycles deterministic even while W remains held.
+        resumeSnapshot(obj,active,stamp);
+        InterlockedExchange(&pausedBits,0);
         InterlockedExchange(&paused,0);
-        resumeHeld(obj,read);
 
         pushBoolCode(L,true,"OK");
         return 2;
@@ -845,7 +844,7 @@ static int dispatch(Lua50::State L,const char* command){
 
     return -1;
 }
-} // namespace MovementNativee
+} // namespace MovementNativeee
 
 static void handleRuntimeWorldEvent(Lua50::State L,const char* ev){
     if(!ev)return;
