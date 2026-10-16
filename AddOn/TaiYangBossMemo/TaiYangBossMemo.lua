@@ -1380,7 +1380,10 @@ mapWindow:SetMovable(true);mapWindow:EnableMouse(true);mapWindow:RegisterForDrag
 mapWindow:SetScript("OnDragStart",function() this:StartMoving() end)
 mapWindow:SetScript("OnDragStop",function() this:StopMovingOrSizing() end)
 local mapHeading=label(mapWindow,16,-15,"地图 · 战前准备","GameFontNormalLarge",370)
-local mapHeader=label(mapWindow,18,-42,"Boss 名称                 药剂             装备","GameFontHighlightSmall",360)
+-- Header labels use the same X offsets as the row columns; do not align with spaces.
+local mapHeaderName=label(mapWindow,18,-42,"Boss 名称","GameFontHighlightSmall",171)
+local mapHeaderPot=label(mapWindow,197,-42,"药剂","GameFontHighlightSmall",75)
+local mapHeaderGear=label(mapWindow,287,-42,"装备","GameFontHighlightSmall",85)
 local mapScroll=CreateFrame("ScrollFrame",nil,mapWindow)
 mapScroll:SetPoint("TOPLEFT",mapWindow,"TOPLEFT",13,-65)
 mapScroll:SetWidth(382);mapScroll:EnableMouseWheel(true)
@@ -1413,25 +1416,38 @@ local mapOpen=button(mapWindow,"查看准备",24,-999,172,25,function()
     mapWindow:Hide()
     showBossPreparation(mapSelected)
 end)
+local function updateMapSelection()
+    for j=1,table.getn(mapRows) do
+        local r=mapRows[j]
+        if r.key then
+            local selected=(r.key==mapSelected)
+            local boss=bossInfo(r.key)
+            r.name:SetText((selected and "▶ " or "   ")..(boss and boss.name or "Boss"))
+            if selected then r.highlight:Show() else r.highlight:Hide() end
+        end
+    end
+end
 local function mapRow(i)
     if mapRows[i] then return mapRows[i] end
     local row=CreateFrame("Button",nil,mapContent)
     row:SetWidth(373);row:SetHeight(26)
     row:SetPoint("TOPLEFT",mapContent,"TOPLEFT",0,-(i-1)*27)
+    local highlight=row:CreateTexture(nil,"BACKGROUND")
+    highlight:SetAllPoints(row)
+    highlight:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
+    highlight:SetVertexColor(0.85,0.65,0.1,0.32)
+    highlight:Hide()
     local name=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     name:SetPoint("LEFT",row,"LEFT",5,0);name:SetWidth(171);name:SetJustifyH("LEFT")
     local pots=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    pots:SetPoint("LEFT",row,"LEFT",184,0);pots:SetWidth(75)
+    pots:SetPoint("LEFT",row,"LEFT",184,0);pots:SetWidth(75);pots:SetJustifyH("LEFT")
     local gear=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    gear:SetPoint("LEFT",row,"LEFT",274,0);gear:SetWidth(85)
+    gear:SetPoint("LEFT",row,"LEFT",274,0);gear:SetWidth(85);gear:SetJustifyH("LEFT")
     row:SetScript("OnClick",function()
         mapSelected=mapKeys[i]
-        for j=1,table.getn(mapRows) do
-            local r=mapRows[j]
-            if r.key then r.name:SetText((r.key==mapSelected and "▶ " or "  ")..(bossInfo(r.key).name or "Boss")) end
-        end
+        updateMapSelection()
     end)
-    mapRows[i]={frame=row,name=name,pots=pots,gear=gear}
+    mapRows[i]={frame=row,name=name,pots=pots,gear=gear,highlight=highlight}
     return mapRows[i]
 end
 local function showMapWindow(zone,keys)
@@ -1471,6 +1487,7 @@ local function showMapWindow(zone,keys)
         r.frame:Show()
     end
     for i=count+1,table.getn(mapRows) do mapRows[i].key=nil;mapRows[i].frame:Hide() end
+    updateMapSelection()
     local screenHeight=UIParent:GetHeight() or 768
     local visible=math.min(count*27,math.max(110,screenHeight-250))
     mapScroll:SetHeight(visible)
