@@ -622,7 +622,7 @@ struct MovementTrace {
 static MovementTrace g_movementTrace[32]={};
 static volatile LONG g_movementTraceWrite=0;
 static void movementTraceRecord(void* self,unsigned long flags,int starting,unsigned long timestamp,unsigned long extra,unsigned long stateBefore,unsigned long stateAfter){
-    LONG n=InterlockedIncrement(&g_movementTraceWrite)-1;
+    LONG n=_InterlockedIncrement(&g_movementTraceWrite)-1;
     MovementTrace& e=g_movementTrace[(unsigned long)n%32UL];
     e.self=(unsigned long)self;e.flags=flags;e.starting=starting;e.timestamp=timestamp;e.extra=extra;
     e.returnAddress=(unsigned long)__builtin_return_address(0);e.stateBefore=stateBefore;e.stateAfter=stateAfter;
