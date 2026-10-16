@@ -684,10 +684,12 @@ static void stopAll(void* obj){
 }
 static bool syncHeldKeysAfterWorldLoad(){
     if(InterlockedCompareExchange(&worldResyncPending,0,0)==0)return true;
-    if(InterlockedIncrement(&worldResyncTicks)>300){
+    const LONG resyncTick=InterlockedCompareExchange(&worldResyncTicks,0,0);
+    if(resyncTick>=300){
         InterlockedExchange(&worldResyncPending,0);
         return true;
     }
+    InterlockedExchange(&worldResyncTicks,resyncTick+1);
     KeyStateFn read=keyState();
     if(!read)return false;
     const unsigned long held=heldKeys(read);
