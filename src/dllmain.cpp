@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <intrin.h>
 #include "../third_party/minhook/include/MinHook.h"
 #include "wow112_offsets.h"
 #include "lua50.h"
@@ -626,7 +625,7 @@ static void movementTraceRecord(void* self,unsigned long flags,int starting,unsi
     LONG n=InterlockedIncrement(&g_movementTraceWrite)-1;
     MovementTrace& e=g_movementTrace[(unsigned long)n%32UL];
     e.self=(unsigned long)self;e.flags=flags;e.starting=starting;e.timestamp=timestamp;e.extra=extra;
-    e.returnAddress=(unsigned long)_ReturnAddress();e.stateBefore=stateBefore;e.stateAfter=stateAfter;
+    e.returnAddress=(unsigned long)__builtin_return_address(0);e.stateBefore=stateBefore;e.stateAfter=stateAfter;
 }
 static void appendHexField(char* out,unsigned long cap,const char* key,unsigned long v){
     cat(out,cap,key);char h[16]={0};hex32(h,sizeof(h),v);cat(out,cap,h);
