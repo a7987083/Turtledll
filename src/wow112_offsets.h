@@ -51,9 +51,16 @@ constexpr unsigned long RESOLVE_UNIT_TOKEN = 0x00515940UL;
 // WoW 1.12.1 build 5875 native movement command wrappers.
 // These wrappers preserve the client's input-context gate before HANDLER.
 constexpr unsigned long MOVE_FORWARD_START = 0x00513E20UL;
+constexpr unsigned long MOVE_FORWARD_STOP = 0x00513E50UL;
 constexpr unsigned long MOVE_BACKWARD_START = 0x00513E80UL;
+constexpr unsigned long MOVE_BACKWARD_STOP = 0x00513EB0UL;
 constexpr unsigned long MOVE_STRAFE_LEFT_START = 0x00513FA0UL;
+constexpr unsigned long MOVE_STRAFE_LEFT_STOP = 0x00513FD0UL;
 constexpr unsigned long MOVE_STRAFE_RIGHT_START = 0x00514000UL;
+constexpr unsigned long MOVE_STRAFE_RIGHT_STOP = 0x00514030UL;
+constexpr unsigned long MOVE_INPUT_CONTEXT_CHECK = 0x00494A50UL;
+constexpr unsigned long MOVE_INPUT_FLAGS = 0x00BE1148UL;
+constexpr unsigned long MOVE_INPUT_FLAGS_OFFSET = 0x04UL;
 
 // AURA6-D4-R4 target-duration/lifecycle prediction. Values are read from the stock
 // 1.12 client at cast time; no per-frame scanning is introduced.
