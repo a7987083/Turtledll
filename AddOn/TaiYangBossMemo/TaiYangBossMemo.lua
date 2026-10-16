@@ -1121,7 +1121,7 @@ for i=1,4 do
     local n=i
     local b=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
     b:SetWidth(243);b:SetHeight(25)
-    b:SetPoint("BOTTOMLEFT",popup,"BOTTOMLEFT",(i%2==1) and 25 or 281,(i<=2) and 111 or 78)
+    b:SetPoint("BOTTOMLEFT",popup,"BOTTOMLEFT",(math.mod(i,2)==1) and 25 or 281,(i<=2) and 111 or 78)
     b:SetScript("OnClick",function()
         if activeAlert and this.setName then
             local _,message=equipOutfit(activeAlert.entry,this.setName)
