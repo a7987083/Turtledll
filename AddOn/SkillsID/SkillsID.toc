@@ -2,5 +2,5 @@
 ## Title: Skills ID
 ## Notes: Show verified SpellIDs in spell tooltips (WoW 1.12.1 / Lua 5.0).
 ## Author: TaiYang
-## Version: 1.0.0
+## Version: 1.1.0
 SkillsID.lua
