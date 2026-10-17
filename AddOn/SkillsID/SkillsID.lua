@@ -2,8 +2,17 @@
 -- Only display verified spell IDs; spellbook slots are NOT spell IDs.
 local SI = { byNameRank = {}, ambiguous = {}, scanned = false, cursor = 1,
              upper = 60000, batch = 200, pending = nil, driver = nil, started = false }
+local function normalize(value)
+  if type(value) ~= "string" then return "" end
+  value = string.gsub(value, "|c%x%x%x%x%x%x%x%x", "")
+  value = string.gsub(value, "|r", "")
+  value = string.gsub(value, "^%s+", "")
+  value = string.gsub(value, "%s+$", "")
+  value = string.gsub(value, "%s+", " ")
+  return value
+end
 local function key(name, rank)
-  return (name or "") .. "\001" .. (rank or "")
+  return normalize(name) .. "\001" .. normalize(rank)
 end
 local function insertSpell(id, rec)
   if not rec or type(rec.name) ~= "string" or rec.name == "" then return end
@@ -19,6 +28,13 @@ local function lookup(name, rank)
   local k = key(name, rank)
   if not SI.ambiguous[k] then return SI.byNameRank[k] end
   return nil
+end
+local function missReason(name, rank)
+  if not SI.scanned then return "INDEX_INCOMPLETE" end
+  local k = key(name, rank)
+  if SI.ambiguous[k] then return "AMBIGUOUS_NAME_RANK" end
+  if not SI.byNameRank[k] then return "NOT_INDEXED_OR_RANK_MISMATCH" end
+  return "OK"
 end
 local function addLine(tip, id)
   id = tonumber(id)
@@ -65,7 +81,7 @@ local function startIndex()
       SI.pending = nil
       if p and p.tip and p.tip:IsShown() and GetSpellName then
         local name, rank = GetSpellName(p.slot, p.bookType)
-        if name == p.name and (rank or "") == p.rank then
+        if key(name, rank) == key(p.name, p.rank) then
           local line = getglobal(p.tip:GetName() .. "TextLeft1")
           if line and line:GetText() == p.name then
             -- AddIDLine is declared below; deferred injection handled there.
@@ -83,6 +99,7 @@ if GameTooltip and GameTooltip.SetSpell then
     local a, b = original(tip, slot, bookType)
     if GetSpellName then
       local name, rank = GetSpellName(slot, bookType)
+      SI.lastSpell = { name = name, rank = rank or "", slot = slot, bookType = bookType }
       if SI.scanned then
         addLine(tip, lookup(name, rank))
       else
@@ -155,7 +172,13 @@ hookUnitAura("SetUnitBuff", true)
 hookUnitAura("SetUnitDebuff", false)
 
 SLASH_SKILLSID1 = "/skillsid"
-SlashCmdList["SKILLSID"] = function()
+SlashCmdList["SKILLSID"] = function(msg)
+  if normalize(msg) == "debug" then
+    local p = SI.lastSpell
+    local status = p and ("name=" .. tostring(p.name) .. ", rank=" .. tostring(p.rank) .. ", result=" .. missReason(p.name, p.rank)) or "NO_SPELLBOOK_HOVER"
+    DEFAULT_CHAT_FRAME:AddMessage("|cffffcc33SkillsID|r: " .. status)
+    return
+  end
   local status
   if type(GetSpellRec) ~= "function" then
     status = "GetSpellRec unavailable; spellbook SpellIDs cannot be resolved reliably."
