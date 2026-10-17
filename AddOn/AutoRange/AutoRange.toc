@@ -1,0 +1,10 @@
+## Interface: 11200
+## Title: AutoRange · 自动危险圈
+## Notes: DLL-only direct TaiYangShenDian APIs; auto-enables required Features; original UnitXP inSight retained
+## Author: a7987083 / OpenAI test build
+## Version: B3.8R7.5.1c-Warning-Stage2.29b-CustomTotemOverride-GUIDFallback-TYSDirectAPI-DLLOnly
+## Dependencies: !Libs
+## OptionalDeps: FuBar, SuperAPI
+## SavedVariables: AutoRangeDB
+AutoRange.lua
+FuBar.lua
