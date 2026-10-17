@@ -1,28 +1,51 @@
 -- SkillsID: WoW 1.12.1 / Lua 5.0
--- Show SpellIDs from action buttons, auras and spell links; no spellbook scanning.
+-- Action buttons, auras, and chat spell links only; no spellbook scanning.
+-- Track only the tooltip line this addon inserted; never change other addons' lines.
+local ownedLines = {}
 local function addLine(tip, id)
-  id = tonumber(id)
-  if not id or id <= 0 then return end
-  if not tip or not tip.GetName then return end
+  if not tip or type(tip.GetName) ~= "function" then return end
   local name = tip:GetName()
   if not name then return end
+  local record = ownedLines[tip]
+  local line = record and record.line
+  if line and line:GetText() ~= record.label then
+    ownedLines[tip] = nil
+    record = nil
+    line = nil
+  end
+  id = tonumber(id)
+  if not id or id <= 0 or id ~= math.floor(id) then
+    if line then line:SetText("") end
+    ownedLines[tip] = nil
+    return
+  end
   local label = "SpellID: " .. id
+  if line then
+    if record.label ~= label then
+      line:SetText(label)
+      record.label = label
+    end
+    return
+  end
+  -- Do not add a second copy if another hook already displayed this value.
   local i
   for i = 1, tip:NumLines() do
-    local line = getglobal(name .. "TextLeft" .. i)
-    if line and line:GetText() == label then return end
+    local existing = getglobal(name .. "TextLeft" .. i)
+    if existing and existing:GetText() == label then return end
   end
   tip:AddLine(label, 1, 0.82, 0.25)
-  tip:Show()
+  line = getglobal(name .. "TextLeft" .. tip:NumLines())
+  if line then ownedLines[tip] = { line = line, label = label } end
+  if tip.IsShown and not tip:IsShown() then tip:Show() end
 end
 if GameTooltip and GameTooltip.SetAction then
   local original = GameTooltip.SetAction
   GameTooltip.SetAction = function(tip, slot)
     local a, b = original(tip, slot)
     local id
-    if GetActionText then
-      local text, actionType, actionId = GetActionText(slot)
-      if actionType == "SPELL" then id = actionId end
+    if type(GetActionText) == "function" then
+      local ok, unused, actionType, actionId = pcall(GetActionText, slot)
+      if ok and actionType == "SPELL" then id = actionId end
     end
     -- Never guess an action's rank from its name alone.
     addLine(tip, id)
@@ -65,8 +88,8 @@ if GameTooltip and GameTooltip.SetPlayerBuff and GetPlayerBuffID then
   local original = GameTooltip.SetPlayerBuff
   GameTooltip.SetPlayerBuff = function(tip, index, filter)
     local a, b = original(tip, index, filter)
-    local id = GetPlayerBuffID(index)
-    addLine(tip, id)
+    local ok, id = pcall(GetPlayerBuffID, index)
+    addLine(tip, ok and id or nil)
     return a, b
   end
 end
@@ -77,7 +100,8 @@ local function auraId(unit, index, helpful)
   local api
   if helpful then api = UnitBuff else api = UnitDebuff end
   if type(api) ~= "function" then return nil end
-  local ok, texture, stacks, dispelType, id = pcall(api, unit, index)
+  -- Lua 5.0: placeholders preserve the fourth return value (SpellID).
+  local ok, unused1, unused2, unused3, id = pcall(api, unit, index)
   if ok and type(id) == "number" and id > 0 then return id end
   return nil
 end
