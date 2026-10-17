@@ -1,6 +1,6 @@
 ## Interface: 11200
 ## Title: Skills ID
-## Notes: Show verified SpellIDs in spell tooltips (WoW 1.12.1 / Lua 5.0).
+## Notes: Show SpellIDs in action, aura and chat tooltips (WoW 1.12.1 / Lua 5.0).
 ## Author: TaiYang
-## Version: 1.2.1
+## Version: 1.2.2
 SkillsID.lua
