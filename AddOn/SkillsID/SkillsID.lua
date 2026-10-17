@@ -89,6 +89,29 @@ if GameTooltip and GameTooltip.SetPlayerBuff and GetPlayerBuffID then
     return a, b
   end
 end
+-- SuperWoW extends UnitBuff/UnitDebuff with the exact aura SpellID as return #4.
+-- Vanilla clients without that extension do not expose an exact ID here.
+local function auraId(unit, index, helpful)
+  if type(unit) ~= "string" or type(index) ~= "number" then return nil end
+  local api
+  if helpful then api = UnitBuff else api = UnitDebuff end
+  if type(api) ~= "function" then return nil end
+  local ok, texture, stacks, dispelType, id = pcall(api, unit, index)
+  if ok and type(id) == "number" and id > 0 then return id end
+  return nil
+end
+local function hookUnitAura(method, helpful)
+  if not GameTooltip or type(GameTooltip[method]) ~= "function" then return end
+  local original = GameTooltip[method]
+  GameTooltip[method] = function(tip, unit, index)
+    local a, b = original(tip, unit, index)
+    addLine(tip, auraId(unit, index, helpful))
+    return a, b
+  end
+end
+hookUnitAura("SetUnitBuff", true)
+hookUnitAura("SetUnitDebuff", false)
+
 -- Build exact Name+Rank lookup incrementally to avoid a long load-time stall.
 -- No GetSpellRec means no verified spellbook mapping; do not display a slot index.
 if type(GetSpellRec) == "function" then
