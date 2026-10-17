@@ -125,20 +125,38 @@ if GameTooltip and GameTooltip.SetAction then
     return a, b
   end
 end
+-- Turtle WoW chat spell links can use enchant:<spellID>.
+-- Limit parsing to the link type prefix; never use a spell name as an ID.
+local function linkSpellID(link)
+  if type(link) ~= "string" then return nil end
+  local _, _, id = string.find(link, "^spell:(%d+)$")
+  if not id then _, _, id = string.find(link, "^enchant:(%d+)$") end
+  return id and tonumber(id) or nil
+end
 local function hookHyperlink(tip)
-  if not tip or not tip.SetHyperlink then return end
+  if not tip or type(tip.SetHyperlink) ~= "function" then return end
   local original = tip.SetHyperlink
   tip.SetHyperlink = function(self, link)
     local a, b = original(self, link)
-    if type(link) == "string" then
-      local _, _, id = string.find(link, "^spell:(%d+)")
-      if id then addLine(self, id) end
-    end
+    -- Only annotate a tooltip the client actually displayed.
+    if self.IsShown and self:IsShown() then addLine(self, linkSpellID(link)) end
     return a, b
   end
 end
 hookHyperlink(GameTooltip)
 hookHyperlink(ItemRefTooltip)
+-- Some vanilla chat links are rendered by SetItemRef without calling the
+-- exposed ItemRefTooltip:SetHyperlink method. Keep that path covered as well.
+if type(SetItemRef) == "function" then
+  local originalSetItemRef = SetItemRef
+  SetItemRef = function(link, text, button)
+    local a, b = originalSetItemRef(link, text, button)
+    if ItemRefTooltip and ItemRefTooltip.IsShown and ItemRefTooltip:IsShown() then
+      addLine(ItemRefTooltip, linkSpellID(link))
+    end
+    return a, b
+  end
+end
 if GameTooltip and GameTooltip.SetPlayerBuff and GetPlayerBuffID then
   local original = GameTooltip.SetPlayerBuff
   GameTooltip.SetPlayerBuff = function(tip, index, filter)
