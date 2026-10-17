@@ -2,5 +2,5 @@
 ## Title: Skills ID
 ## Notes: Show SpellIDs in action, aura and chat tooltips (WoW 1.12.1 / Lua 5.0).
 ## Author: TaiYang
-## Version: 1.2.2
+## Version: 1.2.3
 SkillsID.lua
